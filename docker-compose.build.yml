@@ -1,0 +1,22 @@
+# 从源码本地构建，不依赖任何镜像仓库。
+#   docker compose -f docker-compose.build.yml up -d --build
+# 更新代码后重新执行同一行命令即可（--build 会重新编译）。
+services:
+  bambu-spool:
+    build:
+      context: .
+    image: bambu-spool:local
+    container_name: bambu-spool
+    restart: unless-stopped
+    ports:
+      - "8971:8971"
+    environment:
+      BAMBU_REGION: china
+      PUID: 99
+      PGID: 100
+      # APP_PASSWORD: "换成你的口令"
+      # NOTIFY_WEBHOOK: "https://ntfy.sh/你的主题"
+      TASK_POLL_INTERVAL: 60
+      DEDUCT_ON_FAILURE: "true"
+    volumes:
+      - ./data:/data

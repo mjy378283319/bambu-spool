@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+data/
+*.db
+*.log
+.dom*.html
+dom*.html
+shot-*.png
+qr.png
+.edgeprof/
+.env
+.DS_Store

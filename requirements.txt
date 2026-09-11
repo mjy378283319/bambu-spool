@@ -1,0 +1,12 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32
+sqlmodel>=0.0.22
+paho-mqtt>=2.1
+httpx>=0.27
+cryptography>=43.0
+qrcode>=8.0
+pillow>=11.0
+python-multipart>=0.0.12
+# 可选但强烈建议：拓竹云接口在 Cloudflare 后面，curl_cffi 会模仿浏览器指纹，显著降低被 403 的概率。
+# 如果安装失败可以删掉此行，程序会自动回退到 httpx。
+curl_cffi>=0.7

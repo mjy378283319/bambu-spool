@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>拓竹耗材管家</title>
+<link rel="stylesheet" href="/static/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f766e'/><circle cx='16' cy='16' r='6' fill='white'/></svg>" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo"></span><span>拓竹耗材管家</span></div>
+  <nav class="nav">
+    <button data-view="dashboard">仪表盘</button>
+    <button data-view="spools">料盘库存</button>
+    <button data-view="jobs">打印记录</button>
+    <button data-view="settings">设置</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="conn" id="conn"><span class="dot"></span><span id="connText">连接中</span></div>
+</header>
+
+<main>
+  <div class="login-gate hidden" id="loginGate">
+    <div class="card">
+      <h2>需要口令</h2>
+      <label class="field"><span>访问口令</span><input type="password" id="gatePassword" /></label>
+      <button class="primary" style="width:100%" onclick="doGateLogin()">进入</button>
+    </div>
+  </div>
+
+  <section class="view" id="view-dashboard">
+    <div class="grid-stats" id="dashStats"></div>
+    <div id="printerCards" style="margin-top:16px"></div>
+    <div class="card">
+      <h2>实时事件 <span class="count" id="eventCount"></span></h2>
+      <div class="events" id="eventList"><div class="empty-state">暂无事件</div></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-spools">
+    <div class="card">
+      <h2>料盘库存 <span class="count" id="spoolCount"></span>
+        <span class="spacer"></span>
+        <button class="sm" onclick="openLabelSheet()">打印标签</button>
+        <button class="primary sm" onclick="openSpoolDialog()">新增料盘</button>
+      </h2>
+      <div class="row" style="margin-bottom:14px">
+        <input id="spoolSearch" placeholder="搜索品牌 / 材料 / 颜色 / 位置" style="max-width:260px" oninput="renderSpools()" />
+        <select id="spoolMaterial" style="max-width:130px" onchange="renderSpools()"><option value="">全部材料</option></select>
+        <select id="spoolBrand" style="max-width:150px" onchange="renderSpools()"><option value="">全部品牌</option></select>
+        <label class="small muted" style="display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="spoolLowOnly" style="width:auto" onchange="renderSpools()" /> 仅看余量不足
+        </label>
+        <label class="small muted" style="display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="spoolArchived" style="width:auto" onchange="renderSpools()" /> 已归档
+        </label>
+      </div>
+      <div id="spoolTable"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-jobs">
+    <div class="card">
+      <h2>打印记录 <span class="count" id="jobCount"></span>
+        <span class="spacer"></span>
+        <select id="jobFilter" style="max-width:130px" onchange="loadJobs()">
+          <option value="">全部状态</option>
+          <option value="finished">已完成</option>
+          <option value="failed">失败</option>
+          <option value="cancelled">已取消</option>
+          <option value="running">进行中</option>
+        </select>
+        <button class="sm" onclick="loadJobs()">刷新</button>
+      </h2>
+      <div id="jobTable"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-settings">
+    <div class="grid-2">
+      <div class="card">
+        <h2>拓竹账号</h2>
+        <div id="accountBox"></div>
+      </div>
+      <div class="card">
+        <h2>系统信息</h2>
+        <div id="systemBox"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>设备</h2>
+      <div id="deviceBox"></div>
+    </div>
+    <div class="card">
+      <h2>使用说明</h2>
+      <div class="small muted" style="line-height:1.9">
+        <p style="margin:0 0 8px">自动扣重的完整链路：拓竹云订阅打印机实时状态 → 识别打印任务起止 → 打印结束后从云端任务历史取到每个槽位的实际克重 → 扣减该槽位绑定的料盘。</p>
+        <p style="margin:0 0 8px">要让它工作，打印任务需要<b>经拓竹云端发起</b>（Bambu Studio 云端发送、或 Bambu Handy 手机 App）。用局域网模式或 U 盘打印的任务不会进云端记录，这类任务可以在打印记录里手动录入用量。</p>
+        <p style="margin:0 0 8px">料盘和槽位的对应关系由「槽位绑定」维护：在仪表盘的 AMS 槽位上点击即可绑定。绑定一次之后，后续每次打印都会自动扣到正确的料盘上。</p>
+        <p style="margin:0">扣错了不要紧：料盘详情页的每次扣减记录都可以一键转到另一盘料上。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast-wrap" id="toasts"></div>
+<div id="modalHost"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
