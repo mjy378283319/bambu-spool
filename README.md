@@ -58,10 +58,11 @@ docker compose -f docker-compose.build.yml up -d --build
 
 打开 `http://NAS地址:8971`：
 
-1. 进「设置」→ 填拓竹账号密码 → 登录（中国大陆账号选「中国大陆」区域）
-2. 点「同步设备」，打印机就出现了
-3. 回「仪表盘」，点 AMS 槽位，把槽位绑定到对应料盘
-4. 之后每次打印都会自动记账
+1. 首次打开会要求**创建管理员账号**（账号 + 密码，密码至少 8 位）。创建后此入口自动关闭
+2. 用该账号登录 → 进「设置」→ 填拓竹账号密码 → 登录拓竹（中国大陆账号选「中国大陆」区域）
+3. 点「同步设备」，打印机就出现了
+4. 回「仪表盘」，点 AMS 槽位，把槽位绑定到对应料盘
+5. 之后每次打印都会自动记账
 
 ### 在 Unraid 上部署
 
@@ -119,7 +120,10 @@ docker run --rm -p 8971:8971 -e BAMBU_MOCK=1 ghcr.io/mjy378283319/bambu-spool:la
 |---|---|---|
 | `DATA_DIR` | `/data` | 数据目录，**必须持久化**（存 SQLite 和加密密钥） |
 | `PORT` | `8971` | 监听端口 |
-| `APP_PASSWORD` | 空 | 访问口令，留空不鉴权 |
+| `SESSION_TTL_DAYS` | `30` | 登录会话有效期（天），每次访问滑动续期 |
+| `LOGIN_MAX_ATTEMPTS` | `5` | 登录失败锁定阈值 |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | 锁定时长（分钟） |
+| `PBKDF2_ITERATIONS` | `300000` | 口令哈希迭代次数，弱 CPU 的 NAS 可降到 100000 |
 | `BAMBU_REGION` | `china` | `china` / `global` |
 | `BAMBU_MOCK` | `0` | `1` 启用模拟打印机 |
 | `TASK_POLL_INTERVAL` | `60` | 云端任务轮询间隔（秒），也是扣重的最大延迟 |
@@ -128,6 +132,24 @@ docker run --rm -p 8971:8971 -e BAMBU_MOCK=1 ghcr.io/mjy378283319/bambu-spool:la
 | `MIN_PROGRESS_TO_RECORD` | `1.0` | 低于此进度视为误触，不记 |
 | `NOTIFY_WEBHOOK` | 空 | 通知地址，POST `{"title","message"}` |
 | `TOKEN_RENEW_BEFORE_HOURS` | `3` | 令牌剩余多久时自动续期 |
+
+### 挂到公网（Lucky / Nginx 反代）
+
+应用自带完整的账号密码认证，暴露到公网前确认以下几点：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `TRUST_PROXY` | `true` | 信任反代传来的 `X-Forwarded-*` 头，挂在 Lucky/Nginx 后面必须保持开启 |
+| `REQUIRE_HTTPS` | `false` | 设为 `true` 后，检测到外部是 http 会 308 跳转到 https。**公网强烈建议开启**，且反代要正确传递 `X-Forwarded-Proto` |
+| `COOKIE_SECURE` | `auto` | 会话 Cookie 的 Secure 标志。`auto` 会按实际协议自动判断，一般不用动 |
+| `ALLOW_PUBLIC_SETUP` | `false` | 是否允许从公网 IP 完成「首次创建管理员」。默认只允许内网直连，防止服务刚上线就被陌生人抢注账号 |
+| `ALLOWED_ORIGINS` | 空 | 跨站写操作检查的白名单，非浏览器客户端需要时填，逗号分隔 |
+
+推荐的上线路径：
+
+1. 先在内网打开 `http://NAS地址:8971`，**创建好管理员账号**（此时 `ALLOW_PUBLIC_SETUP=false` 也能创建）
+2. 再用 Lucky 把域名反代到 8971 端口，并在容器环境变量里加 `REQUIRE_HTTPS=true`
+3. 登录接口有失败锁定（默认 5 次 / 15 分钟），密码走 PBKDF2 存储，会话 Cookie 为 HttpOnly
 | `DATABASE_URL` | SQLite | 可换 PostgreSQL |
 
 完整列表见 [.env.example](.env.example)。

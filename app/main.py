@@ -1,4 +1,4 @@
-"""应用入口。"""
+"""应用入口：生命周期、访问控制中间件、安全响应头。"""
 from __future__ import annotations
 
 import logging
@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api.routes import _token_for, router
+from . import auth
+from .api.routes import router
+from .auth import is_https
 from .config import settings
 from .core.hub import hub
 from .db import init_db
@@ -22,12 +24,27 @@ logger = logging.getLogger("bambu-spool")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+# 无需登录即可访问的路径。前端外壳（HTML/CSS/JS）必须开放，
+# 否则用户连登录页都加载不出来；壳里不含任何数据。
+OPEN_EXACT = {"/", "/index.html", "/favicon.ico", "/health"}
+OPEN_PREFIX = ("/static/", "/api/auth/")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     if settings.mock_mode:
         logger.info("以模拟打印机模式启动，无需拓竹账号")
+
+    auth.bootstrap_admin_from_env()
+    if auth.user_count() == 0:
+        logger.warning(
+            "尚未创建任何账号。请立刻打开网页完成管理员初始化；"
+            "初始化接口已限制为仅内网直连可访问（要放开请设 ALLOW_PUBLIC_SETUP=1）。"
+        )
+    if not settings.trust_proxy:
+        logger.info("TRUST_PROXY 已关闭，反向代理传来的 X-Forwarded-* 将被忽略")
+
     await hub.start()
     logger.info("服务已就绪：http://%s:%s", settings.host, settings.port)
     try:
@@ -36,23 +53,77 @@ async def lifespan(app: FastAPI):
         await hub.stop()
 
 
-app = FastAPI(title="拓竹耗材管家", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="拓竹耗材管家",
+    version="0.2.0",
+    lifespan=lifespan,
+    # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
-# 无需鉴权即可访问的路径
-OPEN_PATHS = {"/", "/index.html", "/favicon.ico", "/api/auth/login", "/api/auth/status"}
+# 会话 Cookie 只含随机令牌，配合 SameSite=Lax 已能挡住跨站表单提交；
+# 这里再对「改数据的请求」做一次 Origin 校验，纵深防御。
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _origin_allowed(request: Request) -> bool:
+    origin = request.headers.get("origin", "").strip().rstrip("/")
+    if not origin:
+        # 非浏览器客户端（curl / 脚本）不带 Origin，放行
+        return True
+    if settings.allowed_origins:
+        return origin in settings.allowed_origins
+    # 默认与当前 Host 比对；反代下 Host 通常是外部域名
+    host = request.headers.get("x-forwarded-host", "") or request.headers.get("host", "")
+    if not host:
+        return True
+    return origin.endswith("//" + host.split(",")[0].strip())
 
 
 @app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    if not settings.app_password:
-        return await call_next(request)
+async def access_control(request: Request, call_next):
     path = request.url.path
-    if path in OPEN_PATHS or path.startswith("/static") or path.startswith("/docs") or path.startswith("/openapi"):
-        return await call_next(request)
-    cookie = request.cookies.get("bs_auth", "")
-    if cookie == _token_for(settings.app_password) or request.headers.get("x-app-password") == settings.app_password:
-        return await call_next(request)
-    return JSONResponse({"detail": "需要登录"}, status_code=401)
+
+    # 1) 强制 HTTPS（仅在反代已告知外部协议时生效）
+    if settings.require_https and not is_https(request) and path != "/health":
+        target = "https://" + (request.headers.get("host", "") + path)
+        if request.url.query:
+            target += "?" + request.url.query
+        return RedirectResponse(target, status_code=308)
+
+    # 2) 放行前端外壳与登录接口
+    if path in OPEN_EXACT or path.startswith(OPEN_PREFIX):
+        return _harden(await call_next(request))
+
+    # 3) 跨站写操作拦截
+    if request.method in UNSAFE_METHODS and not _origin_allowed(request):
+        return JSONResponse({"detail": "跨站请求已被拒绝"}, status_code=403)
+
+    # 4) 会话校验
+    if auth.current_user(request) is None:
+        return JSONResponse(
+            {"detail": "未登录", "code": "unauthenticated"}, status_code=401
+        )
+
+    return _harden(await call_next(request))
+
+
+def _harden(response):
+    """给所有响应加上基础安全头。"""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    # 前端是单页原生实现，用到内联事件处理器，因此 style/script 需要 unsafe-inline
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'",
+    )
+    return response
 
 
 app.include_router(router)

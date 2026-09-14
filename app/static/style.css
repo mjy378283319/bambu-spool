@@ -248,8 +248,84 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .toast.err { background: var(--red); }
 .toast.ok { background: var(--green); }
 
-.login-gate {
-  max-width: 360px; margin: 90px auto; text-align: center;
+/* ── 登录页 ─────────────────────────────────────────── */
+.auth-page {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(1100px 520px at 50% -10%, #e6f4f1 0%, transparent 62%),
+    var(--bg);
+  overflow-y: auto;
+}
+.auth-card {
+  width: 100%; max-width: 388px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 30px 28px 26px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px rgba(16,24,40,.09);
+}
+.auth-head { display: flex; align-items: center; gap: 11px; margin-bottom: 24px; }
+.auth-logo {
+  width: 38px; height: 38px; border-radius: 11px;
+  background: var(--accent); position: relative; flex: none;
+}
+.auth-logo::after {
+  content: ""; position: absolute; inset: 11px;
+  border-radius: 50%; background: #fff;
+}
+.auth-name { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+.auth-tag { font-size: 11px; color: var(--text-3); letter-spacing: .4px; }
+
+.auth-card h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+.auth-sub { margin: 0 0 20px; font-size: 13px; color: var(--text-2); }
+
+.auth-card .field { margin-bottom: 14px; }
+.auth-card .field > span { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 6px; }
+.auth-card .field input {
+  width: 100%; padding: 10px 12px; font-size: 14px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font-family: inherit;
+}
+.auth-card .field input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.auth-check {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text-2);
+  margin: 2px 0 16px; cursor: pointer; user-select: none;
+}
+.auth-check input { width: auto; margin: 0; }
+
+.auth-error {
+  background: var(--red-soft); color: var(--red);
+  border: 1px solid #f6cfca; border-radius: var(--radius-sm);
+  padding: 9px 12px; font-size: 12.5px; margin-bottom: 14px;
+  line-height: 1.5;
+}
+.auth-submit { width: 100%; padding: 11px; font-size: 14px; }
+.auth-submit[disabled] { opacity: .6; cursor: progress; }
+
+.auth-foot {
+  margin: 18px 0 0; font-size: 12px; color: var(--text-3);
+  text-align: center; line-height: 1.7;
+}
+.auth-copyright { margin-top: 22px; font-size: 11.5px; color: var(--text-3); }
+
+/* ── 顶部账号区 ─────────────────────────────────────── */
+.user-chip {
+  display: flex; align-items: center; gap: 7px;
+  padding-left: 12px; margin-left: 4px;
+  border-left: 1px solid var(--border);
+  font-size: 13px; color: var(--text-2);
+}
+.user-chip .avatar {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; flex: none; text-transform: uppercase;
 }
 
 @media (max-width: 720px) {
@@ -257,4 +333,6 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .nav button { padding: 6px 9px; font-size: 13px; }
   main { padding: 16px 12px 50px; }
   .field-row { grid-template-columns: 1fr; }
+  .user-chip #userName { display: none; }
+  .auth-card { padding: 24px 20px 20px; }
 }

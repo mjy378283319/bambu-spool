@@ -13,8 +13,8 @@ engine = create_engine(settings.database_url, echo=False, connect_args=connect_a
 
 
 def init_db() -> None:
-    # 确保模型已注册
-    from . import models  # noqa: F401
+    # 确保模型已注册（auth 里的账号/会话表也要建出来）
+    from . import auth, models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
 

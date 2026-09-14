@@ -9,6 +9,50 @@
 </head>
 <body>
 
+<!-- ══ 登录页：未鉴权时独立整屏展示，与应用完全分离 ══ -->
+<div class="auth-page hidden" id="authPage">
+  <div class="auth-card">
+    <div class="auth-head">
+      <span class="auth-logo"></span>
+      <div>
+        <div class="auth-name">拓竹耗材管家</div>
+        <div class="auth-tag">Bambu Spool Manager</div>
+      </div>
+    </div>
+
+    <h1 id="authTitle">登录</h1>
+    <p class="auth-sub" id="authSub">请输入账号和密码</p>
+
+    <form id="authForm" onsubmit="return submitAuth(event)" autocomplete="on">
+      <label class="field"><span>账号</span>
+        <input id="authUser" name="username" autocomplete="username" placeholder="admin" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      </label>
+
+      <label class="field"><span>密码</span>
+        <input id="authPass" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+      </label>
+
+      <label class="field hidden" id="authConfirmWrap"><span>确认密码</span>
+        <input id="authPass2" name="password2" type="password" autocomplete="new-password" placeholder="再输入一次" />
+      </label>
+
+      <label class="auth-check" id="authRememberWrap">
+        <input type="checkbox" id="authRemember" checked /> <span>保持登录状态</span>
+      </label>
+
+      <div class="auth-error hidden" id="authError"></div>
+
+      <button class="primary auth-submit" id="authSubmit" type="submit">登录</button>
+    </form>
+
+    <p class="auth-foot" id="authFoot"></p>
+  </div>
+  <div class="auth-copyright">数据完全保存在你自己的服务器上</div>
+</div>
+
+<!-- ══ 主应用 ══ -->
+<div id="app" class="hidden">
+
 <header class="topbar">
   <div class="brand"><span class="logo"></span><span>拓竹耗材管家</span></div>
   <nav class="nav">
@@ -19,17 +63,15 @@
   </nav>
   <div class="spacer"></div>
   <div class="conn" id="conn"><span class="dot"></span><span id="connText">连接中</span></div>
+  <div class="user-chip" id="userChip">
+    <span class="avatar" id="userAvatar">U</span>
+    <span id="userName">—</span>
+    <button class="sm" onclick="openAccountMenu()">账号</button>
+    <button class="sm" onclick="doLogout()">退出</button>
+  </div>
 </header>
 
 <main>
-  <div class="login-gate hidden" id="loginGate">
-    <div class="card">
-      <h2>需要口令</h2>
-      <label class="field"><span>访问口令</span><input type="password" id="gatePassword" /></label>
-      <button class="primary" style="width:100%" onclick="doGateLogin()">进入</button>
-    </div>
-  </div>
-
   <section class="view" id="view-dashboard">
     <div class="grid-stats" id="dashStats"></div>
     <div id="printerCards" style="margin-top:16px"></div>
@@ -104,6 +146,8 @@
     </div>
   </section>
 </main>
+
+</div>
 
 <div class="toast-wrap" id="toasts"></div>
 <div id="modalHost"></div>

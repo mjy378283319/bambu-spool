@@ -10,7 +10,8 @@ const S = {
   bindings: [],
   view: "dashboard",
   socket: null,
-  authToken: localStorage.getItem("bs_auth_token") || "",
+  auth: { setupRequired: false, authenticated: false, user: null },
+  socketRetry: null,
 };
 
 /* ── 基础设施 ──────────────────────────────────────────── */
@@ -23,11 +24,11 @@ function esc(value) {
 
 async function api(path, options = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
-  if (S.authToken) headers["x-app-password"] = S.authToken;
-  const resp = await fetch(path, Object.assign({}, options, { headers }));
+  // 登录态走 HttpOnly Cookie，浏览器自动携带，前端不接触令牌
+  const resp = await fetch(path, Object.assign({}, options, { headers, credentials: "same-origin" }));
   if (resp.status === 401) {
-    showGate();
-    throw new Error("需要口令");
+    showAuthPage();
+    throw new Error("需要登录");
   }
   if (!resp.ok) {
     let detail = `请求失败（${resp.status}）`;
@@ -47,24 +48,155 @@ function toast(message, kind = "") {
   setTimeout(() => node.remove(), 4200);
 }
 
-function showGate() {
-  document.getElementById("loginGate").classList.remove("hidden");
-  document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+/* ── 登录页 ────────────────────────────────────────────── */
+function showAuthPage() {
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("authPage").classList.remove("hidden");
+  if (S.socket) { try { S.socket.close(); } catch (e) { /* 忽略 */ } S.socket = null; }
+  if (S.socketRetry) { clearTimeout(S.socketRetry); S.socketRetry = null; }
 }
-function hideGate() { document.getElementById("loginGate").classList.add("hidden"); }
 
-async function doGateLogin() {
-  const password = document.getElementById("gatePassword").value;
+function hideAuthPage() {
+  document.getElementById("authPage").classList.add("hidden");
+  document.getElementById("app").classList.remove("hidden");
+}
+
+function authError(message) {
+  const box = document.getElementById("authError");
+  if (!message) { box.classList.add("hidden"); box.textContent = ""; return; }
+  box.textContent = message;
+  box.classList.remove("hidden");
+}
+
+function renderAuthPage(status) {
+  const setup = !!status.setup_required;
+  S.auth = { setupRequired: setup, authenticated: !!status.authenticated, user: status.user || null };
+
+  document.getElementById("authTitle").textContent = setup ? "初始化管理员" : "登录";
+  document.getElementById("authSub").textContent = setup
+    ? "第一次使用，请创建管理员账号"
+    : "请输入账号和密码";
+
+  document.getElementById("authConfirmWrap").classList.toggle("hidden", !setup);
+  document.getElementById("authRememberWrap").classList.toggle("hidden", setup);
+  document.getElementById("authSubmit").textContent = setup ? "创建并进入" : "登录";
+
+  const userInput = document.getElementById("authUser");
+  userInput.value = setup ? "admin" : "";
+  document.getElementById("authPass").value = "";
+  document.getElementById("authPass2").value = "";
+  document.getElementById("authPass").setAttribute("autocomplete", setup ? "new-password" : "current-password");
+  authError("");
+
+  // 初始化引导文案：明确告知安全前提
+  let foot = "";
+  if (setup) {
+    foot = status.setup_allowed
+      ? "口令至少 8 位，不要只用纯数字。创建后此初始化入口会自动关闭。"
+      : "⚠️ 当前不是内网直连，初始化已被拒绝。请先在内网打开本页面完成初始化。";
+  }
+  document.getElementById("authFoot").innerHTML = foot;
+  setTimeout(() => (setup ? document.getElementById("authPass") : userInput).focus(), 60);
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const setup = S.auth.setupRequired;
+  const username = document.getElementById("authUser").value.trim();
+  const password = document.getElementById("authPass").value;
+  const confirm = document.getElementById("authPass2").value;
+  const remember = document.getElementById("authRemember").checked;
+  const button = document.getElementById("authSubmit");
+
+  authError("");
+  if (!username) { authError("请填写账号"); return false; }
+  if (!password) { authError("请填写密码"); return false; }
+  if (setup && password !== confirm) { authError("两次输入的密码不一致"); return false; }
+
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = setup ? "创建中…" : "登录中…";
   try {
-    const result = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) });
-    if (result.token) {
-      S.authToken = result.token;
-      localStorage.setItem("bs_auth_token", result.token);
-      if (password) document.cookie = `bs_auth=${result.token}; path=/; max-age=31536000`;
+    if (setup) {
+      await api("/api/auth/setup", { method: "POST", body: JSON.stringify({ username, password }) });
+    } else {
+      await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password, remember }) });
     }
-    hideGate();
-    location.reload();
+    await enterApp();
+  } catch (err) {
+    authError(err.message || "登录失败");
+    button.disabled = false;
+    button.textContent = original;
+    document.getElementById("authPass").value = "";
+    document.getElementById("authPass").focus();
+  }
+  return false;
+}
+
+async function doLogout() {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch (err) { /* 忽略 */ }
+  S.status = null;
+  S.auth = { setupRequired: false, authenticated: false, user: null };
+  const check = await fetch("/api/auth/status", { credentials: "same-origin" }).then((r) => r.json()).catch(() => null);
+  if (check) renderAuthPage(check);
+  showAuthPage();
+}
+
+function openAccountMenu() {
+  const user = S.auth.user || {};
+  openModal("账号", `
+    <div class="row" style="margin-bottom:14px">
+      <span class="avatar" style="width:32px;height:32px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;border-radius:50%;font-weight:600">${esc((user.display_name || "U").slice(0, 1))}</span>
+      <div>
+        <div><b>${esc(user.display_name || user.username || "—")}</b></div>
+        <div class="small muted">账号 ${esc(user.username || "—")}</div>
+      </div>
+    </div>
+    <div class="small muted" style="margin-bottom:14px">
+      上次登录：${esc(fmtTime(user.last_login_at))}
+    </div>
+    <h2 style="font-size:13.5px">修改密码</h2>
+    <label class="field"><span>当前密码</span><input type="password" id="pwOld" autocomplete="current-password" /></label>
+    <label class="field"><span>新密码</span><input type="password" id="pwNew" autocomplete="new-password" /></label>
+    <label class="field"><span>确认新密码</span><input type="password" id="pwNew2" autocomplete="new-password" /></label>
+    <div class="row" style="margin-top:16px">
+      <button class="primary" onclick="submitPasswordChange()">保存新密码</button>
+      <span class="spacer"></span>
+      <button class="sm" onclick="logoutAllDevices()">退出所有设备</button>
+    </div>
+    <p class="small muted" style="margin:14px 0 0">改完密码后，除当前浏览器外的其它登录都会失效。</p>
+  `);
+}
+
+async function submitPasswordChange() {
+  const oldPw = document.getElementById("pwOld").value;
+  const newPw = document.getElementById("pwNew").value;
+  const newPw2 = document.getElementById("pwNew2").value;
+  if (!oldPw || !newPw) { toast("请填写当前密码和新密码", "err"); return; }
+  if (newPw !== newPw2) { toast("两次输入的新密码不一致", "err"); return; }
+  try {
+    await api("/api/auth/password", { method: "POST", body: JSON.stringify({ old_password: oldPw, new_password: newPw }) });
+    closeModal();
+    toast("密码已更新", "ok");
+    const me = await api("/api/auth/me").catch(() => null);
+    if (me) { S.auth.user = me.user; renderUserChip(); }
   } catch (err) { toast(err.message, "err"); }
+}
+
+async function logoutAllDevices() {
+  try {
+    await api("/api/auth/logout-all", { method: "POST" });
+    closeModal();
+    toast("已退出所有设备", "ok");
+    doLogout();
+  } catch (err) { toast(err.message, "err"); }
+}
+
+function renderUserChip() {
+  const user = S.auth.user || {};
+  const name = user.display_name || user.username || "—";
+  document.getElementById("userName").textContent = name;
+  document.getElementById("userAvatar").textContent = (name || "U").slice(0, 1);
 }
 
 function fmtTime(iso) {
@@ -1087,8 +1219,15 @@ function connectSocket() {
     }
   };
 
-  socket.onclose = () => {
-    setTimeout(connectSocket, 4000);
+  socket.onclose = (event) => {
+    S.socket = null;
+    // 4401 是服务端因未登录主动关闭：不要重连，直接回登录页
+    if (event && event.code === 4401) {
+      showAuthPage();
+      return;
+    }
+    if (S.socketRetry) clearTimeout(S.socketRetry);
+    S.socketRetry = setTimeout(connectSocket, 4000);
   };
   socket.onerror = () => { /* onclose 会接手重连 */ };
 }
@@ -1110,19 +1249,7 @@ function addEvent(event) {
 }
 
 /* ── 启动 ──────────────────────────────────────────────── */
-async function boot() {
-  await loadCatalog();
-  try {
-    await loadBindings();
-    await loadPrinters();
-    await loadStatus();
-    hideGate();
-  } catch (err) {
-    if ((err.message || "").includes("口令")) return;
-    toast(err.message, "err");
-  }
-  connectSocket();
-
+function applyHashRoute() {
   const knownViews = ["dashboard", "spools", "jobs", "settings"];
   const hash = location.hash.slice(1);
   if (knownViews.includes(hash)) {
@@ -1139,6 +1266,48 @@ async function boot() {
   } else {
     switchView("dashboard");
   }
+}
+
+/** 登录成功后进入应用：拉取数据并建立实时连接。 */
+async function enterApp() {
+  S.auth.authenticated = true;
+  S.auth.setupRequired = false;
+  renderUserChip();
+  hideAuthPage();
+  await loadCatalog();
+  try {
+    await loadBindings();
+    await loadPrinters();
+    await loadStatus();
+    const me = await api("/api/auth/me").catch(() => null);
+    if (me) { S.auth.user = me.user; renderUserChip(); }
+  } catch (err) {
+    if ((err.message || "").includes("登录")) return false;
+    toast(err.message, "err");
+  }
+  connectSocket();
+  applyHashRoute();
+  return true;
+}
+
+async function boot() {
+  let status = null;
+  try {
+    const resp = await fetch("/api/auth/status", { credentials: "same-origin" });
+    status = await resp.json();
+  } catch (err) {
+    document.body.innerHTML = '<div style="padding:40px;font-family:system-ui">无法连接服务，请刷新重试。</div>';
+    return;
+  }
+
+  if (!status.authenticated) {
+    renderAuthPage(status);
+    showAuthPage();
+    return;
+  }
+
+  S.auth = { setupRequired: false, authenticated: true, user: status.user || null };
+  await enterApp();
 }
 
 // 定时兜底刷新（WebSocket 断线时也能保持数据新鲜）

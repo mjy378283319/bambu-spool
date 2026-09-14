@@ -5,18 +5,26 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import io
 import json
 import qrcode
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from .. import auth as auth_mod
+from ..auth import (
+    client_ip,
+    is_https,
+    is_private_host,
+    peer_ip,
+    resolve_session,
+    token_from_request,
+)
 from ..catalog import (
     BRAND_PRESETS,
     COLOR_PRESETS,
@@ -37,20 +45,23 @@ router = APIRouter()
 
 
 # ══ 鉴权 ═══════════════════════════════════════════════════
-def _token_for(password: str) -> str:
-    return hashlib.sha256(f"bambu-spool::{password}".encode("utf-8")).hexdigest()
+# 登录态校验统一由 app.main 的中间件完成（HTTP）与 websocket_endpoint（WS）完成。
+# 这里只放登录/登出/初始化等免鉴权接口。
 
 
-def require_auth(request: Request) -> None:
-    if not settings.app_password:
-        return
-    cookie = request.cookies.get("bs_auth", "")
-    header = request.headers.get("x-app-password", "")
-    if cookie == _token_for(settings.app_password):
-        return
-    if header and header == settings.app_password:
-        return
-    raise HTTPException(status_code=401, detail="需要登录")
+def _setup_allowed(request: Request) -> bool:
+    """首次创建管理员是否被允许。
+
+    默认只认「内网直连」——看的是 TCP 对端地址而非 X-Forwarded-For，
+    所以即使挂在反向代理后面，外面的人也伪造不出内网来源。
+    """
+    if settings.allow_public_setup:
+        return True
+    return is_private_host(peer_ip(request))
+
+
+def _client_meta(request: Request) -> dict:
+    return {"ip": client_ip(request), "ua": request.headers.get("user-agent", "")[:300]}
 
 
 # ══ 通用 ═══════════════════════════════════════════════════
@@ -122,16 +133,21 @@ def binding_dict(binding: SlotBinding, session: Session) -> dict:
 
 # ══ 系统 ═══════════════════════════════════════════════════
 @router.get("/api/system/status")
-def system_status(session: Session = Depends(get_session)) -> dict:
+def system_status(request: Request, session: Session = Depends(get_session)) -> dict:
     acc = hub.account()
     snapshot = hub.snapshot()
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "mock": settings.mock_mode,
-        "auth_required": bool(settings.app_password),
         "region": acc.region if acc else settings.region,
+        "security": {
+            "session_days": settings.session_ttl_days,
+            "https": is_https(request),
+            "trust_proxy": settings.trust_proxy,
+            "account_count": auth_mod.user_count(),
+        },
         "account": {
             "logged_in": bool(acc and acc.access_token),
             "account": acc.account if acc else "",
@@ -153,13 +169,102 @@ def system_status(session: Session = Depends(get_session)) -> dict:
     }
 
 
+@router.get("/api/auth/status")
+def auth_status(request: Request) -> dict:
+    """登录页的引导接口：告诉前端是「初始化」还是「登录」，以及当前登录态。"""
+    user = auth_mod.current_user(request)
+    return {
+        "setup_required": auth_mod.user_count() == 0,
+        "setup_allowed": _setup_allowed(request),
+        "authenticated": user is not None,
+        "user": auth_mod.user_dict(user),
+        "https": is_https(request),
+    }
+
+
+@router.post("/api/auth/setup")
+def auth_setup(payload: dict = Body(...), request: Request = None, response: Response = None) -> dict:  # type: ignore[assignment]
+    """首次初始化管理员账号。已有账号后此接口永久关闭。"""
+    if auth_mod.user_count() > 0:
+        raise HTTPException(status_code=409, detail="管理员已存在，请直接登录")
+    if not _setup_allowed(request):
+        raise HTTPException(
+            status_code=403,
+            detail="初始化只允许从内网访问。请先在内网打开一次完成初始化，或设置 ALLOW_PUBLIC_SETUP=1",
+        )
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    if not username:
+        raise HTTPException(status_code=400, detail="请填写账号")
+    try:
+        user = auth_mod.create_user(username, password, display_name=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, _ = auth_mod.create_session(user, request, days=auth_mod.settings.session_ttl_days)
+    auth_mod.set_session_cookie(response, token, request)
+    return {"ok": True, "user": auth_mod.user_dict(user)}
+
+
 @router.post("/api/auth/login")
-def auth_login(payload: dict = Body(...), response: Response = None) -> dict:  # type: ignore[assignment]
-    if not settings.app_password:
-        return {"ok": True}
-    if payload.get("password") != settings.app_password:
-        raise HTTPException(status_code=401, detail="口令不正确")
-    return {"ok": True, "token": _token_for(settings.app_password)}
+def auth_login(payload: dict = Body(...), request: Request = None, response: Response = None) -> dict:  # type: ignore[assignment]
+    if auth_mod.user_count() == 0:
+        raise HTTPException(status_code=409, detail="尚未初始化管理员账号")
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    remember = bool(payload.get("remember", True))
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="请填写账号和密码")
+
+    user = auth_mod.authenticate(username, password, request)
+    days = auth_mod.settings.session_ttl_days if remember else 1
+    token, _ = auth_mod.create_session(user, request, days=days)
+    auth_mod.set_session_cookie(response, token, request, days=days)
+    return {"ok": True, "user": auth_mod.user_dict(user)}
+
+
+@router.post("/api/auth/logout")
+def auth_logout(request: Request = None, response: Response = None) -> dict:  # type: ignore[assignment]
+    auth_mod.revoke_session(token_from_request(request))
+    auth_mod.clear_session_cookie(response)
+    return {"ok": True}
+
+
+@router.get("/api/auth/me")
+def auth_me(request: Request) -> dict:
+    user = auth_mod.current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    return {
+        "user": auth_mod.user_dict(user),
+        "active_sessions": auth_mod.active_session_count(int(user.id or 0)),
+    }
+
+
+@router.post("/api/auth/password")
+def auth_change_password(payload: dict = Body(...), request: Request = None) -> dict:  # type: ignore[assignment]
+    """修改自己的口令。改完除当前会话外的其它登录都会失效。"""
+    user = auth_mod.current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    old = str(payload.get("old_password", ""))
+    new = str(payload.get("new_password", ""))
+    try:
+        revoked = auth_mod.change_password(user, old, new, keep_token=token_from_request(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "revoked_other_sessions": revoked}
+
+
+@router.post("/api/auth/logout-all")
+def auth_logout_all(request: Request = None, response: Response = None) -> dict:  # type: ignore[assignment]
+    """退出所有设备。"""
+    user = auth_mod.current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    count = auth_mod.revoke_user_sessions(int(user.id or 0))
+    auth_mod.clear_session_cookie(response)
+    return {"ok": True, "revoked": count}
 
 
 # ══ 账号 ═══════════════════════════════════════════════════
@@ -919,6 +1024,18 @@ def list_events() -> dict:
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    """实时推送。
+
+    注意：HTTP 中间件不会作用于 WebSocket，握手必须单独校验，
+    否则带口令部署时 /ws 仍会把全部状态裸奔出去。
+    """
+    if resolve_session(token_from_request(websocket)) is None:  # type: ignore[arg-type]
+        # 必须先 accept 才能给出自定义关闭码；直接 close 只会变成握手期 HTTP 403，
+        # 前端拿到的是 1006，无法区分「未登录」和「网络抖动」，就会无限重连。
+        await websocket.accept()
+        await websocket.close(code=4401, reason="unauthenticated")
+        return
+
     await websocket.accept()
     queue = hub.subscribe()
     try:
