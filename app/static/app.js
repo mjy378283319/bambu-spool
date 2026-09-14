@@ -270,6 +270,7 @@ async function loadCatalog() {
 
 async function loadStatus() {
   S.status = await api("/api/system/status");
+  try { S.stats = await api("/api/stats"); } catch (err) { S.stats = null; }
   renderDashboard();
   renderSettings();
 }
@@ -310,11 +311,15 @@ async function loadJobs() {
 function renderDashboard() {
   if (!S.status) return;
   const stats = S.status.stats || {};
+  const st = S.stats || {};
   document.getElementById("dashStats").innerHTML = `
     <div class="stat"><div class="label">在用料盘</div><div class="value">${stats.spool_count || 0}<small> 盘</small></div></div>
     <div class="stat"><div class="label">库存余量</div><div class="value">${(stats.remaining_total || 0).toFixed(0)}<small> g</small></div></div>
     <div class="stat"><div class="label">余量不足</div><div class="value">${stats.low_count || 0}<small> 盘</small></div></div>
-    <div class="stat"><div class="label">待结算任务</div><div class="value">${(S.status.pending_jobs || []).length}<small> 个</small></div></div>`;
+    <div class="stat"><div class="label">待结算任务</div><div class="value">${(S.status.pending_jobs || []).length}<small> 个</small></div></div>
+    <div class="stat"><div class="label">耗材总价值</div><div class="value">¥${(st.price_total != null ? st.price_total : (stats.price_total || 0)).toFixed(2)}</div></div>
+    <div class="stat"><div class="label">库存余值</div><div class="value">¥${(st.stock_value != null ? st.stock_value : (stats.stock_value || 0)).toFixed(2)}</div></div>
+    <div class="stat"><div class="label">累计打印耗材费</div><div class="value">¥${(st.print_cost_total != null ? st.print_cost_total : 0).toFixed(2)}</div></div>`;
 
   const printers = S.status.printers || [];
   const host = document.getElementById("printerCards");
@@ -506,12 +511,14 @@ function renderSpools() {
   host.innerHTML = `<table>
     <thead><tr>
       <th>料盘</th><th>材料</th><th>位置 / 槽位</th>
-      <th style="text-align:right">余量</th><th style="width:130px">使用进度</th><th></th>
+      <th style="text-align:right">余量</th><th style="width:130px">使用进度</th>
+      <th style="text-align:right">价格 / 余值</th><th></th>
     </tr></thead>
     <tbody>${S.spools.map((spool) => {
       const slots = (spool.slots || []).length
         ? spool.slots.map((x) => esc(x.label)).join("、")
         : "未装到机器上";
+      const hasPrice = (spool.price || 0) > 0;
       return `<tr class="clickable" onclick="openSpoolDetail(${spool.id})">
         <td>
           <div class="row" style="gap:8px">
@@ -534,6 +541,10 @@ function renderSpools() {
               background:${spool.is_low ? "#d97706" : "var(--accent)"}"></div>
           </div>
           <div class="tiny muted" style="margin-top:3px">${spool.remaining_percent}% · 已用 ${spool.used_weight.toFixed(0)} g</div>
+        </td>
+        <td class="num">
+          ${hasPrice ? `¥${spool.price.toFixed(2)}<br><span class="tiny muted">余值 ¥${spool.stock_value.toFixed(2)}</span>`
+            : '<span class="tiny muted">未登记</span>'}
         </td>
         <td onclick="event.stopPropagation()">
           <button class="sm ghost" onclick="openUseDialog(${spool.id})">补录</button>
@@ -676,7 +687,18 @@ function openSpoolDialog(spool, forceNew) {
       <label class="field"><span>当前余量（g）</span>
         <input type="number" id="f_remaining_weight" value="${isEdit ? value.remaining_weight : value.initial_weight}" step="1" /></label>
     </div>
-    <label class="field"><span>存放位置（可选）</span>
+    <div class="field-row">
+      <label class="field"><span>整盘价格（¥）</span>
+        <input type="number" id="f_price" value="${value.price != null ? value.price : 0}" step="0.01" min="0" placeholder="如 99.9" /></label>
+      <label class="field"><span>存放位置（可选）</span>
+        <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
+    </div>
+    <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
+    <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
+  `, `<button onclick="closeModal()">取消</button>
+      <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
+  renderColorPresets();
+}
       <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
     <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
@@ -696,6 +718,7 @@ async function saveSpool(id) {
     remaining_weight: parseFloat(document.getElementById("f_remaining_weight").value),
     location: document.getElementById("f_location").value.trim(),
     note: document.getElementById("f_note").value.trim(),
+    price: parseFloat(document.getElementById("f_price").value) || 0,
   };
   if (!payload.brand) { toast("请填写品牌", "err"); return; }
   if (!payload.material) { toast("请选择材料", "err"); return; }
@@ -735,6 +758,9 @@ async function openSpoolDetail(id) {
             <span class="muted small">剩余 / 满盘 ${spool.initial_weight.toFixed(0)} g</span></div>
           <div class="small muted">已用 ${spool.used_weight.toFixed(0)} g ·
             皮重 ${spool.spool_weight.toFixed(0)} g · 含盘 ${spool.total_weight.toFixed(0)} g</div>
+          <div class="small muted">整盘价 ${(spool.price > 0) ? "¥" + spool.price.toFixed(2) : "—"} ·
+            单价 ${(spool.price_per_g > 0) ? "¥" + spool.price_per_g.toFixed(3) + "/g" : "—"} ·
+            余值 ${(spool.stock_value > 0) ? "¥" + spool.stock_value.toFixed(2) : "—"}</div>
         </div>
         <span class="spacer"></span>
         <div class="small muted" style="text-align:right">
@@ -954,7 +980,9 @@ function jobStatusTag(status, pending) {
 
 function renderJobs() {
   const host = document.getElementById("jobTable");
-  document.getElementById("jobCount").textContent = S.jobs.length ? `${S.jobs.length} 条` : "";
+  const totalCost = S.jobs.reduce((sum, j) => sum + (j.cost_total || 0), 0);
+  document.getElementById("jobCount").textContent = S.jobs.length
+    ? `${S.jobs.length} 条 · 耗材费合计 ¥${totalCost.toFixed(2)}` : "";
   if (!S.jobs.length) {
     host.innerHTML = '<div class="empty-state">还没有打印记录。任务会在打印机开始打印时自动创建。</div>';
     return;
@@ -962,7 +990,7 @@ function renderJobs() {
   host.innerHTML = `<table>
     <thead><tr>
       <th>任务</th><th>打印机</th><th>时间</th>
-      <th style="text-align:right">耗材</th><th>状态</th><th>数据来源</th>
+      <th style="text-align:right">耗材</th><th style="text-align:right">耗材费</th><th>状态</th><th>数据来源</th>
     </tr></thead>
     <tbody>${S.jobs.map((job) => `
       <tr class="clickable" onclick="openJobDetail(${job.id})">
@@ -971,6 +999,7 @@ function renderJobs() {
         <td class="small">${esc(job.printer_name || "")}</td>
         <td class="small muted">${esc(fmtTime(job.started_at))}</td>
         <td class="num">${job.total_weight_g ? job.total_weight_g.toFixed(1) + " g" : "—"}</td>
+        <td class="num">${job.cost_total ? "¥" + job.cost_total.toFixed(2) : "—"}</td>
         <td>${jobStatusTag(job.status, job.pending)}</td>
         <td class="small muted">${job.source === "cloud_task" ? "云端任务记录"
           : job.source === "manual" ? "手动录入" : "无数据"}</td>
@@ -989,8 +1018,9 @@ async function openJobDetail(jobId) {
         <td class="small muted">${esc(f.slot_label || "—")}</td>
         <td class="small muted">${esc(f.material || "")} ${f.filament_id ? "· " + esc(f.filament_id) : ""}</td>
         <td class="num">${f.weight_g.toFixed(2)} g</td>
+        <td class="num">${f.cost ? "¥" + f.cost.toFixed(2) : "—"}</td>
         <td class="small muted">${esc(f.match_strategy || "")}</td>
-      </tr>`).join("") : '<tr><td colspan="5"><div class="empty-state">这次任务没有解析到耗材明细</div></td></tr>';
+      </tr>`).join("") : '<tr><td colspan="6"><div class="empty-state">这次任务没有解析到耗材明细</div></td></tr>';
 
     const actions = job.deduction_applied
       ? ""
@@ -1007,12 +1037,13 @@ async function openJobDetail(jobId) {
       ${job.note ? `<p class="hint">${esc(job.note)}</p>` : ""}
       <div class="row small" style="margin-bottom:12px">
         <span>总耗材 <b>${job.total_weight_g ? job.total_weight_g.toFixed(2) + " g" : "—"}</b></span>
+        <span>本次耗材费 <b>¥${(job.cost_total || 0).toFixed(2)}</b></span>
         <span class="muted">数据来源：${job.source === "cloud_task" ? "拓竹云端任务记录"
           : job.source === "manual" ? "手动录入" : "暂无"}</span>
       </div>
       ${actions ? `<div class="row" style="margin-bottom:12px">${actions}</div>` : ""}
       <table><thead><tr><th>料盘</th><th>槽位</th><th>耗材</th>
-        <th style="text-align:right">用量</th><th>匹配依据</th></tr></thead>
+        <th style="text-align:right">用量</th><th style="text-align:right">耗材费</th><th>匹配依据</th></tr></thead>
         <tbody>${rows}</tbody></table>
     `, `<button class="primary" onclick="closeModal()">关闭</button>`, true);
   } catch (err) { toast(err.message, "err"); }

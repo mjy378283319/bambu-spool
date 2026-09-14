@@ -45,7 +45,7 @@ from ..colors import (
     resolve_colors,
 )
 from ..config import settings
-from ..core.deduction import apply_deduction, build_usages, load_usages, resolve_spools
+from ..core.deduction import apply_deduction, build_usages, load_usages, resolve_spools, usage_cost
 from ..core.hub import hub
 from ..db import get_session
 from ..models import PrintJob, Printer, SlotBinding, Spool, UsageRecord, utcnow
@@ -87,6 +87,9 @@ def spool_dict(spool: Spool) -> dict:
         "remaining_weight": spool.remaining_weight,
         "used_weight": spool.used_weight,
         "total_weight": spool.total_weight,
+        "price": round(spool.price, 2),
+        "price_per_g": round(spool.price_per_g, 5),
+        "stock_value": round(spool.stock_value, 2),
         "remaining_percent": spool.remaining_percent,
         "is_low": spool.is_low,
         "tray_info_idx": spool.tray_info_idx,
@@ -122,7 +125,11 @@ def job_dict(job: PrintJob, session: Session, with_filaments: bool = True) -> di
     printer = session.get(Printer, job.printer_id)
     data["printer_name"] = printer.name if printer else ""
     if with_filaments:
-        data["filaments"] = [u.__dict__ for u in load_usages(job)]
+        cost_total, usages = job_cost(job, session)
+        data["cost_total"] = cost_total
+        data["filaments"] = [u.__dict__ for u in usages]
+    else:
+        data["cost_total"] = 0.0
     return data
 
 
@@ -138,6 +145,31 @@ def binding_dict(binding: SlotBinding, session: Session) -> dict:
         "bound_at": binding.bound_at.isoformat(),
         "note": binding.note,
     }
+
+
+def job_cost(job: PrintJob, session: Session) -> tuple[float, list]:
+    """计算一次打印任务消耗的料材费用（¥）。
+
+    优先用 filaments_json 里快照的 cost（即使料盘后来被删或改价也稳定）；
+    没快照时（老数据）按当前料盘单价实时折算。
+    返回 (本次耗材费合计, 含 cost 的用量明细列表)。
+    """
+    usages = load_usages(job)
+    spool_ids = {u.spool_id for u in usages if u.spool_id}
+    spools: dict[int, Spool] = {}
+    if spool_ids:
+        for s in session.exec(select(Spool).where(Spool.id.in_(spool_ids))).all():  # type: ignore[attr-defined]
+            spools[s.id] = s
+
+    total = 0.0
+    for u in usages:
+        cost = getattr(u, "cost", 0.0) or 0.0
+        if cost == 0.0 and u.spool_id and u.spool_id in spools:
+            cost = usage_cost(spools[u.spool_id], u.weight_g)
+        cost = round(cost, 2)
+        u.cost = cost
+        total += cost
+    return round(total, 2), usages
 
 
 # ══ 系统 ═══════════════════════════════════════════════════
@@ -171,6 +203,8 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
             "spool_count": len(spools),
             "remaining_total": round(sum(s.remaining_weight for s in spools), 1),
             "low_count": sum(1 for s in spools if s.is_low),
+            "price_total": round(sum(s.price for s in spools if not s.archived), 2),
+            "stock_value": round(sum(s.stock_value for s in spools if not s.archived), 2),
         },
         "recent_jobs": [job_dict(j, session, with_filaments=False) for j in jobs],
         "events": hub.events()[:60],
@@ -493,6 +527,7 @@ class SpoolCreate(BaseModel):
     location: str = ""
     note: str = ""
     tray_info_idx: str = ""
+    price: float = 0.0
 
 
 @router.post("/api/spools")
@@ -513,6 +548,7 @@ def create_spool(payload: SpoolCreate, session: Session = Depends(get_session)) 
         location=payload.location,
         note=payload.note,
         tray_info_idx=payload.tray_info_idx,
+        price=payload.price,
     )
     session.add(spool)
     session.commit()
@@ -533,6 +569,7 @@ class SpoolPatch(BaseModel):
     note: Optional[str] = None
     tray_info_idx: Optional[str] = None
     archived: Optional[bool] = None
+    price: Optional[float] = None
 
 
 @router.get("/api/spools/{spool_id}")
@@ -590,6 +627,8 @@ def patch_spool(
         spool.spool_weight = payload.spool_weight
     if payload.initial_weight is not None:
         spool.initial_weight = payload.initial_weight
+    if payload.price is not None:
+        spool.price = payload.price
     if payload.archived is not None:
         spool.archived = payload.archived
     if payload.remaining_weight is not None:
@@ -898,6 +937,7 @@ def move_usage(
                     entry.spool_id = target.id
                     entry.spool_name = target.name
                     entry.match_strategy += "（已人工纠正）"
+                    entry.cost = round(usage_cost(target, entry.weight_g), 2)
             job.filaments_json = json.dumps([e.__dict__ for e in entries], ensure_ascii=False)
             session.add(job)
 
@@ -918,6 +958,36 @@ def stats(session: Session = Depends(get_session)) -> dict:
             by_material.get(spool.material, 0.0) + spool.remaining_weight, 1
         )
 
+    # 价格维度汇总
+    price_total = round(sum(s.price for s in spools if not s.archived), 2)        # 在用料盘总采购价
+    stock_value = round(sum(s.stock_value for s in spools if not s.archived), 2)  # 当前库存余值
+    used_value = round(  # 已消耗部分按当前单价折算（近似，未登记价格的盘不计）
+        sum(s.price_per_g * s.used_weight for s in spools), 2
+    )
+    archived_value = round(sum(s.price for s in spools if s.archived), 2)
+    by_material_price: dict[str, float] = {}
+    for spool in spools:
+        if spool.price <= 0:
+            continue
+        by_material_price[spool.material] = round(
+            by_material_price.get(spool.material, 0.0) + spool.price, 2
+        )
+
+    # 累计打印耗材费：逐任务按快照 cost（缺失则按当前单价实时折算）
+    spool_map = {s.id: s for s in spools}
+    print_cost_total = 0.0
+    by_day_cost: dict[str, float] = {}
+    for job in jobs:
+        for u in load_usages(job):
+            cost = getattr(u, "cost", 0.0) or 0.0
+            if cost == 0.0 and u.spool_id and u.spool_id in spool_map:
+                cost = usage_cost(spool_map[u.spool_id], u.weight_g)
+            cost = round(cost, 2)
+            print_cost_total += cost
+            if job.started_at:
+                day = job.started_at.strftime("%Y-%m-%d")
+                by_day_cost[day] = round(by_day_cost.get(day, 0.0) + cost, 2)
+
     by_day: dict[str, float] = {}
     for record in records:
         if record.source in ("auto", "manual"):
@@ -931,8 +1001,15 @@ def stats(session: Session = Depends(get_session)) -> dict:
         "used_total": round(sum(s.used_weight for s in spools), 1),
         "low_count": sum(1 for s in spools if not s.archived and s.is_low),
         "job_count": len(jobs),
+        "price_total": price_total,
+        "stock_value": stock_value,
+        "used_value": used_value,
+        "archived_value": archived_value,
         "by_material": by_material,
+        "by_material_price": by_material_price,
+        "print_cost_total": round(print_cost_total, 2),
         "by_day": dict(sorted(by_day.items())[-30:]),
+        "by_day_cost": dict(sorted(by_day_cost.items())[-30:]),
     }
 
 

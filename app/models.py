@@ -100,6 +100,9 @@ class Spool(SQLModel, table=True):
     remaining_weight: float = 1000.0
     used_weight: float = 0.0
 
+    # 整盘（满盘）购买价格，单位 ¥（人民币）。0 表示未登记。
+    price: float = 0.0
+
     # 拓竹官方 RFID 料盘的标识，用于自动识别
     tag_uid: str = ""
     tray_uuid: str = ""
@@ -125,6 +128,18 @@ class Spool(SQLModel, table=True):
     @property
     def is_low(self) -> bool:
         return self.remaining_weight <= 100.0
+
+    @property
+    def price_per_g(self) -> float:
+        """每克单价（¥/g），按整盘价与满盘净重折算。用于按用量计算费用。"""
+        if self.initial_weight <= 0:
+            return 0.0
+        return round(self.price / self.initial_weight, 5)
+
+    @property
+    def stock_value(self) -> float:
+        """当前余量对应的价值（¥）。"""
+        return round(self.price_per_g * self.remaining_weight, 2)
 
 
 class SlotBinding(SQLModel, table=True):

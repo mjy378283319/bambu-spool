@@ -40,6 +40,8 @@ class FilamentUsage:
     match_strategy: str = "未匹配"
     deducted_g: float = 0.0
     deducted: bool = False
+    # 本条用量消耗的料材费用（¥），扣重时按「单价 × 克重」折算并快照保存。
+    cost: float = 0.0
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -49,6 +51,16 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return round(float(value), 3)
     except (TypeError, ValueError):
         return default
+
+
+def usage_cost(spool: "Spool | None", weight_g: float) -> float:
+    """按「单价 × 克重」折算一条用量的费用（¥）。
+
+    单价 = 整盘价 / 满盘净重。未登记价格、净重为 0 或用量非正时返回 0。
+    """
+    if spool is None or weight_g <= 0 or spool.initial_weight <= 0 or spool.price <= 0:
+        return 0.0
+    return round(spool.price / spool.initial_weight * weight_g, 4)
 
 
 def _decode_ams_hint(value: Any) -> Optional[tuple[int, int]]:
@@ -209,6 +221,9 @@ def apply_deduction(session: Session, job: PrintJob, usages: list[FilamentUsage]
         spool = session.get(Spool, usage.spool_id)
         if spool is None:
             continue
+
+        cost = usage_cost(spool, usage.weight_g)
+        usage.cost = round(cost, 2)
 
         spool.used_weight = round(spool.used_weight + usage.weight_g, 2)
         spool.remaining_weight = round(max(0.0, spool.remaining_weight - usage.weight_g), 2)
