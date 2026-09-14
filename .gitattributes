@@ -1,0 +1,15 @@
+# 统一换行与文本/二进制判定，避免不同平台提交时互相刷换行。
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary
