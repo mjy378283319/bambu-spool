@@ -640,9 +640,10 @@ function markActivePreset() {
   });
 }
 
-function openSpoolDialog(spool) {
+function openSpoolDialog(spool, forceNew) {
   S.dialogSpool = spool || null;
-  const isEdit = !!spool;
+  // forceNew：表单预填了某盘料的参数，但目的是新增（例如图片识色匹配到的色卡）
+  const isEdit = !!spool && !forceNew;
   const value = spool || {
     brand: "", material: "", color_name: "黑色", color_hex: "#1A1A1A",
     spool_weight: 250, initial_weight: 1000, location: "", note: "", name: "",
@@ -1262,6 +1263,552 @@ async function toggleDevice(printerId, enabled) {
 }
 
 /* ── WebSocket ─────────────────────────────────────────── */
+/* ── 图片识色 ───────────────────────────────────────────
+   图像本身在浏览器里处理（Canvas 主色聚类 + 吸管），只把最终几个 HEX
+   发给后端做配色匹配。好处：容器不用图像库、上传流量小、可以交互式调色。
+   色差统一用 CIEDE2000，比 RGB 欧氏距离更贴近人眼判断。         */
+
+const CF = {
+  img: null,        // 已解码的原图
+  palette: [],      // [{hex, weight}]
+  result: null,     // 上一次匹配结果，渲染时按索引取用（避免把中文塞进 onclick）
+  catalogTotal: 0,
+  busy: false,
+};
+
+function cfRgb(hex) {
+  const v = String(hex || "").replace("#", "");
+  if (v.length !== 6) return [0, 0, 0];
+  return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+}
+
+function cfHexOf(rgb, alpha) {
+  const body = rgb.map((v) => Math.max(0, Math.min(255, Math.round(v)))
+    .toString(16).padStart(2, "0")).join("");
+  return "#" + (alpha === undefined ? body : body + alpha).toUpperCase();
+}
+
+function cfDist2(a, b) {
+  const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+  return dr * dr + dg * dg + db * db;
+}
+
+function cfLevelClass(level) {
+  if (level === "几乎一致" || level === "同色") return "lv-ok";
+  if (level === "非常接近" || level === "接近") return "lv-info";
+  if (level === "略有差异") return "lv-warn";
+  return "lv-far";
+}
+
+function openColorFinder() {
+  CF.img = null;
+  CF.palette = [];
+  CF.result = null;
+  CF.busy = false;
+
+  const materials = (S.catalog.materials || []).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  const brands = (S.catalog.brands || []).map((b) => `<option value="${esc(b)}">${esc(b)}</option>`).join("");
+
+  openModal("图片识色 · 找同色耗材", `
+    <div class="cf-grid">
+      <div>
+        <div class="cf-drop" id="cfDrop">
+          <input type="file" id="cfFile" accept="image/*" hidden />
+          <div class="cf-drop-inner" id="cfDropInner">
+            <div class="cf-drop-icon"></div>
+            <div><b>把图片拖到这里</b></div>
+            <div class="small muted">或 <a href="#" onclick="cfBrowse();return false">选择文件</a>，也可以直接 Ctrl+V 粘贴</div>
+            <div class="small muted">手机端支持直接拍照</div>
+          </div>
+          <canvas id="cfCanvas" class="hidden" onclick="cfPick(event)"></canvas>
+        </div>
+        <div class="cf-tools">
+          <button class="sm" onclick="cfBrowse()">选择图片</button>
+          <button class="sm" id="cfAgain" onclick="cfExtract()" disabled>重新识别主色</button>
+          <button class="sm hidden" id="cfReset" onclick="cfResetImage()">换一张</button>
+        </div>
+        <div class="small muted" id="cfHint">点击图片上任意位置，可以精确吸取那一块的颜色。</div>
+      </div>
+
+      <div>
+        <div class="cf-title">识别到的颜色 <span class="count" id="cfPaletteCount"></span>
+          <span class="spacer"></span>
+          <button class="sm" onclick="cfAddManual()">手动加色</button>
+        </div>
+        <div class="cf-palette" id="cfPalette"></div>
+
+        <div class="field-row">
+          <label class="field"><span>材料</span>
+            <select id="cfMaterial"><option value="">全部材料</option>${materials}</select></label>
+          <label class="field"><span>品牌</span>
+            <select id="cfBrand"><option value="">全部品牌</option>${brands}</select></label>
+        </div>
+        <label class="field"><span>匹配范围</span>
+          <select id="cfScope">
+            <option value="both">库里的料 + 品牌色卡</option>
+            <option value="inventory">只看库里已有的料</option>
+            <option value="catalog">只看品牌色卡</option>
+          </select></label>
+        <label class="field"><span>色差上限 <b id="cfThresholdLabel">ΔE ≤ 12</b></span>
+          <input type="range" id="cfThreshold" min="2" max="30" step="1" value="12"
+                 oninput="cfThresholdLabel()" /></label>
+
+        <button class="primary" id="cfRun" onclick="cfRunMatch()" style="width:100%">开始匹配</button>
+      </div>
+    </div>
+    <div id="cfResult" class="cf-result"></div>
+  `, '<button onclick="closeModal()">关闭</button>', true);
+
+  const drop = document.getElementById("cfDrop");
+  drop.addEventListener("dragover", (ev) => { ev.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    drop.classList.remove("over");
+    const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (file) cfLoadFile(file);
+  });
+  document.getElementById("cfFile").addEventListener("change", (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (file) cfLoadFile(file);
+  });
+  cfRenderPalette();
+}
+
+function cfBrowse() {
+  const input = document.getElementById("cfFile");
+  if (input) input.click();
+}
+
+function cfThresholdLabel() {
+  const el = document.getElementById("cfThreshold");
+  const label = document.getElementById("cfThresholdLabel");
+  if (el && label) label.textContent = "ΔE ≤ " + el.value;
+}
+
+function cfResetImage() {
+  CF.img = null;
+  CF.palette = [];
+  CF.result = null;
+  const canvas = document.getElementById("cfCanvas");
+  const inner = document.getElementById("cfDropInner");
+  if (canvas) { canvas.classList.add("hidden"); canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); }
+  if (inner) inner.classList.remove("hidden");
+  document.getElementById("cfAgain").disabled = true;
+  document.getElementById("cfReset").classList.add("hidden");
+  document.getElementById("cfResult").innerHTML = "";
+  cfRenderPalette();
+}
+
+function cfLoadFile(file) {
+  if (!file || !/^image\//.test(file.type || "")) { toast("请选择图片文件", "err"); return; }
+  if (file.size > 16 * 1024 * 1024) { toast("图片超过 16MB，请先压缩一下", "err"); return; }
+  const reader = new FileReader();
+  reader.onerror = () => toast("读取图片失败", "err");
+  reader.onload = () => {
+    const image = new Image();
+    image.onerror = () => toast("这个图片格式浏览器打不开", "err");
+    image.onload = () => {
+      CF.img = image;
+      cfDrawImage();
+      cfExtract();
+    };
+    // 用 dataURL 而不是 createObjectURL：现代浏览器会按 EXIF 自动摆正手机照片
+    image.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function cfDrawImage() {
+  const canvas = document.getElementById("cfCanvas");
+  const inner = document.getElementById("cfDropInner");
+  if (!canvas || !CF.img) return;
+  // 预览按比例缩放到框内，坐标换算时用 canvas 的像素尺寸做基准
+  const scale = Math.min(1, 560 / CF.img.width, 380 / CF.img.height);
+  canvas.width = Math.max(1, Math.round(CF.img.width * scale));
+  canvas.height = Math.max(1, Math.round(CF.img.height * scale));
+  canvas.getContext("2d").drawImage(CF.img, 0, 0, canvas.width, canvas.height);
+  canvas.classList.remove("hidden");
+  if (inner) inner.classList.add("hidden");
+  document.getElementById("cfAgain").disabled = false;
+  document.getElementById("cfReset").classList.remove("hidden");
+}
+
+/* 主色提取：先用边框像素估背景色并剔除，再在最远点初始化的 k-means 上聚类。
+   纯 RGB 距离够用了——这一步只决定「哪些像素算一块」，精确色差交给后端。 */
+function cfExtract() {
+  if (!CF.img) return;
+  const MAX = 140;
+  const scale = Math.min(1, MAX / CF.img.width, MAX / CF.img.height);
+  const w = Math.max(1, Math.round(CF.img.width * scale));
+  const h = Math.max(1, Math.round(CF.img.height * scale));
+
+  const work = document.createElement("canvas");
+  work.width = w;
+  work.height = h;
+  const ctx = work.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(CF.img, 0, 0, w, h);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch (err) {
+    toast("无法读取图片像素", "err");
+    return;
+  }
+
+  const pixels = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue;                          // 透明像素
+    pixels.push([data[i], data[i + 1], data[i + 2]]);
+  }
+  if (!pixels.length) { toast("这张图没有可用像素", "err"); return; }
+
+  // 背景色 = 最外两圈像素的中位数
+  const border = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x > 1 && x < w - 2 && y > 1 && y < h - 2) continue;
+      const i = (y * w + x) * 4;
+      if (data[i + 3] < 200) continue;
+      border.push([data[i], data[i + 1], data[i + 2]]);
+    }
+  }
+  let bg = null;
+  if (border.length >= 20) {
+    const mid = (arr) => { const s = arr.slice().sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+    bg = [mid(border.map((p) => p[0])), mid(border.map((p) => p[1])), mid(border.map((p) => p[2]))];
+  }
+
+  let subject = bg ? pixels.filter((p) => cfDist2(p, bg) > 34 * 34) : pixels;
+  // 主体几乎占满画面时背景估计会失灵，那就别剔了
+  if (subject.length < pixels.length * 0.12) subject = pixels;
+  // 采样上限，保证手机上也够快
+  if (subject.length > 12000) {
+    const stride = Math.ceil(subject.length / 12000);
+    subject = subject.filter((_, i) => i % stride === 0);
+  }
+
+  const clusters = cfKmeans(subject, 6, 12);
+  CF.palette = clusters.map((c) => ({ hex: cfHexOf(c.rgb), weight: c.weight }));
+  CF.result = null;
+  document.getElementById("cfResult").innerHTML = "";
+  cfRenderPalette();
+}
+
+function cfKmeans(pixels, k, rounds) {
+  if (!pixels.length) return [];
+  const mean = [0, 0, 0];
+  pixels.forEach((p) => { mean[0] += p[0]; mean[1] += p[1]; mean[2] += p[2]; });
+  mean[0] /= pixels.length; mean[1] /= pixels.length; mean[2] /= pixels.length;
+
+  // 最远点采样初始化：结果是确定的，同一张图不会每次跳色
+  let far = -1, farD = -1;
+  pixels.forEach((p, i) => { const d = cfDist2(p, mean); if (d > farD) { farD = d; far = i; } });
+  const centroids = [pixels[far].slice()];
+  while (centroids.length < k) {
+    let best = 0, bestD = -1;
+    pixels.forEach((p, i) => {
+      let d = Infinity;
+      centroids.forEach((c) => { const dd = cfDist2(p, c); if (dd < d) d = dd; });
+      if (d > bestD) { bestD = d; best = i; }
+    });
+    if (bestD <= 0) break;
+    centroids.push(pixels[best].slice());
+  }
+
+  const assign = new Array(pixels.length).fill(0);
+  for (let round = 0; round < rounds; round++) {
+    let moved = false;
+    for (let i = 0; i < pixels.length; i++) {
+      let best = 0, bestD = Infinity;
+      for (let c = 0; c < centroids.length; c++) {
+        const d = cfDist2(pixels[i], centroids[c]);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      if (assign[i] !== best) { assign[i] = best; moved = true; }
+    }
+    const sums = centroids.map(() => [0, 0, 0, 0]);
+    for (let i = 0; i < pixels.length; i++) {
+      const s = sums[assign[i]];
+      s[0] += pixels[i][0]; s[1] += pixels[i][1]; s[2] += pixels[i][2]; s[3] += 1;
+    }
+    for (let c = 0; c < centroids.length; c++) {
+      if (sums[c][3]) centroids[c] = [sums[c][0] / sums[c][3], sums[c][1] / sums[c][3], sums[c][2] / sums[c][3]];
+    }
+    if (!moved && round > 0) break;
+  }
+
+  const counts = centroids.map(() => 0);
+  pixels.forEach((p, i) => { counts[assign[i]] += 1; });
+  return centroids
+    .map((c, i) => ({ rgb: c, count: counts[i] }))
+    .filter((c) => c.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .map((c) => ({ rgb: c.rgb, weight: c.count / pixels.length }));
+}
+
+/* 吸管：取点击处 5×5 的平均色 */
+function cfPick(ev) {
+  if (!CF.img) return;
+  const canvas = document.getElementById("cfCanvas");
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.round((ev.clientX - rect.left) / rect.width * canvas.width);
+  const y = Math.round((ev.clientY - rect.top) / rect.height * canvas.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const r = 2;
+  const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
+  const w = Math.min(canvas.width - x0, r * 2 + 1);
+  const h = Math.min(canvas.height - y0, r * 2 + 1);
+  if (w <= 0 || h <= 0) return;
+  const data = ctx.getImageData(x0, y0, w, h).data;
+  let sum = [0, 0, 0], n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue;
+    sum[0] += data[i]; sum[1] += data[i + 1]; sum[2] += data[i + 2]; n++;
+  }
+  if (!n) return;
+  const hex = cfHexOf(sum.map((v) => v / n));
+  cfAddHex(hex, "吸管取色");
+}
+
+function cfAddHex(hex, label) {
+  const norm = String(hex || "").toUpperCase();
+  if (!/^#[0-9A-F]{6}$/.test(norm)) return;
+  const hit = CF.palette.find((c) => c.hex === norm);
+  if (hit) {
+    hit.weight = Math.min(1, hit.weight + 0.12);
+    toast(`${norm} 权重已调高`, "ok");
+  } else {
+    CF.palette.push({ hex: norm, weight: 0.2, manual: true });
+    if (label) toast(`${label}：${norm}`, "ok");
+  }
+  cfRenderPalette();
+}
+
+function cfAddManual() {
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = "#888888";
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.addEventListener("input", () => cfAddHex(input.value));
+  input.addEventListener("change", () => input.remove());
+  input.click();
+}
+
+function cfRemoveColor(index) {
+  CF.palette.splice(index, 1);
+  cfRenderPalette();
+}
+
+function cfRenderPalette() {
+  const box = document.getElementById("cfPalette");
+  const count = document.getElementById("cfPaletteCount");
+  if (!box) return;
+  if (!CF.palette.length) {
+    box.innerHTML = '<div class="cf-empty small">还没有颜色。拖一张图片进来，或点「手动加色」。</div>';
+    if (count) count.textContent = "";
+    return;
+  }
+  const total = CF.palette.reduce((sum, c) => sum + c.weight, 0) || 1;
+  box.innerHTML = CF.palette.map((c, i) => `
+    <div class="cf-chip">
+      <span class="cf-swatch" style="background:${esc(c.hex)}"></span>
+      <span class="cf-chip-hex">${esc(c.hex)}</span>
+      <span class="cf-chip-weight">${Math.round((c.weight / total) * 100)}%</span>
+      <button class="cf-chip-x" title="移除" onclick="cfRemoveColor(${i})">×</button>
+    </div>`).join("");
+  if (count) count.textContent = CF.palette.length + " 色";
+}
+
+async function cfRunMatch() {
+  if (CF.busy) return;
+  if (!CF.palette.length) { toast("先取一个颜色吧", "err"); return; }
+  const button = document.getElementById("cfRun");
+  CF.busy = true;
+  if (button) { button.disabled = true; button.textContent = "匹配中…"; }
+  try {
+    const data = await api("/api/color/match", {
+      method: "POST",
+      body: JSON.stringify({
+        colors: CF.palette.map((c) => ({ hex: c.hex, weight: c.weight })),
+        material: document.getElementById("cfMaterial").value,
+        brands: document.getElementById("cfBrand").value ? [document.getElementById("cfBrand").value] : [],
+        scope: document.getElementById("cfScope").value,
+        max_delta_e: parseFloat(document.getElementById("cfThreshold").value),
+        limit: 5,
+      }),
+    });
+    CF.result = data;
+    CF.catalogTotal = (data.catalog || {}).total || 0;
+    cfRenderResult();
+  } catch (err) {
+    toast(err.message, "err");
+  } finally {
+    CF.busy = false;
+    if (button) { button.disabled = false; button.textContent = "开始匹配"; }
+  }
+}
+
+function cfRenderResult() {
+  const box = document.getElementById("cfResult");
+  if (!box || !CF.result) return;
+  const colors = CF.result.colors || [];
+  const scope = CF.result.filters.scope;
+  const total = CF.catalogTotal;
+
+  if (!colors.length) {
+    box.innerHTML = '<div class="cf-empty">没有可匹配的颜色。</div>';
+    return;
+  }
+
+  box.innerHTML = colors.map((color, ci) => {
+    const head = `
+      <div class="cf-result-head">
+        <span class="cf-swatch lg" style="background:${esc(color.hex)}"></span>
+        <div>
+          <div class="cf-hit-name">${esc(color.hex)}</div>
+          <div class="cf-hit-sub">占画面 ${Math.round(color.weight * 100)}%${
+            (color.brands || []).length ? " · 最接近 " + esc(color.brands[0].brand) : ""}</div>
+        </div>
+      </div>`;
+
+    const inv = color.inventory;
+    const cat = color.catalog;
+
+    const invCol = scope === "catalog" ? "" : `
+      <div class="cf-col">
+        <div class="cf-col-title">库里的料 <span class="count">${
+          inv ? (inv.length || "0") : "—"}</span></div>
+        ${cfRenderInventory(color, ci)}
+      </div>`;
+
+    const catCol = scope === "inventory" ? "" : `
+      <div class="cf-col">
+        <div class="cf-col-title">品牌色卡 <span class="count">${
+          cat ? cat.length : 0}</span><span class="cf-col-note">${total} 色参与比对</span></div>
+        ${cfRenderCatalog(color, ci)}
+      </div>`;
+
+    return `
+      <div class="cf-result-block">
+        ${head}
+        <div class="cf-cols">${invCol}${catCol}</div>
+        ${cfRenderBrands(color, ci)}
+      </div>`;
+  }).join("");
+}
+
+function cfRenderInventory(color, ci) {
+  const list = color.inventory;
+  if (!list) return "";
+  if (!list.length) {
+    const near = color.nearest_inventory;
+    return `<div class="cf-empty small">库里没有色差在阈值内的料。${
+      near ? `最接近的是「${esc(near.name)}」ΔE ${near.delta_e}（差异明显）。` : ""}</div>`;
+  }
+  return list.map((hit) => `
+    <div class="cf-hit">
+      <span class="cf-swatch" style="background:${esc(hit.hex)}"></span>
+      <div class="cf-hit-main">
+        <div class="cf-hit-name">${esc(hit.name || hit.color_name)}${hit.is_low
+          ? ' <span class="tag red">余量不足</span>' : ""}</div>
+        <div class="cf-hit-sub">${esc(hit.brand)} · ${esc(hit.material)} · ${esc(hit.hex)}
+          · 余 ${hit.remaining_weight} g（${hit.remaining_percent}%）${
+          hit.location ? " · " + esc(hit.location) : ""}</div>
+      </div>
+      <div class="cf-hit-de">
+        <span class="cf-de">ΔE ${hit.delta_e}</span>
+        <span class="cf-level ${cfLevelClass(hit.level)}">${esc(hit.level)}</span>
+      </div>
+      <button class="sm" onclick="cfOpenSpool(${hit.spool_id})">查看</button>
+    </div>`).join("");
+}
+
+function cfRenderCatalog(color, ci) {
+  const list = color.catalog;
+  if (!list) return "";
+  if (!list.length) {
+    const near = color.nearest_catalog;
+    return `<div class="cf-empty small">没有色差在阈值内的官方色。${
+      near ? `最接近的是 ${esc(near.brand)}「${esc(near.name)}」ΔE ${near.delta_e}，可以把阈值放宽再试。` : ""}</div>`;
+  }
+  return list.map((hit, hi) => `
+    <div class="cf-hit">
+      <span class="cf-swatch" style="background:${esc(hit.hex)}"></span>
+      <div class="cf-hit-main">
+        <div class="cf-hit-name">${esc(hit.name)}${hit.en ? ` <span class="muted small">${esc(hit.en)}</span>` : ""}${
+          hit.official ? "" : ' <span class="tag amber">色值近似</span>'}</div>
+        <div class="cf-hit-sub">${esc(hit.brand)} · ${esc(hit.series)} · ${esc(hit.hex)}</div>
+      </div>
+      <div class="cf-hit-de">
+        <span class="cf-de">ΔE ${hit.delta_e}</span>
+        <span class="cf-level ${cfLevelClass(hit.level)}">${esc(hit.level)}</span>
+      </div>
+      <button class="sm" onclick="cfNewSpool(${ci}, ${hi})">建料盘</button>
+    </div>`).join("");
+}
+
+function cfRenderBrands(color, ci) {
+  const brands = color.brands || [];
+  if (brands.length < 2) return "";
+  return `
+    <div class="cf-brands">
+      <span class="small muted">换个品牌的等价色：</span>
+      ${brands.map((b) => `<span class="cf-brand-chip lv-${cfLevelClass(b.level).slice(3)}">
+        <i style="background:${esc(b.hex)}"></i>${esc(b.brand)} · ${esc(b.name)}
+        <b>ΔE ${b.delta_e}</b></span>`).join("")}
+    </div>`;
+}
+
+function cfOpenSpool(spoolId) {
+  closeModal();
+  openSpoolDetail(spoolId);
+}
+
+function cfNewSpool(colorIndex, hitIndex) {
+  const color = (CF.result && CF.result.colors || [])[colorIndex];
+  const hit = color && (color.catalog || [])[hitIndex];
+  if (!hit) return;
+  const material = materialForSeries(hit.series);
+  const weights = (S.catalog.spool_weights || {})[hit.brand] || [];
+  closeModal();
+  openSpoolDialog({
+    brand: hit.brand,
+    material: material,
+    color_name: hit.name,
+    color_hex: hit.hex,
+    spool_weight: weights[0] || 200,
+    initial_weight: 1000,
+    location: "",
+    note: "由图片识色添加（" + hit.hex + "）",
+    name: "",
+  }, true);
+}
+
+/* 色卡系列名反推材料：优先精确命中，再退回前缀匹配 */
+function materialForSeries(series) {
+  const map = S.catalog.material_color_series || {};
+  for (const material of Object.keys(map)) {
+    if ((map[material] || []).includes(series)) return material;
+  }
+  return "";
+}
+
+/* 粘贴图片：全局只挂一次，模态不在时直接忽略 */
+document.addEventListener("paste", (ev) => {
+  if (!document.getElementById("cfDrop")) return;
+  const items = (ev.clipboardData && ev.clipboardData.items) || [];
+  for (const item of items) {
+    if (item.kind === "file" && /^image\//.test(item.type)) {
+      const file = item.getAsFile();
+      if (file) { ev.preventDefault(); cfLoadFile(file); }
+      return;
+    }
+  }
+});
+
 function connectSocket() {
   if (S.socket) { try { S.socket.close(); } catch (e) { /* 忽略 */ } }
   const proto = location.protocol === "https:" ? "wss" : "ws";

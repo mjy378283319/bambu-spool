@@ -37,6 +37,13 @@ from ..catalog import (
     normalize_color,
     spool_weight_options,
 )
+from ..colors import (
+    catalog_index,
+    match_catalog,
+    match_inventory,
+    recommend_brands,
+    resolve_colors,
+)
 from ..config import settings
 from ..core.deduction import apply_deduction, build_usages, load_usages, resolve_spools
 from ..core.hub import hub
@@ -939,6 +946,110 @@ def catalog() -> dict:
         "material_color_series": MATERIAL_COLOR_SERIES,
         "spool_weights": {b: spool_weight_options(b) for b in BRAND_PRESETS},
         "model_codes": MODEL_CODE_TO_NAME,
+    }
+
+
+# ══ 图片识色：配色匹配 ═══════════════════════════════════════
+class ColorQuery(BaseModel):
+    hex: str = ""
+    weight: float = 1.0
+
+
+class ColorMatchPayload(BaseModel):
+    # 既接受 ["#3A7D44", ...]，也接受 [{"hex": "...", "weight": 0.4}, ...]
+    colors: list[ColorQuery | str] = []
+    material: str = ""
+    brands: list[str] = []
+    # both / catalog / inventory
+    scope: str = "both"
+    limit: int = 5
+    # 超过这个 ΔE00 就不算「接近」；界面上的灰字提示用得到
+    max_delta_e: float = 12.0
+    include_archived: bool = False
+
+
+@router.post("/api/color/match")
+def color_match(
+    payload: ColorMatchPayload, session: Session = Depends(get_session)
+) -> dict:
+    """把一组颜色（通常来自图片识色）匹配到品牌色卡与自家料盘。
+
+    图像的主色提取在前端完成（Canvas），这里只管配色比对——所以容器不需要
+    任何图像处理依赖，而且客户端还能是脚本或 Home Assistant 之类。
+    """
+    queries = resolve_colors(payload.colors)
+    if not queries:
+        raise HTTPException(status_code=400, detail="没有可用的颜色，请检查传入的色值")
+
+    scope = payload.scope if payload.scope in ("both", "catalog", "inventory") else "both"
+    limit = max(1, min(int(payload.limit or 5), 20))
+    threshold = max(0.5, min(float(payload.max_delta_e or 12.0), 60.0))
+    brands = payload.brands or []
+
+    spools: list[Spool] = []
+    if scope in ("both", "inventory"):
+        spools = list(session.exec(select(Spool)).all())
+
+    results = []
+    for query in queries:
+        item: dict = {"hex": query["hex"], "weight": query["weight"], "lab": query["lab"]}
+
+        if scope in ("both", "catalog"):
+            matches = match_catalog(
+                query["hex"], payload.material, brands, limit=limit, max_delta_e=threshold
+            )
+            item["catalog"] = matches
+            item["brands"] = recommend_brands(matches)
+            if not matches:
+                # 全都不在阈值内时，也给一个「最接近的」用于兜底提示
+                nearest = match_catalog(
+                    query["hex"], payload.material, brands, limit=1, max_delta_e=100.0
+                )
+                item["nearest_catalog"] = nearest[0] if nearest else None
+
+        if scope in ("both", "inventory"):
+            inventory = match_inventory(
+                query["hex"],
+                spools,
+                payload.material,
+                brands,
+                limit=limit,
+                max_delta_e=threshold,
+                include_archived=payload.include_archived,
+            )
+            item["inventory"] = inventory
+            if not inventory:
+                nearest = match_inventory(
+                    query["hex"],
+                    spools,
+                    payload.material,
+                    brands,
+                    limit=1,
+                    max_delta_e=100.0,
+                    include_archived=payload.include_archived,
+                )
+                item["nearest_inventory"] = nearest[0] if nearest else None
+
+        results.append(item)
+
+    all_entries = catalog_index().get("*", [])
+    by_brand: dict[str, int] = {}
+    for entry in all_entries:
+        by_brand[entry["brand"]] = by_brand.get(entry["brand"], 0) + 1
+
+    return {
+        "colors": results,
+        "filters": {
+            "material": payload.material,
+            "brands": brands,
+            "scope": scope,
+            "max_delta_e": threshold,
+        },
+        "catalog": {
+            "total": len(all_entries),
+            "by_brand": dict(sorted(by_brand.items(), key=lambda kv: -kv[1])),
+        },
+        "spool_count": len(spools),
     }
 
 

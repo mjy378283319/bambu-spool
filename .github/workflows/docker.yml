@@ -28,6 +28,12 @@ jobs:
       - name: 运行流程自测
         run: python tests/test_flow.py
 
+      - name: 运行配色匹配自测
+        run: python tests/test_color.py
+
+      - name: 运行访问控制自测
+        run: python tests/test_auth.py
+
   build:
     name: 构建并推送镜像
     runs-on: ubuntu-latest
