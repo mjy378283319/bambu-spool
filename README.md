@@ -21,6 +21,13 @@
 
 全程不需要手动记账。
 
+录入料盘时还内置了**品牌配色卡**：选 Polymaker 会按材料带出
+Panchroma™ PLA（28 色）、Panchroma™ 哑光 PLA（52 色）、Polymaker™ PETG（24 色）
+的官方色号；Kexcelled（K5 PLA 51 色 / PLA 哑光 55 色 / PETG 52 色 / PETG 哑光 22 色）、
+兰博（13 个 PLA 系列 + 2 个 PETG 系列）、魔创（8 个系列 152 色：PLA / PLA 哑光 / PLA+ /
+HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）也已内置。点色块直接填名称和色值；
+无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部取自官方产品图）会标注为近似值。
+
 ## 架构与数据来源
 
 ```

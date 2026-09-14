@@ -154,6 +154,33 @@ label.field > span { display: block; font-size: 12.5px; color: var(--text-2); ma
   border: 1px solid rgba(0,0,0,.12);
 }
 
+/* ── 品牌官方色卡选择器 ─────────────────────────────── */
+.preset-color-box { margin-bottom: 11px; }
+.preset-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 5px;
+}
+.preset-title { font-size: 12.5px; color: var(--text-2); }
+.preset-count { font-size: 11.5px; color: var(--text-3); }
+.preset-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
+  gap: 5px; max-height: 128px; overflow-y: auto; padding: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.preset-chip {
+  width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; padding: 0;
+  border: 1px solid rgba(0,0,0,.16); cursor: pointer; position: relative;
+  transition: transform .08s ease;
+}
+.preset-chip:hover { transform: scale(1.14); }
+.preset-chip.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.preset-chip.approx::after {
+  content: ""; position: absolute; right: -2px; bottom: -2px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--text-3);
+}
+
 /* ── 打印机卡片 ─────────────────────────────────────── */
 .printer-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
 .printer-head h3 { margin: 0; font-size: 15px; font-weight: 500; }

@@ -6,7 +6,7 @@ const S = {
   printers_full: [],
   spools: [],
   jobs: [],
-  catalog: { brands: [], materials: [], colors: [], spool_weights: {} },
+  catalog: { brands: [], materials: [], colors: [], color_series: {}, material_color_series: {}, spool_weights: {} },
   bindings: [],
   view: "dashboard",
   socket: null,
@@ -555,6 +555,91 @@ async function editCurrentSpool(id) {
   openSpoolDialog(spool);
 }
 
+/* ── 品牌官方色卡（如 Polymaker Panchroma / PETG） ─────── */
+function presetGroupsFor(brand, material) {
+  const all = S.catalog.color_series || {};
+  const seriesMap = all[brand];
+  if (!seriesMap) return [];
+  const map = S.catalog.material_color_series || {};
+  const mat = (material || "").toUpperCase();
+  const groups = [];
+  Object.keys(map).forEach((key) => {
+    if (!mat.startsWith(key)) return;
+    (map[key] || []).forEach((name) => {
+      const colors = seriesMap[name];
+      if (colors && colors.length) groups.push({ series: name, colors });
+    });
+  });
+  return groups;
+}
+
+function renderColorPresets() {
+  const brandEl = document.getElementById("f_brand");
+  const matEl = document.getElementById("f_material");
+  const box = document.getElementById("colorPresets");
+  const list = document.getElementById("colorList");
+  if (!brandEl || !matEl || !box || !list) return;
+
+  const groups = presetGroupsFor(brandEl.value, matEl.value);
+  if (!groups.length) {
+    box.innerHTML = "";
+    list.innerHTML = (S.catalog.colors || [])
+      .map((c) => `<option value="${esc(c.name)}">`).join("");
+    S._presetIndex = {};
+    return;
+  }
+
+  const index = {};
+  box.innerHTML = groups.map((g) => `
+    <div class="preset-color-box">
+      <div class="preset-head">
+        <span class="preset-title">${esc(g.series)} 色卡</span>
+        <span class="preset-count">${g.colors.length} 色 · 点色块直接选用</span>
+      </div>
+      <div class="preset-grid">${g.colors.map((c) => {
+        index[c.name] = c.hex;
+        if (c.en) index[c.en] = c.hex;
+        const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}${c.official ? "" : "（色值为近似）"}`;
+        return `<button type="button" class="preset-chip${c.official ? "" : " approx"}"
+          data-hex="${esc(c.hex)}" style="background:${esc(c.hex)}" title="${esc(tip)}"
+          onclick="pickPresetColor('${esc(c.hex)}', '${esc(c.name)}')"></button>`;
+      }).join("")}</div>
+    </div>`).join("");
+
+  list.innerHTML = groups.flatMap((g) => g.colors)
+    .map((c) => `<option value="${esc(c.name)}" label="${esc(c.en || "")}"></option>`).join("");
+
+  S._presetIndex = index;
+  markActivePreset();
+}
+
+function pickPresetColor(hex, name) {
+  const nameEl = document.getElementById("f_color_name");
+  const hexEl = document.getElementById("f_color_hex");
+  if (nameEl) nameEl.value = name;
+  if (hexEl) hexEl.value = hex;
+  markActivePreset();
+}
+
+function onColorNameInput() {
+  const nameEl = document.getElementById("f_color_name");
+  const hexEl = document.getElementById("f_color_hex");
+  if (!nameEl || !hexEl) return;
+  const hit = (S._presetIndex || {})[nameEl.value.trim()];
+  if (hit) hexEl.value = hit;
+  markActivePreset();
+}
+
+function markActivePreset() {
+  const hexEl = document.getElementById("f_color_hex");
+  if (!hexEl) return;
+  const cur = (hexEl.value || "").toUpperCase();
+  document.querySelectorAll(".preset-chip").forEach((el) => {
+    const hex = (el.getAttribute("data-hex") || "").toUpperCase();
+    el.classList.toggle("active", hex === cur);
+  });
+}
+
 function openSpoolDialog(spool) {
   S.dialogSpool = spool || null;
   const isEdit = !!spool;
@@ -569,17 +654,18 @@ function openSpoolDialog(spool) {
 
   openModal(isEdit ? "编辑料盘" : "新增料盘", `
     <label class="field"><span>品牌</span>
-      <select id="f_brand">${brandOptions}</select></label>
+      <select id="f_brand" onchange="renderColorPresets()">${brandOptions}</select></label>
     <div class="field-row">
-      <label class="field"><span>材料</span><select id="f_material">${materialOptions}</select></label>
+      <label class="field"><span>材料</span><select id="f_material" onchange="renderColorPresets()">${materialOptions}</select></label>
       <label class="field"><span>颜色名称</span>
-        <input id="f_color_name" list="colorList" value="${esc(value.color_name)}" />
+        <input id="f_color_name" list="colorList" value="${esc(value.color_name)}" oninput="onColorNameInput()" />
         <datalist id="colorList">${S.catalog.colors.map((c) => `<option value="${esc(c.name)}">`).join("")}</datalist>
       </label>
     </div>
+    <div id="colorPresets"></div>
     <div class="field-row">
       <label class="field"><span>颜色</span>
-        <input type="color" id="f_color_hex" value="${esc(value.color_hex)}" style="height:34px;padding:2px" /></label>
+        <input type="color" id="f_color_hex" value="${esc(value.color_hex)}" style="height:34px;padding:2px" oninput="markActivePreset()" /></label>
       <label class="field"><span>空盘皮重（g）</span>
         <input type="number" id="f_spool_weight" value="${value.spool_weight}" step="1" /></label>
     </div>
@@ -595,6 +681,7 @@ function openSpoolDialog(spool) {
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
+  renderColorPresets();
 }
 
 async function saveSpool(id) {

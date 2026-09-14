@@ -26,8 +26,10 @@ from ..auth import (
     token_from_request,
 )
 from ..catalog import (
+    BRAND_COLOR_SERIES,
     BRAND_PRESETS,
     COLOR_PRESETS,
+    MATERIAL_COLOR_SERIES,
     MATERIALS,
     MODEL_CODE_TO_NAME,
     build_spool_name,
@@ -933,6 +935,8 @@ def catalog() -> dict:
         "brands": BRAND_PRESETS,
         "materials": MATERIALS,
         "colors": COLOR_PRESETS,
+        "color_series": BRAND_COLOR_SERIES,
+        "material_color_series": MATERIAL_COLOR_SERIES,
         "spool_weights": {b: spool_weight_options(b) for b in BRAND_PRESETS},
         "model_codes": MODEL_CODE_TO_NAME,
     }

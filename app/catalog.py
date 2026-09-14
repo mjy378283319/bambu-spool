@@ -103,7 +103,7 @@ def hms_text(attr: int, code: int) -> str:
 
 # ── 材料与皮重 ─────────────────────────────────────────────────
 MATERIALS = [
-    "PLA", "PLA-CF", "PLA-AERO", "PETG", "PETG-CF", "ABS", "ASA", "ASA-CF",
+    "PLA", "PLA-CF", "PLA-AERO", "PETG", "PETG-CF", "PETG-HT", "ABS", "ASA", "ASA-CF",
     "PC", "PA", "PA-CF", "PA6-CF", "PAHT-CF", "TPU", "TPU-AMS", "PVA", "BVOH",
     "HIPS", "PPS", "PPS-CF", "PPA-CF", "PP", "PCTG", "PE", "EVA", "PHA", "其他",
 ]
@@ -114,9 +114,12 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "Bambu Lab": [250.0, 190.0],      # 塑料盘 250g / 可重复使用盘 190g
     "拓竹": [250.0, 190.0],
     "eSUN 易生": [230.0, 200.0],
-    "Polymaker": [220.0],
+    "Polymaker": [140.0, 220.0],      # 纸盘 140±7g（官方，PolyTerra/PolyLite 1kg）/ 旧塑料盘 220g
+    "大简": [200.0, 150.0],            # 塑料盘约 200g / 纸盘约 150g（估算，建议用称重校准修正）
     "爱丽兹 Allizz": [200.0],
     "Kexcelled": [240.0],
+    "兰博": [200.0],                   # 官网未公布空盘重量，估算值，建议称重校准
+    "魔创": [200.0],                   # 官网未公布空盘重量，估算值，建议称重校准
     "三绿 Sunlu": [180.0, 200.0],
     "创想三维 Creality": [200.0],
     "JAYO": [180.0],
@@ -151,6 +154,174 @@ COLOR_PRESETS: list[dict[str, str]] = [
 
 def spool_weight_options(brand: str) -> list[float]:
     return BRAND_SPOOL_WEIGHTS.get(brand, [])
+
+
+# ── 品牌专属配色预设 ────────────────────────────────────────────
+# 数据来源：Polymaker 官方站点（us.polymaker.com / eu-wholesale.polymaker.com）
+# 商品页的色卡。official=True 表示 HEX 直接取自官方页面；False 表示官方仅公布
+# 色名、该 HEX 是按色名推断的近似值（界面会加角标提示）。
+def _c(name: str, en: str, hex_value: str, official: bool = True) -> dict:
+    return {"name": name, "en": en, "hex": hex_value, "official": official}
+
+
+# Panchroma™ Basic PLA（US 商品页 28 色）
+POLYMAKER_PANCHROMA_PLA: list[dict] = [
+    _c("黑色", "Black", "#080A0D"),
+    _c("白色", "White", "#EBF7FF"),
+    _c("冷白", "Cold White", "#D9DFE5"),
+    _c("红色", "Red", "#E72F1D"),
+    _c("橙色", "Orange", "#F67405"),
+    _c("品红", "Magenta", "#F24574"),
+    _c("粉色", "Pink", "#F1A1AF"),
+    _c("酒红", "Wine Red", "#D60212"),
+    _c("柠檬黄", "Lemon Yellow", "#EED230"),
+    _c("黄色", "Yellow", "#FFE800"),
+    _c("奶油白", "Cream", "#EED1A8"),
+    _c("米色", "Beige", "#C2AB72"),
+    _c("棕褐", "Tan", "#A79E82"),
+    _c("棕色", "Brown", "#55331A"),
+    _c("绿色", "Green", "#06924D"),
+    _c("青柠绿", "Lime Green", "#D5D701"),
+    _c("丛林绿", "Jungle Green", "#4E742D"),
+    _c("橄榄绿", "Olive Green", "#948902"),
+    _c("暗橄榄绿", "Dark Olive Drab", "#575B54"),
+    _c("天蓝", "Azure Blue", "#0066D9"),
+    _c("蓝色", "Blue", "#003776"),
+    _c("水蓝", "Aqua Blue", "#5EBDDB"),
+    _c("石蓝", "Stone Blue", "#487BA2"),
+    _c("品牌青", "Polymaker Teal", "#4CC0C7"),
+    _c("钢灰", "Steel Grey", "#616469"),
+    _c("灰色", "Grey", "#8C9099"),
+    _c("深灰", "Dark Grey", "#485259"),
+    _c("紫色", "Purple", "#6C47B2"),
+]
+
+# Panchroma™ Matte PLA（原 PolyTerra™ PLA，US 商品页 52 色）
+POLYMAKER_PANCHROMA_MATTE: list[dict] = [
+    _c("哑光炭黑", "Matte Charcoal Black", "#2F2E30"),
+    _c("哑光棉白", "Matte Cotton White", "#F4EFEB"),
+    _c("哑光木棕", "Matte Wood Brown", "#AB7449"),
+    _c("哑光日出橙", "Matte Sunrise Orange", "#F88B17"),
+    _c("哑光森林绿", "Matte Forest Green", "#60AD70"),
+    _c("哑光极地青", "Matte Arctic Teal", "#61BCC3"),
+    _c("哑光化石灰", "Matte Fossil Grey", "#8A8C94"),
+    _c("哑光樱花粉", "Matte Sakura Pink", "#EAADBD"),
+    _c("哑光草原黄", "Matte Savannah Yellow", "#F3C432"),
+    _c("哑光宝石蓝", "Matte Sapphire Blue", "#0163A6"),
+    _c("哑光薰衣草紫", "Matte Lavender Purple", "#9572BF"),
+    _c("哑光大地棕", "Matte Earth Brown", "#7C594A"),
+    _c("哑光熔岩红", "Matte Lava Red", "#ED2F2E"),
+    _c("哑光荷花粉", "Matte Lotus Pink", "#DD76C0"),
+    _c("哑光青柠绿", "Matte Lime Green", "#D7D602"),
+    _c("哑光天空蓝", "Matte Sky Blue", "#1AC5FC"),
+    _c("哑光烟灰", "Matte Ash Grey", "#485155"),
+    _c("哑光电光靛", "Matte Electric Indigo", "#6858A9"),
+    _c("哑光阳光黄", "Matte Sunshine Yellow", "#F9DA07"),
+    _c("哑光草绿", "Matte Grass Green", "#32BC46"),
+    _c("哑光电光洋红", "Matte Electric Magenta", "#D33A6D"),
+    _c("哑光海沫绿", "Matte Seafoam Green", "#7DD4BE"),
+    _c("哑光树莓蓝", "Matte Raspberry Blue", "#5472D0"),
+    _c("哑光酒红", "Matte Wine Burgundy", "#753E4C"),
+    _c("哑光祖母绿", "Matte Emerald Green", "#22624F"),
+    _c("哑光军红", "Matte Army Red", "#BF312E"),
+    _c("哑光军浅绿", "Matte Army Light Green", "#AB8C02"),
+    _c("哑光军米色", "Matte Army Beige", "#DBBAA5"),
+    _c("哑光军紫", "Matte Army Purple", "#36364A"),
+    _c("哑光军棕", "Matte Army Brown", "#795A4D"),
+    _c("哑光军蓝", "Matte Army Blue", "#2E4462"),
+    _c("哑光军深绿", "Matte Army Dark Green", "#5F6244"),
+    _c("哑光马卡龙花生", "Matte Pastel Peanut", "#BF9573"),
+    _c("哑光马卡龙蜜桃", "Matte Pastel Peach", "#F6BF8B"),
+    _c("哑光马卡龙香蕉", "Matte Pastel Banana", "#F7D475"),
+    _c("哑光马卡龙薄荷", "Matte Pastel Mint", "#D2DEBB"),
+    _c("哑光马卡龙糖果", "Matte Pastel Candy", "#F0D6D9"),
+    _c("哑光马卡龙冰蓝", "Matte Pastel Ice", "#A4D0DF"),
+    _c("哑光马卡龙西瓜", "Matte Pastel Watermelon", "#EE474B"),
+    _c("哑光马卡龙长春花", "Matte Pastel Periwinkle", "#ADB4E6"),
+    _c("哑光马卡龙珊瑚", "Matte Pastel Coral", "#F09A7E"),
+    _c("哑光马卡龙米色", "Matte Pastel Beige", "#E4D0B0"),
+    _c("哑光莫兰迪红", "Matte Muted Red", "#D84B2E"),
+    _c("哑光莫兰迪蓝", "Matte Muted Blue", "#5F778E"),
+    _c("哑光莫兰迪紫", "Matte Muted Purple", "#7C5C78"),
+    _c("哑光莫兰迪绿", "Matte Muted Green", "#777E71"),
+    _c("哑光莫兰迪白", "Matte Muted White", "#BBADA4"),
+    _c("哑光莫兰迪苔绿", "Matte Muted Moss", "#92864F"),
+    _c("哑光莫兰迪青", "Matte Muted Teal", "#5D989E"),
+    _c("哑光莫兰迪藕紫", "Matte Muted Mauve", "#A36D82"),
+    _c("哑光莫兰迪赤陶", "Matte Muted Terracotta", "#C06443"),
+    _c("哑光玫瑰", "Matte Rose", "#CF6076"),
+]
+
+# Polymaker™ PETG（原 PolyLite™ PETG，官方 24 色；部分色号官方未公布 HEX，为近似值）
+POLYMAKER_PETG: list[dict] = [
+    _c("黑色", "Black", "#070908"),
+    _c("白色", "White", "#F2F1ED", official=False),
+    _c("灰色", "Grey", "#8C9099", official=False),
+    _c("深灰", "Dark Grey", "#4A5054", official=False),
+    _c("银灰", "Silver Grey", "#B7BBBF", official=False),
+    _c("粉色", "Pink", "#B288AB"),
+    _c("品红", "Magenta", "#E3127E", official=False),
+    _c("红色", "Red", "#DD1116"),
+    _c("橙色", "Orange", "#F07B22", official=False),
+    _c("绿色", "Green", "#1E9E4A", official=False),
+    _c("黄色", "Yellow", "#F5D400", official=False),
+    _c("青柠绿", "Lime", "#C4D600", official=False),
+    _c("深绿", "Dark Green", "#121B13"),
+    _c("青色", "Teal", "#17A2A2", official=False),
+    _c("电光蓝", "Electric Blue", "#003E70"),
+    _c("蓝色", "Blue", "#1B4F9C", official=False),
+    _c("深蓝", "Dark Blue", "#030E1A"),
+    _c("紫色", "Purple", "#6C47B2", official=False),
+    _c("深紫", "Dark Purple", "#2E1A47"),
+    _c("军棕", "Army Brown", "#795A4D", official=False),
+    _c("星空黑", "Galaxy Black", "#212721"),
+    _c("星空深灰", "Galaxy Dark Grey", "#474648"),
+    _c("星空蓝", "Galaxy Blue", "#012C61"),
+    _c("星空红", "Galaxy Red", "#BF1A11"),
+]
+
+# 品牌 -> 系列 -> 色卡
+BRAND_COLOR_SERIES: dict[str, dict[str, list[dict]]] = {
+    "Polymaker": {
+        "Panchroma PLA": POLYMAKER_PANCHROMA_PLA,
+        "Panchroma 哑光 PLA": POLYMAKER_PANCHROMA_MATTE,
+        "PETG": POLYMAKER_PETG,
+    },
+}
+
+# 材料 -> 该品牌下适用的系列
+MATERIAL_COLOR_SERIES: dict[str, list[str]] = {
+    "PLA": ["Panchroma PLA", "Panchroma 哑光 PLA"],
+    "PETG": ["PETG"],
+}
+
+# Kexcelled / 兰博 / 魔创 的配色数据在 brand_colors.py（自动生成），在此合并
+from .brand_colors import (  # noqa: E402
+    BRAND_COLOR_SERIES_EXTRA,
+    MATERIAL_COLOR_SERIES_EXTRA,
+)
+
+BRAND_COLOR_SERIES.update(BRAND_COLOR_SERIES_EXTRA)
+for _mat, _series in MATERIAL_COLOR_SERIES_EXTRA.items():
+    _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
+    MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _series if s not in _existing]
+
+
+def color_series_for(brand: str, material: str) -> list[dict]:
+    """返回该品牌+材料组合下可用的官方色卡分组（无预设时返回空列表）。"""
+    series = BRAND_COLOR_SERIES.get(brand)
+    if not series:
+        return []
+    mat = (material or "").upper()
+    groups: list[dict] = []
+    for mat_key, names in MATERIAL_COLOR_SERIES.items():
+        if not mat.startswith(mat_key):
+            continue
+        for name in names:
+            colors = series.get(name)
+            if colors:
+                groups.append({"series": name, "colors": colors})
+    return groups
 
 
 def normalize_color(value: str) -> str:
