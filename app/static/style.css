@@ -721,6 +721,29 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   font-size: 12px; font-weight: 600; flex: none; text-transform: uppercase;
 }
 
+/* ── 标签打印 ───────────────────────────────────────── */
+.label-layout { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 18px; align-items: start; }
+.label-form, .label-side { min-width: 0; }
+.label-preview {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 12px;
+  display: flex; align-items: center; justify-content: center; min-height: 120px;
+}
+.label-canvas {
+  width: 100%; max-width: 100%; height: auto; background: #fff;
+  border: 1px solid var(--border); border-radius: 6px;
+  /* 位图是 1:1 点数，放大时保持硬边，才能看出真实的点阵效果 */
+  image-rendering: pixelated;
+}
+.label-ble-tests { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.label-diag { margin-top: 10px; font-size: 12px; }
+.label-diag summary { cursor: pointer; color: var(--text-2); }
+.label-diag ul { margin: 8px 0 0; padding-left: 16px; line-height: 1.75; word-break: break-all; }
+.label-diag code { font-size: 11px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+label.field.check { display: flex; align-items: center; gap: 7px; }
+label.field.check input { width: auto; margin: 0; flex: none; }
+label.field.check > span { display: inline; margin-bottom: 0; }
+
 /* ── 窄屏 ───────────────────────────────────────────── */
 @media (max-width: 860px) {
   .brand-name { display: none; }
@@ -729,6 +752,7 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .nav button { padding: 8px 10px; }
   .fld.wide { grid-column: span 1; }
   .printer-layout { grid-template-columns: minmax(0, 1fr); }
+  .label-layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 720px) {
   .tray-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

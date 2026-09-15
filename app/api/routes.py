@@ -1216,8 +1216,11 @@ def color_match(
 
 
 # ══ 二维码标签 ═════════════════════════════════════════════
-def _qr_png(content: str) -> bytes:
-    qr = qrcode.QRCode(version=None, box_size=8, border=2)
+def _qr_png(content: str, box: int = 8, border: int = 2) -> bytes:
+    # qrcode 的 box_size 必须 > 0，给 0 会直接抛 ValueError；box_size 过大又会
+    # 吃内存。这里收口成 1..64，调用方就不用各自防一遍。
+    box = max(1, min(64, int(box)))
+    qr = qrcode.QRCode(version=None, box_size=box, border=border)
     qr.add_data(content)
     qr.make(fit=True)
     image = qr.make_image(fill_color="black", back_color="white")
@@ -1226,16 +1229,73 @@ def _qr_png(content: str) -> bytes:
     return buffer.getvalue()
 
 
+def _qr_module_count(content: str, border: int = 2) -> int:
+    """二维码的总模块数（含静区），供前端按模块物理尺寸反推合适的倍率。"""
+    probe = qrcode.QRCode(version=None, box_size=1, border=border)
+    probe.add_data(content)
+    probe.make(fit=True)
+    return probe.modules_count + border * 2
+
+
+def _qr_png_fit(content: str, target_dots: int, border: int = 2) -> tuple[bytes, int]:
+    """按目标点宽输出二维码，且保证每个模块落在整数个像素上。
+
+    标签位图里二维码是 1:1 贴上去的，缩放会让模块边界糊掉、扫不出来。
+    所以先取「不超过目标宽度」的最大整数倍率，返回 (PNG 字节, 实际点宽)。
+    实际值可能略小于目标值，用 X-QR-Dots 告诉前端。
+    """
+    total = _qr_module_count(content, border=border)
+    box = max(1, int(target_dots) // total)
+    return _qr_png(content, box=box, border=border), total * box
+
+
 def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
 @router.get("/api/labels/spool/{spool_id}.png")
-def spool_label(spool_id: int, request: Request, session: Session = Depends(get_session)):
+def spool_label(
+    spool_id: int,
+    request: Request,
+    dots: int = 0,
+    box: int = 0,
+    session: Session = Depends(get_session),
+):
+    """料盘二维码。
+
+    两种给尺寸的方式，都是为了在 1 位标签位图里贴图不糊（模块必须整数像素）：
+      ?box=N   指定每个模块占 N 个点 —— 前端按「模块物理尺寸」算，推荐；
+      ?dots=N  指定总点宽，服务端取不超过它的最大整数倍率（旧接口，保留）。
+    两种情况都会通过 X-QR-Dots / X-QR-Modules 回传实际值。
+    """
     spool = session.get(Spool, spool_id)
     if spool is None:
         raise HTTPException(status_code=404, detail="料盘不存在")
-    return Response(content=_qr_png(f"{_base_url(request)}/#spool={spool_id}"), media_type="image/png")
+    content = f"{_base_url(request)}/#spool={spool_id}"
+    if box > 0:
+        total = _qr_module_count(content)
+        actual_box = max(1, min(16, int(box)))
+        return Response(
+            content=_qr_png(content, box=actual_box),
+            media_type="image/png",
+            headers={
+                "X-QR-Dots": str(total * actual_box),
+                "X-QR-Modules": str(total),
+                "Cache-Control": "no-store",
+            },
+        )
+    if dots > 0:
+        payload, actual = _qr_png_fit(content, dots)
+        return Response(
+            content=payload,
+            media_type="image/png",
+            headers={
+                "X-QR-Dots": str(actual),
+                "X-QR-Modules": str(_qr_module_count(content)),
+                "Cache-Control": "no-store",
+            },
+        )
+    return Response(content=_qr_png(content), media_type="image/png")
 
 
 @router.get("/api/labels/slot/{printer_id}/{ams_id}/{tray_id}.png")

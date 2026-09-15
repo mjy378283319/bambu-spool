@@ -32,6 +32,7 @@ const ICO = {
   scale: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.4" r="6"/><path d="M12 10.4v3.3l2.3 1.6"/><path d="M8.4 4.6h7.2l-1.4 3"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.4 7V5.4c0-.8.6-1.4 1.4-1.4h2.4c.8 0 1.4.6 1.4 1.4V7"/><path d="M6.6 7l.9 12.1c.1 1 .9 1.7 1.9 1.7h5.2c1 0 1.8-.7 1.9-1.7L17.4 7"/><path d="M10.4 11v6M13.6 11v6"/></svg>',
   printer: '<svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="5.5" rx="1.4"/><rect x="3.5" y="10.5" width="17" height="9" rx="2"/><path d="M7 19.5v2h10v-2"/><path d="M17 14.2h.01"/></svg>',
+  tag: '<svg viewBox="0 0 24 24"><path d="M4.2 4.2h7.1l8.5 8.5-7.1 7.1-8.5-8.5z"/><circle cx="8.1" cy="8.1" r="1.35"/></svg>',
   thermo: '<svg viewBox="0 0 24 24"><path d="M10.4 13.4V5.6a1.6 1.6 0 0 1 3.2 0v7.8a4 4 0 1 1-3.2 0z"/><path d="M12 9.8v6"/></svg>',
   fan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.9"/><path d="M10.2 10.2C8.2 7.6 8.6 5.2 10.7 4.6c1.9-.5 3.1 1.2 2.3 3.1"/><path d="M13.8 10.2c2.6-2 5-1.6 5.6.5.5 1.9-1.2 3.1-3.1 2.3"/><path d="M13.8 13.8c2 2.6 1.6 5-.5 5.6-1.9.5-3.1-1.2-2.3-3.1"/><path d="M10.2 13.8c-2.6 2-5 1.6-5.6-.5-.5-1.9 1.2-3.1 3.1-2.3"/></svg>',
   layer: '<svg viewBox="0 0 24 24"><path d="M12 3.6 20 7.9l-8 4.3-8-4.3z"/><path d="m4 12.4 8 4.3 8-4.3"/><path d="m4 16.4 8 4.3 8-4.3"/></svg>',
@@ -906,6 +907,7 @@ function spoolRowHtml(spool) {
     <td class="tiny muted">${usage}</td>
     <td onclick="event.stopPropagation()">
       <div class="row-actions">
+        <button title="打印或导出这盘料的标签" onclick="openLabelDialog(${spool.id})">${ICO.tag}标签</button>
         <button title="手动补录消耗" onclick="openUseDialog(${spool.id})">${ICO.pencil}补录</button>
         <button title="按称重校准余量" onclick="openMeasureDialog(${spool.id})">${ICO.scale}校准</button>
         <button class="del" title="删除这盘料" onclick="openDeleteSpoolDialog(${spool.id})">${ICO.trash}删除</button>
@@ -1253,6 +1255,7 @@ async function openSpoolDetail(id) {
         </div>
       </div>
       <div class="row" style="margin-bottom:14px">
+        <button class="sm" onclick="openLabelDialog(${spool.id})">${ICO.tag}打印标签</button>
         <button class="sm" onclick="closeModal();openUseDialog(${spool.id})">手动补录消耗</button>
         <button class="sm" onclick="closeModal();openMeasureDialog(${spool.id})">称重校准</button>
         <button class="sm" onclick="editCurrentSpool(${spool.id})">编辑</button>
@@ -1346,9 +1349,10 @@ async function doMeasure(spoolId) {
   } catch (err) { toast(err.message, "err"); }
 }
 
+/* 标签打印的实现在 label.js（渲染 + ESC/POS 打包 + Web Bluetooth），
+   入口是 openLabelDialog(spoolId)；这里保留 A4 拼版的兼容入口。 */
 function openLabelSheet() {
-  const ids = S.spools.map((s) => s.id).join(",");
-  window.open(`/api/labels/sheet?ids=${ids}`, "_blank");
+  window.open(`/api/labels/sheet?ids=${S.spools.map((s) => s.id).join(",")}`, "_blank");
 }
 
 /* ── 槽位绑定 ──────────────────────────────────────────── */

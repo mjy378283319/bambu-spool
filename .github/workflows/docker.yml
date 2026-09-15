@@ -46,8 +46,16 @@ jobs:
       - name: 运行 AMS / AMS HT 状态归一自测
         run: python tests/test_ams.py
 
+      - name: 运行标签二维码自测
+        run: python tests/test_labels.py
+
       - name: 前端 JS 语法检查
-        run: node --check app/static/app.js
+        run: |
+          node --check app/static/app.js
+          node --check app/static/label.js
+
+      - name: 运行标签光栅打包自测
+        run: node tests/test_label_raster.mjs
 
   build:
     name: 构建并推送镜像
