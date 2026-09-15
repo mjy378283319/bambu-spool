@@ -42,12 +42,42 @@ def _migrate_columns() -> None:
                     logger.info("迁移：%s 表新增列 %s", table, col)
 
 
+def _migrate_data() -> None:
+    """把历史数据里的品牌写法归一（「Bambu Lab」→「拓竹」）。
+
+    幂等：没有可改的行时什么都不做。老库里同一个品牌的中英两种写法会让
+    品牌筛选下拉框出现重复项，所以启动时顺手收口一次。
+    """
+    from sqlmodel import Session as _Session, select
+
+    from .catalog import BRAND_ALIASES, BRAND_SPOOL_WEIGHTS, normalize_brand
+    from .models import Spool
+
+    canonical = set(BRAND_SPOOL_WEIGHTS) | set(BRAND_ALIASES.values())
+    try:
+        with _Session(engine) as session:
+            changed = 0
+            for spool in session.exec(select(Spool)).all():
+                fixed = normalize_brand(spool.brand)
+                # 只有当结果确实落在已知的规范名里才改写，避免把用户自定义品牌搞坏
+                if fixed and fixed != spool.brand and fixed in canonical:
+                    spool.brand = fixed
+                    changed += 1
+                    session.add(spool)
+            if changed:
+                session.commit()
+                logger.info("迁移：归一 %s 盘料盘的品牌写法", changed)
+    except Exception as exc:  # pragma: no cover - 迁移失败不应阻塞启动
+        logger.warning("品牌归一迁移跳过：%s", exc)
+
+
 def init_db() -> None:
     # 确保模型已注册（auth 里的账号/会话表也要建出来）
     from . import auth, models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
     _migrate_columns()
+    _migrate_data()
 
 
 @contextmanager

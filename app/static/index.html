@@ -4,8 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>拓竹耗材管家</title>
+<meta name="theme-color" content="#0f766e" />
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/static/icon.svg" />
 <link rel="stylesheet" href="/static/style.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f766e'/><circle cx='16' cy='16' r='6' fill='white'/></svg>" />
 </head>
 <body>
 
@@ -13,7 +15,7 @@
 <div class="auth-page hidden" id="authPage">
   <div class="auth-card">
     <div class="auth-head">
-      <span class="auth-logo"></span>
+      <img class="auth-logo" src="/static/icon.svg" alt="" />
       <div>
         <div class="auth-name">拓竹耗材管家</div>
         <div class="auth-tag">Bambu Spool Manager</div>
@@ -42,7 +44,7 @@
 
       <div class="auth-error hidden" id="authError"></div>
 
-      <button class="primary auth-submit" id="authSubmit" type="submit">登录</button>
+      <button class="btn primary auth-submit" id="authSubmit" type="submit">登录</button>
     </form>
 
     <p class="auth-foot" id="authFoot"></p>
@@ -54,98 +56,215 @@
 <div id="app" class="hidden">
 
 <header class="topbar">
-  <div class="brand"><span class="logo"></span><span>拓竹耗材管家</span></div>
-  <nav class="nav">
-    <button data-view="dashboard">仪表盘</button>
-    <button data-view="spools">料盘库存</button>
-    <button data-view="jobs">打印记录</button>
-    <button data-view="settings">设置</button>
-  </nav>
-  <div class="spacer"></div>
-  <div class="conn" id="conn"><span class="dot"></span><span id="connText">连接中</span></div>
-  <div class="user-chip" id="userChip">
-    <span class="avatar" id="userAvatar">U</span>
-    <span id="userName">—</span>
-    <button class="sm" onclick="openAccountMenu()">账号</button>
-    <button class="sm" onclick="doLogout()">退出</button>
+  <div class="topbar-inner">
+    <div class="brand">
+      <img class="brand-logo" src="/static/icon.svg" alt="拓竹耗材管家" />
+      <span class="brand-name">拓竹耗材管家</span>
+    </div>
+
+    <nav class="nav">
+      <button data-view="dashboard">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.8V20h14V9.8"/><path d="M9.5 20v-5.5h5V20"/></svg>
+        <span>仪表盘</span>
+      </button>
+      <button data-view="spools">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+        <span>料盘库存</span>
+      </button>
+      <button data-view="jobs">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+        <span>打印记录</span>
+      </button>
+      <button data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+
+    <span class="spacer"></span>
+
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">连接中</span></div>
+    <button class="icon-btn" onclick="loadStatus();loadSpools();" title="刷新数据" aria-label="刷新">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-.6 3"/><path d="M20 4v5h-5"/></svg>
+    </button>
+    <div class="user-chip" id="userChip">
+      <span class="avatar" id="userAvatar">U</span>
+      <span class="uname" id="userName">—</span>
+      <button class="btn sm ghost" onclick="openAccountMenu()">账号</button>
+      <button class="btn sm ghost" onclick="doLogout()">退出</button>
+    </div>
   </div>
 </header>
 
 <main>
+
+  <!-- ── 仪表盘 ───────────────────────────────────────── -->
   <section class="view" id="view-dashboard">
+    <div class="page-head">
+      <div>
+        <h1>概览</h1>
+        <p class="page-sub">打印机状态、耗材库存与最近动态</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn" onclick="openLabelSheet()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5z"/></svg>
+          打印标签
+        </button>
+      </div>
+    </div>
+
     <div class="grid-stats" id="dashStats"></div>
-    <div id="printerCards" style="margin-top:16px"></div>
+
+    <div class="section-head">
+      <h2>打印机状态</h2>
+      <span class="count" id="printerCount"></span>
+    </div>
+    <div id="printerCards"></div>
+
+    <div class="section-head"><h2>最近活动</h2></div>
+    <div class="panel-grid" id="dashPanels"></div>
+
     <div class="card">
-      <h2>实时事件 <span class="count" id="eventCount"></span></h2>
+      <div class="card-head">
+        <h2>实时事件</h2>
+        <span class="count" id="eventCount"></span>
+      </div>
       <div class="events" id="eventList"><div class="empty-state">暂无事件</div></div>
     </div>
   </section>
 
+  <!-- ── 料盘库存 ─────────────────────────────────────── -->
   <section class="view" id="view-spools">
-    <div class="card">
-      <h2>料盘库存 <span class="count" id="spoolCount"></span>
-        <span class="spacer"></span>
-        <button class="sm" onclick="openColorFinder()">图片识色</button>
-        <button class="sm" onclick="openLabelSheet()">打印标签</button>
-        <button class="primary sm" onclick="openSpoolDialog()">新增料盘</button>
-      </h2>
-      <div class="row" style="margin-bottom:14px">
-        <input id="spoolSearch" placeholder="搜索品牌 / 材料 / 颜色 / 位置" style="max-width:260px" oninput="renderSpools()" />
-        <select id="spoolMaterial" style="max-width:130px" onchange="renderSpools()"><option value="">全部材料</option></select>
-        <select id="spoolBrand" style="max-width:150px" onchange="renderSpools()"><option value="">全部品牌</option></select>
-        <label class="small muted" style="display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="spoolLowOnly" style="width:auto" onchange="renderSpools()" /> 仅看余量不足
-        </label>
-        <label class="small muted" style="display:flex;align-items:center;gap:5px">
-          <input type="checkbox" id="spoolArchived" style="width:auto" onchange="renderSpools()" /> 已归档
-        </label>
+    <div class="page-head">
+      <div>
+        <h1>料盘库存</h1>
+        <p class="page-sub">管理每一盘耗材的余量、价格与存放位置，共 <b id="spoolCount"></b></p>
       </div>
+      <div class="page-actions">
+        <button class="btn" onclick="openColorFinder()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.6"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l4.5-4.5 3.5 3 3-2.5L20 17"/></svg>
+          图片识色
+        </button>
+        <button class="btn" onclick="openLabelSheet()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5z"/></svg>
+          打印标签
+        </button>
+        <button class="btn primary" onclick="openSpoolDialog()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          新增料盘
+        </button>
+      </div>
+    </div>
+
+    <div class="card filter-card">
+      <div class="tabs" id="spoolTabs">
+        <button class="tab active" data-tab="all">所有</button>
+        <button class="tab" data-tab="inuse">使用中</button>
+        <button class="tab" data-tab="idle">未使用</button>
+        <button class="tab" data-tab="low">余量不足</button>
+        <button class="tab" data-tab="archived">已归档</button>
+      </div>
+      <div class="filter-grid">
+        <label class="fld wide"><span>关键字</span>
+          <input id="spoolSearch" placeholder="料盘名称 / 品牌 / 颜色 / 位置" oninput="renderSpools()" /></label>
+        <label class="fld"><span>品牌</span>
+          <select id="spoolBrand" onchange="renderSpools()"><option value="">全部品牌</option></select></label>
+        <label class="fld"><span>材料</span>
+          <select id="spoolMaterial" onchange="renderSpools()"><option value="">全部材料</option></select></label>
+        <label class="fld"><span>外观</span>
+          <select id="spoolFinish" onchange="renderSpools()">
+            <option value="">全部外观</option><option value="哑光">哑光</option><option value="普通">普通</option>
+          </select></label>
+        <label class="fld"><span>最低价格（¥）</span>
+          <input type="number" id="spoolPriceMin" placeholder="不限" min="0" step="1" oninput="renderSpools()" /></label>
+        <label class="fld"><span>最高价格（¥）</span>
+          <input type="number" id="spoolPriceMax" placeholder="不限" min="0" step="1" oninput="renderSpools()" /></label>
+        <div class="fld fld-actions">
+          <button class="btn" onclick="renderSpools()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+            搜索
+          </button>
+          <button class="btn ghost" onclick="resetSpoolFilters()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 2.6 5.3"/><path d="M4 4v6h6"/></svg>
+            重置
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card table-card">
       <div id="spoolTable"></div>
+      <div class="table-foot" id="spoolFooter"></div>
     </div>
   </section>
 
+  <!-- ── 打印记录 ─────────────────────────────────────── -->
   <section class="view" id="view-jobs">
-    <div class="card">
-      <h2>打印记录 <span class="count" id="jobCount"></span>
-        <span class="spacer"></span>
-        <select id="jobFilter" style="max-width:130px" onchange="loadJobs()">
-          <option value="">全部状态</option>
-          <option value="finished">已完成</option>
-          <option value="failed">失败</option>
-          <option value="cancelled">已取消</option>
-          <option value="running">进行中</option>
-        </select>
-        <button class="sm" onclick="loadJobs()">刷新</button>
-      </h2>
+    <div class="page-head">
+      <div>
+        <h1>打印记录</h1>
+        <p class="page-sub">每次打印的耗材用量与费用，扣错了可以逐条纠正</p>
+      </div>
+      <div class="page-actions">
+        <label class="fld inline"><span>状态</span>
+          <select id="jobFilter" onchange="loadJobs()">
+            <option value="">全部状态</option>
+            <option value="finished">已完成</option>
+            <option value="failed">失败</option>
+            <option value="cancelled">已取消</option>
+            <option value="running">进行中</option>
+          </select></label>
+        <button class="btn" onclick="loadJobs()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-.6 3"/><path d="M20 4v5h-5"/></svg>
+          刷新
+        </button>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <div class="card-head">
+        <h2>记录列表</h2>
+        <span class="count" id="jobCount"></span>
+      </div>
       <div id="jobTable"></div>
+      <div class="table-foot" id="jobFooter"></div>
     </div>
   </section>
 
+  <!-- ── 设置 ─────────────────────────────────────────── -->
   <section class="view" id="view-settings">
+    <div class="page-head">
+      <div>
+        <h1>设置</h1>
+        <p class="page-sub">拓竹账号、设备与运行信息</p>
+      </div>
+    </div>
+
     <div class="grid-2">
       <div class="card">
-        <h2>拓竹账号</h2>
+        <div class="card-head"><h2>拓竹账号</h2></div>
         <div id="accountBox"></div>
       </div>
       <div class="card">
-        <h2>系统信息</h2>
+        <div class="card-head"><h2>系统信息</h2></div>
         <div id="systemBox"></div>
       </div>
     </div>
     <div class="card">
-      <h2>设备</h2>
+      <div class="card-head"><h2>设备</h2></div>
       <div id="deviceBox"></div>
     </div>
     <div class="card">
-      <h2>使用说明</h2>
+      <div class="card-head"><h2>使用说明</h2></div>
       <div class="small muted" style="line-height:1.9">
         <p style="margin:0 0 8px">自动扣重的完整链路：拓竹云订阅打印机实时状态 → 识别打印任务起止 → 打印结束后从云端任务历史取到每个槽位的实际克重 → 扣减该槽位绑定的料盘。</p>
         <p style="margin:0 0 8px">要让它工作，打印任务需要<b>经拓竹云端发起</b>（Bambu Studio 云端发送、或 Bambu Handy 手机 App）。用局域网模式或 U 盘打印的任务不会进云端记录，这类任务可以在打印记录里手动录入用量。</p>
         <p style="margin:0 0 8px">料盘和槽位的对应关系由「槽位绑定」维护：在仪表盘的 AMS 槽位上点击即可绑定。绑定一次之后，后续每次打印都会自动扣到正确的料盘上。</p>
-        <p style="margin:0">扣错了不要紧：料盘详情页的每次扣减记录都可以一键转到另一盘料上。</p>
+        <p style="margin:0">录错了不要紧：料盘详情页的每次扣减记录都可以一键转到另一盘料上，整盘录错也可以直接删除。</p>
       </div>
     </div>
   </section>
+
 </main>
 
 </div>

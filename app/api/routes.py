@@ -34,6 +34,7 @@ from ..catalog import (
     MODEL_CODE_TO_NAME,
     build_spool_name,
     model_display_name,
+    normalize_brand,
     normalize_color,
     spool_weight_options,
 )
@@ -97,6 +98,7 @@ def spool_dict(spool: Spool) -> dict:
         "location": spool.location,
         "note": spool.note,
         "archived": spool.archived,
+        "finish": "哑光" if "哑光" in (spool.color_name or "") else "普通",
         "created_at": spool.created_at.isoformat(),
         "updated_at": spool.updated_at.isoformat(),
     }
@@ -510,8 +512,27 @@ def list_spools(
                 "tray_id": binding.tray_id,
                 "label": f"AMS {binding.ams_id + 1} · 槽位 {binding.tray_id + 1}",
             })
+
+    # 首次 / 最后使用时间与流水条数：列表要展示，删除确认框也要用条数做判断。
+    # 一次全表查询在内存里归并，比每个料盘各查一次省事。
+    usage_stats: dict[int, dict] = {}
+    for record in session.exec(select(UsageRecord)).all():
+        if not record.spool_id:
+            continue
+        stat = usage_stats.setdefault(record.spool_id, {"count": 0, "first": None, "last": None})
+        stamp = record.created_at.isoformat()
+        stat["count"] += 1
+        if stat["first"] is None or stamp < stat["first"]:
+            stat["first"] = stamp
+        if stat["last"] is None or stamp > stat["last"]:
+            stat["last"] = stamp
+
     for item in items:
         item["slots"] = slot_of.get(item["id"], [])  # type: ignore[index]
+        stat = usage_stats.get(item["id"], {})
+        item["first_used_at"] = stat.get("first")
+        item["last_used_at"] = stat.get("last")
+        item["usage_count"] = stat.get("count", 0)
     return {"spools": items}
 
 
@@ -535,9 +556,11 @@ def create_spool(payload: SpoolCreate, session: Session = Depends(get_session)) 
     remaining = payload.remaining_weight
     if remaining is None:
         remaining = payload.initial_weight
+    # 品牌统一成规范名，避免「Bambu Lab」和「拓竹」两套写法并存
+    brand = normalize_brand(payload.brand)
     spool = Spool(
-        name=payload.name or build_spool_name(payload.brand, payload.material, payload.color_name),
-        brand=payload.brand,
+        name=payload.name or build_spool_name(brand, payload.material, payload.color_name),
+        brand=brand,
         material=payload.material,
         color_name=payload.color_name,
         color_hex=normalize_color(payload.color_hex),
@@ -617,10 +640,12 @@ def patch_spool(
     if spool is None:
         raise HTTPException(status_code=404, detail="料盘不存在")
 
-    for field in ("brand", "material", "color_name", "name", "location", "note", "tray_info_idx"):
+    for field in ("material", "color_name", "name", "location", "note", "tray_info_idx"):
         value = getattr(payload, field)
         if value is not None:
             setattr(spool, field, value)
+    if payload.brand is not None:
+        spool.brand = normalize_brand(payload.brand)
     if payload.color_hex is not None:
         spool.color_hex = normalize_color(payload.color_hex)
     if payload.spool_weight is not None:
@@ -643,13 +668,73 @@ def patch_spool(
 
 
 @router.delete("/api/spools/{spool_id}")
-def delete_spool(spool_id: int, session: Session = Depends(get_session)) -> dict:
+def delete_spool(
+    spool_id: int,
+    force: bool = False,
+    session: Session = Depends(get_session),
+) -> dict:
+    """删除料盘（用于录错了要删掉的情况）。
+
+    默认有保护：料盘上还挂着使用流水时先拦一道（409），界面会弹二次确认，
+    确认后带 force=true 再来。强制删除会顺带收拾干净引用关系，避免留下悬空数据：
+
+      · 删掉该料盘的槽位绑定（否则 AMS 槽位会指向不存在的料盘）
+      · 删掉该料盘名下的使用流水（「使用历史」里的那批记录）
+      · 把打印任务明细里的料盘引用置空，但保留克重与任务本身
+
+    注意：整盘价格是记在料盘上的，删掉之后那部分历史打印费用会退回
+    「按当前单价实时折算」的口径，不再有快照。
+    """
     spool = session.get(Spool, spool_id)
     if spool is None:
         raise HTTPException(status_code=404, detail="料盘不存在")
+
+    records = session.exec(
+        select(UsageRecord).where(UsageRecord.spool_id == spool_id)
+    ).all()
+    bindings = session.exec(
+        select(SlotBinding).where(SlotBinding.spool_id == spool_id)
+    ).all()
+
+    if records and not force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"「{spool.name}」还有 {len(records)} 条使用记录，"
+                "删除后这些记录会一并消失且无法恢复。"
+            ),
+        )
+
+    # 打印任务明细里指向这盘料的行：解绑但保留克重，任务本身不动
+    jobs_updated = 0
+    for job in session.exec(select(PrintJob)).all():
+        entries = load_usages(job)
+        touched = False
+        for entry in entries:
+            if entry.spool_id == spool_id:
+                entry.spool_id = None
+                entry.spool_name = ""
+                entry.match_strategy = f"{entry.match_strategy}（料盘已删除）".strip()
+                touched = True
+        if touched:
+            job.filaments_json = json.dumps([e.__dict__ for e in entries], ensure_ascii=False)
+            session.add(job)
+            jobs_updated += 1
+
+    for binding in bindings:
+        session.delete(binding)
+    for record in records:
+        session.delete(record)
     session.delete(spool)
     session.commit()
-    return {"ok": True}
+
+    return {
+        "ok": True,
+        "name": spool.name,
+        "deleted_usages": len(records),
+        "deleted_bindings": len(bindings),
+        "jobs_updated": jobs_updated,
+    }
 
 
 class UsePayload(BaseModel):

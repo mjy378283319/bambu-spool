@@ -110,9 +110,12 @@ MATERIALS = [
 
 # 品牌 -> 空盘皮重（g）。多数塑料盘在 190~250g，纸质盘更轻。
 # 官方数据来自厂商规格，未覆盖的品牌用户可手工填写。
+#
+# 注意：一个品牌只保留一条规范名（中文名优先），不要同时写「Bambu Lab」和
+# 「拓竹」这类中英双份——那会让新建料盘的品牌下拉框出现重复项。
+# 历史数据里的英文写法由下面的 BRAND_ALIASES 统一归并。
 BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
-    "Bambu Lab": [250.0, 190.0],      # 塑料盘 250g / 可重复使用盘 190g
-    "拓竹": [250.0, 190.0],
+    "拓竹": [250.0, 190.0],            # 塑料盘 250g / 可重复使用盘 190g
     "eSUN 易生": [230.0, 200.0],
     "Polymaker": [140.0, 220.0],      # 纸盘 140±7g（官方，PolyTerra/PolyLite 1kg）/ 旧塑料盘 220g
     "大简": [200.0, 150.0],            # 塑料盘约 200g / 纸盘约 150g（估算，建议用称重校准修正）
@@ -127,7 +130,52 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "Prusament": [200.0],
 }
 
+# 品牌别名 -> 规范名。键统一按「小写 + 去掉空格」归一，值必须是
+# BRAND_SPOOL_WEIGHTS 里的规范名（或用户自定义的写法）。
+# 常用于：老数据里存的英文名、第三方导入的简写、用户在输入框里手打的变体。
+BRAND_ALIASES: dict[str, str] = {
+    "bambulab": "拓竹",
+    "bambulab拓竹": "拓竹",
+    "拓竹科技": "拓竹",
+    "bambu": "拓竹",
+    "esun": "eSUN 易生",
+    "esun易生": "eSUN 易生",
+    "易生": "eSUN 易生",
+    "polymaker": "Polymaker",
+    "poly maker": "Polymaker",
+    "kexcelled": "Kexcelled",
+    "kecelled": "Kexcelled",
+    "sunlu": "三绿 Sunlu",
+    "三绿": "三绿 Sunlu",
+    "creality": "创想三维 Creality",
+    "创想三维": "创想三维 Creality",
+    "allizz": "爱丽兹 Allizz",
+    "爱丽兹": "爱丽兹 Allizz",
+    "jayoo": "JAYO",
+    "大简petg": "大简",
+}
+
+# 规范名自己也进查找表，这样 normalize_brand 可以一把梭
+_BRAND_LOOKUP: dict[str, str] = {
+    name.lower().replace(" ", ""): name for name in BRAND_SPOOL_WEIGHTS
+}
+_BRAND_LOOKUP.update(
+    {alias.lower().replace(" ", ""): target for alias, target in BRAND_ALIASES.items()}
+)
+
+# 品牌下拉框的候选：规范名去重后 + 「其他」
 BRAND_PRESETS = list(BRAND_SPOOL_WEIGHTS.keys()) + ["其他"]
+
+
+def normalize_brand(value: str) -> str:
+    """把品牌写法归一到规范名（「Bambu Lab」→「拓竹」），未收录的原样返回。
+
+    只做映射不做校验：用户填的自定义品牌依然允许存在，只是不会命中预设皮重。
+    """
+    name = (value or "").strip()
+    if not name:
+        return ""
+    return _BRAND_LOOKUP.get(name.lower().replace(" ", ""), name)
 
 # 常见颜色预设（名称 -> HEX）。参考 Mars Printer Hub 与主流耗材厂配色。
 COLOR_PRESETS: list[dict[str, str]] = [

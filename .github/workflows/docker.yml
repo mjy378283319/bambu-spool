@@ -40,6 +40,9 @@ jobs:
       - name: 运行拓竹云接口自测
         run: python tests/test_cloud_endpoints.py
 
+      - name: 运行料盘管理与品牌归一自测
+        run: python tests/test_admin.py
+
       - name: 前端 JS 语法检查
         run: node --check app/static/app.js
 

@@ -5,6 +5,7 @@ const S = {
   printers: [],
   printers_full: [],
   spools: [],
+  dashSpools: [],
   jobs: [],
   catalog: { brands: [], materials: [], colors: [], color_series: {}, material_color_series: {}, spool_weights: {} },
   bindings: [],
@@ -12,7 +13,26 @@ const S = {
   socket: null,
   auth: { setupRequired: false, authenticated: false, user: null },
   socketRetry: null,
+  // 列表状态：状态标签页与分页都放在这里，渲染时只读
+  spoolTab: "all",
+  spoolPage: 1,
+  spoolPageSize: 10,
+  jobPage: 1,
+  jobPageSize: 10,
 };
+
+/* ── 图标（内联 SVG，随文字颜色走） ───────────────────── */
+const ICO = {
+  spool: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="6.5" rx="7.5" ry="2.8"/><path d="M4.5 6.5V12c0 1.6 3.4 2.8 7.5 2.8s7.5-1.2 7.5-2.8V6.5"/><path d="M4.5 12v5.5c0 1.6 3.4 2.8 7.5 2.8s7.5-1.2 7.5-2.8V12"/></svg>',
+  weight: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6.5"/><path d="M12 9.6V13l2.6 1.8"/><path d="M8 4.5h8"/></svg>',
+  coins: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.6v8.8M9.4 10.2h5.2M9.4 13.8h5.2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.8v4.7l3.1 1.9"/></svg>',
+  alert: '<svg viewBox="0 0 24 24"><path d="M12 4.2 21 19.8H3z"/><path d="M12 10v4.2M12 17.2h.01"/></svg>',
+  pencil: '<svg viewBox="0 0 24 24"><path d="M16.4 4.6l3 3L9.6 17.4 5 18.8l1.4-4.6z"/></svg>',
+  scale: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.4" r="6"/><path d="M12 10.4v3.3l2.3 1.6"/><path d="M8.4 4.6h7.2l-1.4 3"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.4 7V5.4c0-.8.6-1.4 1.4-1.4h2.4c.8 0 1.4.6 1.4 1.4V7"/><path d="M6.6 7l.9 12.1c.1 1 .9 1.7 1.9 1.7h5.2c1 0 1.8-.7 1.9-1.7L17.4 7"/><path d="M10.4 11v6M13.6 11v6"/></svg>',
+};
+
 
 /* ── 基础设施 ──────────────────────────────────────────── */
 function esc(value) {
@@ -249,6 +269,10 @@ document.querySelectorAll(".nav button").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 
+document.querySelectorAll("#spoolTabs .tab").forEach((button) => {
+  button.addEventListener("click", () => switchSpoolTab(button.dataset.tab));
+});
+
 /* ── 数据加载 ──────────────────────────────────────────── */
 async function loadCatalog() {
   try {
@@ -271,6 +295,9 @@ async function loadCatalog() {
 async function loadStatus() {
   S.status = await api("/api/system/status");
   try { S.stats = await api("/api/stats"); } catch (err) { S.stats = null; }
+  // 仪表盘的三栏活动面板要用到在用料盘，顺手取一份不带筛选的
+  try { S.dashSpools = (await api("/api/spools?archived=false")).spools || []; }
+  catch (err) { /* 非致命：面板会退化成空列表 */ }
   renderDashboard();
   renderSettings();
 }
@@ -288,15 +315,13 @@ async function loadBindings() {
 }
 
 async function loadSpools() {
-  const params = new URLSearchParams({
-    q: document.getElementById("spoolSearch").value || "",
-    material: document.getElementById("spoolMaterial").value || "",
-    brand: document.getElementById("spoolBrand").value || "",
-    archived: document.getElementById("spoolArchived").checked ? "true" : "false",
-    low_only: document.getElementById("spoolLowOnly").checked ? "true" : "false",
-  });
-  const data = await api("/api/spools?" + params.toString());
-  S.spools = data.spools || [];
+  // 归档的与在用的都要拿到：状态标签页里有「已归档」，一次取回后在本地筛选，
+  // 搜索框、价格区间这类交互就不用每次打服务器了。
+  const [live, archived] = await Promise.all([
+    api("/api/spools?archived=false"),
+    api("/api/spools?archived=true"),
+  ]);
+  S.spools = [...(live.spools || []), ...(archived.spools || [])];
   renderSpools();
 }
 
@@ -312,17 +337,42 @@ function renderDashboard() {
   if (!S.status) return;
   const stats = S.status.stats || {};
   const st = S.stats || {};
+  const priceTotal = st.price_total != null ? st.price_total : (stats.price_total || 0);
+  const stockValue = st.stock_value != null ? st.stock_value : (stats.stock_value || 0);
+  const printCost = st.print_cost_total != null ? st.print_cost_total : 0;
+  const weekUsed = sumRecentDays(st.by_day, 7);
+  const weekCost = sumRecentDays(st.by_day_cost, 7);
+
   document.getElementById("dashStats").innerHTML = `
-    <div class="stat"><div class="label">在用料盘</div><div class="value">${stats.spool_count || 0}<small> 盘</small></div></div>
-    <div class="stat"><div class="label">库存余量</div><div class="value">${(stats.remaining_total || 0).toFixed(0)}<small> g</small></div></div>
-    <div class="stat"><div class="label">余量不足</div><div class="value">${stats.low_count || 0}<small> 盘</small></div></div>
-    <div class="stat"><div class="label">待结算任务</div><div class="value">${(S.status.pending_jobs || []).length}<small> 个</small></div></div>
-    <div class="stat"><div class="label">耗材总价值</div><div class="value">¥${(st.price_total != null ? st.price_total : (stats.price_total || 0)).toFixed(2)}</div></div>
-    <div class="stat"><div class="label">库存余值</div><div class="value">¥${(st.stock_value != null ? st.stock_value : (stats.stock_value || 0)).toFixed(2)}</div></div>
-    <div class="stat"><div class="label">累计打印耗材费</div><div class="value">¥${(st.print_cost_total != null ? st.print_cost_total : 0).toFixed(2)}</div></div>`;
+    <div class="stat"><span class="ico">${ICO.spool}</span>
+      <div class="label">在用料盘</div>
+      <div class="value">${stats.spool_count || 0}<small> 盘</small></div>
+      <div class="sub">已归档 ${stats.archived_count || 0} 盘</div></div>
+    <div class="stat"><span class="ico">${ICO.weight}</span>
+      <div class="label">库存余量</div>
+      <div class="value">${(stats.remaining_total || 0).toFixed(0)}<small> g</small></div>
+      <div class="sub">近 7 天消耗 ${weekUsed.toFixed(0)} g</div></div>
+    <div class="stat"><span class="ico">${ICO.alert}</span>
+      <div class="label">余量不足</div>
+      <div class="value">${stats.low_count || 0}<small> 盘</small></div>
+      <div class="sub">低于 100 g 自动标红</div></div>
+    <div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">耗材总价值</div>
+      <div class="value">¥${priceTotal.toFixed(2)}</div>
+      <div class="sub">库存余值 ¥${stockValue.toFixed(2)}</div></div>
+    <div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">累计打印耗材费</div>
+      <div class="value">¥${printCost.toFixed(2)}</div>
+      <div class="sub">近 7 天 ¥${weekCost.toFixed(2)}</div></div>
+    <div class="stat"><span class="ico">${ICO.clock}</span>
+      <div class="label">待结算任务</div>
+      <div class="value">${(S.status.pending_jobs || []).length}<small> 个</small></div>
+      <div class="sub">打印结束后自动扣重</div></div>`;
 
   const printers = S.status.printers || [];
   const host = document.getElementById("printerCards");
+  const printerCount = document.getElementById("printerCount");
+  if (printerCount) printerCount.textContent = printers.length ? `共 ${printers.length} 台` : "";
   if (!printers.length) {
     host.innerHTML = `<div class="card"><div class="empty-state">
       还没有打印机。到「设置」页绑定拓竹账号后同步设备即可。<br />
@@ -330,6 +380,8 @@ function renderDashboard() {
   } else {
     host.innerHTML = printers.map(renderPrinterCard).join("");
   }
+
+  renderDashPanels();
 
   const events = S.status.events || [];
   document.getElementById("eventCount").textContent = events.length ? `${events.length} 条` : "";
@@ -345,6 +397,67 @@ function renderDashboard() {
     : '<div class="empty-state">暂无事件</div>';
 
   renderConn();
+}
+
+/** 统计接口的 by_day / by_day_cost 是 {日期: 数值}，求最近 N 天之和。 */
+function sumRecentDays(byDay, days) {
+  if (!byDay) return 0;
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  let sum = 0;
+  Object.keys(byDay).forEach((key) => {
+    const day = new Date(key + "T00:00:00");
+    if (!isNaN(day) && day >= cutoff) sum += Number(byDay[key]) || 0;
+  });
+  return sum;
+}
+
+/** 最近使用 / 最近添加 / 库存不足 三栏。数据全部来自在用料盘清单。 */
+function renderDashPanels() {
+  const host = document.getElementById("dashPanels");
+  if (!host) return;
+  const spools = (S.dashSpools && S.dashSpools.length) ? S.dashSpools : S.spools;
+
+  const recent = spools.filter((s) => s.last_used_at)
+    .sort((a, b) => (a.last_used_at < b.last_used_at ? 1 : -1)).slice(0, 6);
+  const added = spools.slice()
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 6);
+  const low = spools.filter((s) => s.is_low)
+    .sort((a, b) => a.remaining_weight - b.remaining_weight).slice(0, 6);
+
+  host.innerHTML = [
+    panelCard("最近使用", ICO.clock, recent,
+      (s) => [ `最后 ${fmtTime(s.last_used_at)}`, s.location || "未指定位置" ],
+      (s) => `${s.remaining_weight.toFixed(0)} g`),
+    panelCard("最近添加", ICO.spool, added,
+      (s) => [ fmtTime(s.created_at), `${s.material || "—"} · 皮重 ${(s.spool_weight || 0).toFixed(0)} g` ],
+      (s) => `${s.remaining_weight.toFixed(0)} g`),
+    panelCard("库存不足", ICO.alert, low,
+      (s) => [ `${s.material || "—"} · ${s.location || "未指定位置"}`, "建议补货或换盘" ],
+      (s) => `<b style="color:var(--red)">${s.remaining_weight.toFixed(1)} g</b>`),
+  ].join("");
+}
+
+function panelCard(title, icon, spools, metaOf, valueOf) {
+  const body = spools.length
+    ? spools.map((s) => {
+        const [line1, line2] = metaOf(s);
+        return `<div class="panel-item" style="cursor:pointer" onclick="openSpoolDetail(${s.id})">
+          <span class="panel-ico"><span class="mat-dot" style="width:12px;height:12px;background:${esc(s.color_hex)}"></span></span>
+          <div class="panel-main">
+            <div class="panel-name">${esc(s.name)}</div>
+            <div class="panel-meta">${esc(line1)}${line2 ? " · " + esc(line2) : ""}</div>
+          </div>
+          <div class="panel-val">${valueOf(s)}</div>
+        </div>`;
+      }).join("")
+    : '<div class="panel-meta" style="padding:14px 0">暂无数据</div>';
+  return `<div class="panel">
+    <div class="panel-head">${icon}<span>${esc(title)}</span><span class="spacer"></span>
+      <span class="count">${spools.length}</span></div>
+    ${body}
+  </div>`;
 }
 
 function renderConn() {
@@ -501,57 +614,232 @@ async function requestPushall(printerId) {
 }
 
 /* ── 料盘 ──────────────────────────────────────────────── */
+function switchSpoolTab(tab) {
+  S.spoolTab = tab;
+  S.spoolPage = 1;
+  document.querySelectorAll("#spoolTabs .tab").forEach((btn) =>
+    btn.classList.toggle("active", btn.dataset.tab === tab));
+  renderSpools();
+}
+
+function resetSpoolFilters() {
+  ["spoolSearch", "spoolPriceMin", "spoolPriceMax", "spoolBrand", "spoolMaterial", "spoolFinish"]
+    .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+  S.spoolPage = 1;
+  switchSpoolTab("all");
+}
+
+/** 状态标签页 + 筛选条件 → 可见料盘列表（全部在本地算，输入即时响应）。 */
+function filteredSpools() {
+  const read = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const kw = read("spoolSearch").trim().toLowerCase();
+  const brand = read("spoolBrand");
+  const material = read("spoolMaterial");
+  const finish = read("spoolFinish");
+  const minPrice = parseFloat(read("spoolPriceMin"));
+  const maxPrice = parseFloat(read("spoolPriceMax"));
+  const tab = S.spoolTab || "all";
+
+  return S.spools.filter((s) => {
+    if (tab === "archived") { if (!s.archived) return false; }
+    else if (s.archived) return false;
+
+    if (tab === "inuse" && !(s.slots || []).length) return false;
+    if (tab === "idle" && ((s.usage_count || 0) > 0 || (s.used_weight || 0) > 0)) return false;
+    if (tab === "low" && !s.is_low) return false;
+
+    if (brand && s.brand !== brand) return false;
+    if (material && s.material !== material) return false;
+    if (finish && (s.finish || "普通") !== finish) return false;
+    if (!isNaN(minPrice) && (s.price || 0) < minPrice) return false;
+    if (!isNaN(maxPrice) && (s.price || 0) > maxPrice) return false;
+    if (kw) {
+      const hay = [s.name, s.brand, s.material, s.color_name, s.location, s.note]
+        .join(" ").toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+function spoolRowHtml(spool) {
+  const hasPrice = (spool.price || 0) > 0;
+  const slots = (spool.slots || []).length
+    ? spool.slots.map((x) => esc(x.label)).join("、")
+    : "";
+  const first = spool.first_used_at ? fmtTime(spool.first_used_at) : "";
+  const last = spool.last_used_at ? fmtTime(spool.last_used_at) : "";
+  const usage = first
+    ? `首次 ${first}${last ? `<br>最后 ${last}` : ""}`
+    : '<span class="tag">未使用</span>';
+
+  return `<tr class="clickable" onclick="openSpoolDetail(${spool.id})">
+    <td class="small muted">${spool.id}</td>
+    <td>
+      <div class="cell-name">
+        <span class="swatch" style="background:${esc(spool.color_hex)}"></span>
+        <div class="nm">
+          <div>${esc(spool.name)}</div>
+          <div class="tiny muted">${esc(spool.location || slots || "未装到机器上")}</div>
+        </div>
+      </div>
+    </td>
+    <td><span class="tag">${esc(spool.material)}</span></td>
+    <td><span class="hex-pill"><i style="background:${esc(spool.color_hex)}"></i>${esc((spool.color_hex || "").toUpperCase())}</span></td>
+    <td class="small muted">${esc(spool.finish || "普通")}</td>
+    <td class="num">${hasPrice ? "¥" + spool.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
+    <td>
+      <div class="bar-cell">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+          <span class="small">${spool.remaining_weight.toFixed(0)} g</span>
+          ${spool.is_low ? '<span class="tag amber">偏低</span>'
+            : `<span class="tiny muted">${spool.remaining_percent}%</span>`}
+        </div>
+        <div class="bar" style="margin-top:5px">
+          <div class="${spool.is_low ? "low" : ""}" style="width:${Math.max(0, Math.min(100, spool.remaining_percent))}%"></div>
+        </div>
+      </div>
+    </td>
+    <td class="tiny muted">${usage}</td>
+    <td onclick="event.stopPropagation()">
+      <div class="row-actions">
+        <button title="手动补录消耗" onclick="openUseDialog(${spool.id})">${ICO.pencil}补录</button>
+        <button title="按称重校准余量" onclick="openMeasureDialog(${spool.id})">${ICO.scale}校准</button>
+        <button class="del" title="删除这盘料" onclick="openDeleteSpoolDialog(${spool.id})">${ICO.trash}删除</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
 function renderSpools() {
   const host = document.getElementById("spoolTable");
-  document.getElementById("spoolCount").textContent = S.spools.length ? `${S.spools.length} 盘` : "";
-  if (!S.spools.length) {
-    host.innerHTML = '<div class="empty-state">还没有料盘。点右上角「新增料盘」开始记录。</div>';
+  const list = filteredSpools();
+  const size = S.spoolPageSize || 10;
+  const pages = Math.max(1, Math.ceil(list.length / size));
+  if (S.spoolPage > pages) S.spoolPage = pages;
+  const page = S.spoolPage || 1;
+
+  const counter = document.getElementById("spoolCount");
+  if (counter) counter.textContent = `${S.spools.filter((s) => !s.archived).length} 盘`;
+
+  if (!list.length) {
+    host.innerHTML = `<div class="empty-state">
+      没有符合条件的料盘。换个筛选条件，或点右上角「新增料盘」开始记录。</div>`;
+    renderTableFoot("spoolFooter", "", 0, 1, size, "spool");
     return;
   }
+
+  const slice = list.slice((page - 1) * size, page * size);
   host.innerHTML = `<table>
     <thead><tr>
-      <th>料盘</th><th>材料</th><th>位置 / 槽位</th>
-      <th style="text-align:right">余量</th><th style="width:130px">使用进度</th>
-      <th style="text-align:right">价格 / 余值</th><th></th>
+      <th style="width:62px">ID</th>
+      <th>料盘</th>
+      <th style="width:92px">类型</th>
+      <th style="width:146px">颜色</th>
+      <th style="width:70px">外观</th>
+      <th style="width:104px;text-align:right">价格</th>
+      <th style="width:148px">剩余</th>
+      <th style="width:172px">使用时间</th>
+      <th style="width:196px"></th>
     </tr></thead>
-    <tbody>${S.spools.map((spool) => {
-      const slots = (spool.slots || []).length
-        ? spool.slots.map((x) => esc(x.label)).join("、")
-        : "未装到机器上";
-      const hasPrice = (spool.price || 0) > 0;
-      return `<tr class="clickable" onclick="openSpoolDetail(${spool.id})">
-        <td>
-          <div class="row" style="gap:8px">
-            <span class="swatch" style="background:${esc(spool.color_hex)}"></span>
-            <div style="min-width:0">
-              <div>${esc(spool.name)}</div>
-              ${spool.location ? `<div class="tiny muted">${esc(spool.location)}</div>` : ""}
-            </div>
-          </div>
-        </td>
-        <td>${esc(spool.material)}</td>
-        <td class="small muted">${slots}</td>
-        <td class="num">
-          ${spool.remaining_weight.toFixed(0)} g
-          ${spool.is_low ? '<span class="tag amber">偏低</span>' : ""}
-        </td>
-        <td>
-          <div class="bar" style="height:5px;background:var(--surface-2);border-radius:999px;overflow:hidden">
-            <div style="height:100%;width:${spool.remaining_percent}%;
-              background:${spool.is_low ? "#d97706" : "var(--accent)"}"></div>
-          </div>
-          <div class="tiny muted" style="margin-top:3px">${spool.remaining_percent}% · 已用 ${spool.used_weight.toFixed(0)} g</div>
-        </td>
-        <td class="num">
-          ${hasPrice ? `¥${spool.price.toFixed(2)}<br><span class="tiny muted">余值 ¥${spool.stock_value.toFixed(2)}</span>`
-            : '<span class="tiny muted">未登记</span>'}
-        </td>
-        <td onclick="event.stopPropagation()">
-          <button class="sm ghost" onclick="openUseDialog(${spool.id})">补录</button>
-          <button class="sm ghost" onclick="openMeasureDialog(${spool.id})">校准</button>
-        </td>
-      </tr>`;
-    }).join("")}</tbody></table>`;
+    <tbody>${slice.map(spoolRowHtml).join("")}</tbody></table>`;
+  renderTableFoot("spoolFooter", "", list.length, page, size, "spool");
+}
+
+function spoolGoPage(page) {
+  const size = S.spoolPageSize || 10;
+  const pages = Math.max(1, Math.ceil(filteredSpools().length / size));
+  S.spoolPage = Math.max(1, Math.min(pages, page));
+  renderSpools();
+}
+
+function spoolSetSize(value) {
+  S.spoolPageSize = parseInt(value, 10) || 10;
+  S.spoolPage = 1;
+  renderSpools();
+}
+
+/* ── 删除料盘 ──────────────────────────────────────────── */
+async function openDeleteSpoolDialog(spoolId) {
+  // 列表里就有完整对象；直接从详情/深链进来时再补一次请求
+  let spool = spoolById(spoolId);
+  if (!spool) {
+    try { spool = await api(`/api/spools/${spoolId}`); }
+    catch (err) { toast(err.message, "err"); return; }
+  }
+  const count = spool.usage_count != null ? spool.usage_count : (spool.usages || []).length;
+  const slots = (spool.slots || []).length || (spool.bindings || []).length;
+
+  openModal("删除料盘", `
+    <div class="info-box">
+      <div style="font-weight:600;margin-bottom:3px">${esc(spool.name)}</div>
+      <div class="muted small">
+        余量 ${spool.remaining_weight.toFixed(0)} / ${spool.initial_weight.toFixed(0)} g
+        ${(spool.price || 0) > 0 ? ` · 整盘价 ¥${spool.price.toFixed(2)}` : ""}
+      </div>
+      <div class="muted small">
+        使用记录 ${count} 条${slots ? ` · 已装在 ${slots} 个槽位` : ""}
+      </div>
+    </div>
+    ${count ? `<div class="warn-box">
+      这盘料有 <b>${count}</b> 条使用流水，删除后这些记录会一起消失，且无法恢复。
+      如果只是余量记错了，请改用「校准」；如果是重复录入或参数录错，删除是安全的。
+    </div>` : `<p class="hint">这盘料还没有使用记录，删除不会影响任何打印账目。</p>`}
+    ${slots ? `<p class="hint">对应的 AMS 槽位会自动解绑，不会留下悬空绑定。</p>` : ""}
+  `, `<button onclick="closeModal()">取消</button>
+      <button class="danger" onclick="doDeleteSpool(${spoolId}, ${count ? "true" : "false"})">
+        ${count ? "确认删除（连带记录）" : "确认删除"}
+      </button>`);
+}
+
+async function doDeleteSpool(spoolId, force) {
+  try {
+    const result = await api(
+      `/api/spools/${spoolId}?force=${force ? "true" : "false"}`,
+      { method: "DELETE" }
+    );
+    closeModal();
+    const extra = result.deleted_usages ? `，清理 ${result.deleted_usages} 条记录` : "";
+    toast(`已删除「${result.name || ""}」${extra}`, "ok");
+    await loadSpools();
+    if (S.status) { await loadStatus(); await loadBindings(); }
+  } catch (err) { toast(err.message, "err"); }
+}
+
+/* ── 分页脚注（料盘与打印记录共用） ────────────────────── */
+function pageNumbers(page, pages) {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  const out = [1];
+  const from = Math.max(2, page - 1);
+  const to = Math.min(pages - 1, page + 1);
+  if (from > 2) out.push("...");
+  for (let i = from; i <= to; i++) out.push(i);
+  if (to < pages - 1) out.push("...");
+  out.push(pages);
+  return out;
+}
+
+function renderTableFoot(hostId, label, total, page, size, prefix) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const pages = Math.max(1, Math.ceil(total / size) || 1);
+  const nav = pageNumbers(page, pages).map((n) => (n === "..."
+    ? '<span class="muted" style="padding:0 3px">…</span>'
+    : `<button class="${n === page ? "active" : ""}" onclick="${prefix}GoPage(${n})">${n}</button>`)).join("");
+  host.innerHTML = `
+    <span>${label}</span>
+    <span class="row" style="gap:10px">
+      <span class="muted">共 ${total} 条记录</span>
+      <select onchange="${prefix}SetSize(this.value)" style="width:auto;padding:4px 8px">
+        ${[10, 20, 50, 100].map((n) =>
+          `<option value="${n}" ${n === size ? "selected" : ""}>${n} / 页</option>`).join("")}
+      </select>
+      <span class="pager">
+        <button onclick="${prefix}GoPage(${page - 1})" ${page <= 1 ? "disabled" : ""}>‹</button>
+        ${nav}
+        <button onclick="${prefix}GoPage(${page + 1})" ${page >= pages ? "disabled" : ""}>›</button>
+      </span>
+    </span>`;
 }
 
 function spoolById(id) { return S.spools.find((s) => s.id === id); }
@@ -765,6 +1053,7 @@ async function openSpoolDetail(id) {
         <button class="sm" onclick="closeModal();openUseDialog(${spool.id})">手动补录消耗</button>
         <button class="sm" onclick="closeModal();openMeasureDialog(${spool.id})">称重校准</button>
         <button class="sm" onclick="editCurrentSpool(${spool.id})">编辑</button>
+        <button class="sm danger" onclick="openDeleteSpoolDialog(${spool.id})">${ICO.trash}删除这盘料</button>
         <span class="spacer"></span>
         <img src="/api/labels/spool/${spool.id}.png" alt="二维码" style="width:62px;height:62px;border:1px solid var(--border);border-radius:6px" />
       </div>
@@ -782,7 +1071,7 @@ function usageSourceLabel(source) {  const map = { auto: "自动扣重", manual:
 }
 
 function openMoveDialog(usageId, spoolId, weight) {
-  const options = S.spools.map((s) =>
+  const options = S.spools.filter((s) => !s.archived).map((s) =>
     `<option value="${s.id}">${esc(s.name)}（余 ${s.remaining_weight.toFixed(0)} g）</option>`).join("");
   const current = spoolById(spoolId);
   openModal("把这条消耗转到另一盘料", `
@@ -977,27 +1266,57 @@ function renderJobs() {
   const totalCost = S.jobs.reduce((sum, j) => sum + (j.cost_total || 0), 0);
   document.getElementById("jobCount").textContent = S.jobs.length
     ? `${S.jobs.length} 条 · 耗材费合计 ¥${totalCost.toFixed(2)}` : "";
+
+  const size = S.jobPageSize || 10;
   if (!S.jobs.length) {
     host.innerHTML = '<div class="empty-state">还没有打印记录。任务会在打印机开始打印时自动创建。</div>';
+    renderTableFoot("jobFooter", "", 0, 1, size, "job");
     return;
   }
+
+  const pages = Math.max(1, Math.ceil(S.jobs.length / size));
+  if (S.jobPage > pages) S.jobPage = pages;
+  const page = S.jobPage || 1;
+  const slice = S.jobs.slice((page - 1) * size, page * size);
+
   host.innerHTML = `<table>
     <thead><tr>
-      <th>任务</th><th>打印机</th><th>时间</th>
-      <th style="text-align:right">耗材</th><th style="text-align:right">耗材费</th><th>状态</th><th>数据来源</th>
+      <th style="width:96px">任务 ID</th>
+      <th>任务标题</th>
+      <th style="width:118px">打印机</th>
+      <th style="width:150px">时间</th>
+      <th style="width:92px;text-align:right">耗材</th>
+      <th style="width:96px;text-align:right">耗材费</th>
+      <th style="width:84px">状态</th>
+      <th style="width:104px">数据来源</th>
     </tr></thead>
-    <tbody>${S.jobs.map((job) => `
+    <tbody>${slice.map((job) => `
       <tr class="clickable" onclick="openJobDetail(${job.id})">
+        <td class="small muted">${esc(job.task_id || job.cloud_task_id || job.id)}</td>
         <td><div>${esc(job.title)}</div>
             <div class="tiny muted">${esc(fmtDuration(job.duration_seconds))} · 结束于 ${esc(job.progress_at_end)}%</div></td>
         <td class="small">${esc(job.printer_name || "")}</td>
         <td class="small muted">${esc(fmtTime(job.started_at))}</td>
-        <td class="num">${job.total_weight_g ? job.total_weight_g.toFixed(1) + " g" : "—"}</td>
+        <td class="num">${job.total_weight_g ? job.total_weight_g.toFixed(2) + " g" : "—"}</td>
         <td class="num">${job.cost_total ? "¥" + job.cost_total.toFixed(2) : "—"}</td>
         <td>${jobStatusTag(job.status, job.pending)}</td>
         <td class="small muted">${job.source === "cloud_task" ? "云端任务记录"
           : job.source === "manual" ? "手动录入" : "无数据"}</td>
       </tr>`).join("")}</tbody></table>`;
+  renderTableFoot("jobFooter", "", S.jobs.length, page, size, "job");
+}
+
+function jobGoPage(page) {
+  const size = S.jobPageSize || 10;
+  const pages = Math.max(1, Math.ceil(S.jobs.length / size));
+  S.jobPage = Math.max(1, Math.min(pages, page));
+  renderJobs();
+}
+
+function jobSetSize(value) {
+  S.jobPageSize = parseInt(value, 10) || 10;
+  S.jobPage = 1;
+  renderJobs();
 }
 
 async function openJobDetail(jobId) {
