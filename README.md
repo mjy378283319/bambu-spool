@@ -501,7 +501,15 @@ node tests/test_panel_fill.mjs
 
 # 外观预填、区域文案、真机照片、扫码认码与扫码深链（61 项断言，node 直跑，不需要相机）
 node tests/test_ui_polish.mjs
+
+# 浏览器实拍验收（36 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）
+# 会自己起一个 MOCK 模式的服务、种演示数据、再逐页截图与断言
+PYTHON=python node scripts/shot_ui.mjs
 ```
+
+> `tests/*.mjs` 是纯函数自测（跑在 node 的 vm 沙箱里，不需要浏览器），CI 里跑的是这些；
+> `scripts/shot_ui.mjs` 走真浏览器 + 真服务，用来抓「截图看着还行但其实是坏的」那类问题
+> （图片 404 了布局还在、温度浮标飘出卡片、hash 深链没跳转）。两者互补。
 
 代码结构：
 
@@ -522,6 +530,7 @@ app/
    └─ vendor/    jsQR（Apache-2.0，本地化，含许可证）
 
 scripts/build_printer_photo.py   把实物照片处理成可用的机型图（裁剪 / 修掉压上去的浮标 / 补背景）
+scripts/shot_ui.mjs              无头浏览器实拍验收（截图 + 断言）
 ```
 
 ## 路线图
