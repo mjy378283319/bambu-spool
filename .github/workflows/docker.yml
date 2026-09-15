@@ -34,6 +34,12 @@ jobs:
       - name: 运行访问控制自测
         run: python tests/test_auth.py
 
+      - name: 运行价格统计自测
+        run: python tests/test_price.py
+
+      - name: 运行拓竹云接口自测
+        run: python tests/test_cloud_endpoints.py
+
       - name: 前端 JS 语法检查
         run: node --check app/static/app.js
 

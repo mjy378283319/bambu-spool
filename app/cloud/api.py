@@ -56,8 +56,7 @@ class ApiClient:
         "china": "cn.mqtt.bambulab.com",
         "global": "us.mqtt.bambulab.com",
     }
-    # 短信验证码接口固定走 cn 域名
-    SMS_URL = "https://api.bambulab.cn/api/v1/user-service/user/sendsmscode"
+    # 短信验证码接口固定走 cn 域名（上游 ha-bambulab const.py：SMS_CODE）
     TFA_URL = "https://bambulab.com/api/sign-in/tfa"
     CSRF_URL = "https://bambulab.com/api/sign-in/csrf"
 
@@ -72,6 +71,16 @@ class ApiClient:
     @property
     def mqtt_host(self) -> str:
         return self.MQTT_HOSTS[self.region]
+
+    @property
+    def sms_url(self) -> str:
+        """短信验证码接口。
+
+        曾经写成 https://api.bambulab.cn/api/v1/...（多一段 /api），
+        网关会直接返回 404 {"error_msg":"404 Route Not Found"}。
+        正确路径与其它 user-service 接口同级。
+        """
+        return self._url("/v1/user-service/user/sendsmscode")
 
     def _url(self, path: str) -> str:
         return f"{self.base}{path}"
@@ -146,6 +155,9 @@ class ApiClient:
             raise BambuCloudError("请求过于频繁，已被限流，请稍后再试。")
         if resp.status_code == 400 and allow_400:
             return
+        if resp.status_code == 404 and "route not found" in text.lower():
+            # 拓竹网关对未知路径的应答。多数情况是接口地址写错或已变更。
+            raise BambuCloudError("拓竹接口地址无效（404）。可能是接口变更，请升级本程序。")
         if resp.status_code >= 400:
             raise BambuCloudError(f"接口返回 {resp.status_code}：{text[:200]}")
 
@@ -193,7 +205,7 @@ class ApiClient:
 
     def request_sms_code(self, phone: str) -> None:
         resp = self._request(
-            "POST", self.SMS_URL, body={"phone": phone, "type": "codeLogin"}
+            "POST", self.sms_url, body={"phone": phone, "type": "codeLogin"}
         )
         self._check(resp)
 

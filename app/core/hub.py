@@ -166,9 +166,16 @@ class PrinterHub:
         api = ApiClient(region)
         if "@" in account:
             api.request_email_code(account)
-            return f"验证码已发送到邮箱 {account}"
-        api.request_sms_code(account)
-        return f"验证码已发送到手机 {account}"
+            message = f"验证码已发送到邮箱 {account}"
+        else:
+            api.request_sms_code(account)
+            message = f"验证码已发送到手机 {account}"
+        # 记下「正在等验证码」的状态，前端据此显示验证码输入框
+        self._save_account(
+            region=region, account=account, status="verifyCode",
+            status_message=message, access_token="", uid="",
+        )
+        return message
 
     async def login_with_code(self, account: str, code: str, region: str) -> dict:
         api = ApiClient(region)

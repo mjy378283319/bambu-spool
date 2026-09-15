@@ -1234,6 +1234,7 @@ async function sendCode() {
       method: "POST", body: JSON.stringify({ account, region }),
     });
     toast(result.message || "验证码已发送", "ok");
+    await loadStatus();  // 拉回 verifyCode 状态，让验证码输入框显示出来
   } catch (err) { toast(err.message, "err"); }
 }
 
