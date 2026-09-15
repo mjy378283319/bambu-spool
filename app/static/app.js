@@ -496,30 +496,41 @@ function stateTag(state) {
 
 /** 风扇通道：[state.fans 的键, 中文名, 是否必须显示]。
  *
- *  名字按拓竹官方口径（P2S 技术参数页 / 冷却风扇系统 Wiki / 屏幕操作指南）：
- *   - 部件冷却风扇：工具头前盖里那台，MQTT 里的 cooling_fan_speed；
- *   - 辅助部件冷却风扇：MQTT 里的 big_fan1_speed；P2S / X2 把它报在自适应风道
- *     切换组件里（device.airduct.parts），后端已经把这一路并进 aux；
- *   - 热端风扇：heatbreak_fan_speed。
- *  机型差异（官方 FAQ 原话：P2S「整机共 3 个风扇 —— 工具头上的部件冷却风扇、
- *  热端附近的热端风扇、装在自适应风道组件里的辅助部件冷却风扇」）：
- *   - P2S / X2 不配外排风扇（外排风扇是选配套件），所以这一档没有「腔体风扇」；
- *     装了左侧那台选配风扇才会多出一行，没装就自动隐藏；
- *   - X1 / P1 / A1 / H2 等：big_fan2 就是腔体风扇，照常显示。 */
+ *  P2S / X2 直接照抄拓竹官方 App（Bambu Handy / Studio）与打印机屏幕
+ *  「空调系统」页的四行与用词：部件 / 右(辅助) / 左(辅助) / 外排。
+ *  取值来源（详见 app/core/status.py 的注释）：
+ *   - 部件     cooling_fan_speed（工具头前盖组件里那台，M106 P1）
+ *   - 右(辅助) 自适应风道切换组件自带风扇，装在腔室右侧（device.airduct
+ *              parts[id=16]，M106 P2）。P2S 真机的 big_fan1_speed 恒为 0，
+ *              所以后端把 airduct 那一路并进 aux，兜底才用 big_fan1。
+ *   - 左(辅助) 选配的 12W 左侧辅助风扇（device.airduct parts[id=160]，M106 P10）
+ *   - 外排     选配的外排风扇套件（自带控制板并入空调系统；认不出部件就退回
+ *              big_fan2 档位）
+ *  左(辅助) / 外排 是选配件，没装就是 null → 界面写「未安装」，不假装成 0%。
+ *  热端风扇官方不列在这一页（自动控制），所以这里不显示。
+ *
+ *  X1 / P1 / A1 / H2 等机型没有自适应风道组件，沿用「腔体风扇」那套命名。 */
 function fanChannels(printer) {
   const model = String((printer && printer.model) || "").toUpperCase();
   const airduct = model.startsWith("P2") || model.startsWith("X2");
-  const rows = [
+  if (airduct) {
+    // 对齐拓竹官方 App / 打印机屏幕「空调系统」页的 4 行，顺序也照抄：
+    //   部件 → 右(辅助) → 左(辅助) → 外排
+    // 左(辅助) 与 外排 是选配件，没装时值为 null，界面显示「未安装」而不是 0%。
+    // 热端风扇官方不列在这一页（自动控制），所以这里不显示。
+    return [
+      ["cooling", "部件", true],
+      ["aux", "右(辅助)", true],
+      ["secondary", "左(辅助)", true],
+      ["exhaust", "外排", true],
+    ];
+  }
+  return [
     ["cooling", "部件冷却风扇", true],
     ["aux", "辅助部件冷却风扇", true],
+    ["chamber", "腔体风扇", true],
+    ["heatbreak", "热端风扇", true],
   ];
-  if (airduct) {
-    rows.push(["secondary", "左侧辅助风扇", false]);
-  } else {
-    rows.push(["chamber", "腔体风扇", true]);
-  }
-  rows.push(["heatbreak", "热端风扇", true]);
-  return rows;
 }
 
 /** #rrggbb → rgba(r,g,b,alpha)。解析失败退回中性灰。 */
@@ -528,6 +539,39 @@ function tint(hex, alpha) {
   if (!m) return `rgba(15, 23, 42, ${alpha})`;
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/** 料条该画多高（百分比），以及这个高度是否可信。
+ *
+ *  优先级：本系统台账的实测余重 > 机器上报的余重（克） > 机器上报的余量百分比。
+ *  都没有就返回 null，界面把料条压暗表示「量未知」——
+ *  以前不论剩多少都按满格画，用户明确反馈「不要耗材一直是满的」。
+ *
+ *  满盘容量取料盘的 initial_weight（默认 1000g），外挂/未绑定槽位退回机器的
+ *  tray_weight 标称值。返回值夹到 [MIN_FILL, 100]：快用完的盘也要留一条能看见的边，
+ *  否则用户会以为是空槽。 */
+const MIN_FILL_PCT = 7;
+function filFill(spool, tray) {
+  const clampPct = (v) => Math.max(MIN_FILL_PCT, Math.min(100, v));
+  // ⚠️ 不能用 Number(x)：Number(null) 是 0、Number("") 也是 0，会把「机器没上报
+  // 这个字段」误判成「余重就是 0 克」，于是料条被画成一小条（known 还是 true），
+  // 「未知」状态就永远不会出现。所以这里必须区分「没有值」和「值就是 0」。
+  const num = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  if (spool) {
+    const cap = num(spool.initial_weight) || 1000;
+    const rem = num(spool.remaining_weight);
+    if (rem !== null && cap > 0) return { pct: clampPct((rem / cap) * 100), known: true };
+  }
+  const trayCap = num(tray && tray.tray_weight) || 1000;
+  const grams = num(tray && tray.remain_weight_g);
+  if (grams !== null && trayCap > 0) return { pct: clampPct((grams / trayCap) * 100), known: true };
+  const remain = num(tray && tray.remain);
+  if (remain !== null && remain >= 0) return { pct: clampPct(remain), known: true };
+  return { pct: 100, known: false };
 }
 
 /** 把耗材色压暗，用作色条上克重标签的底色。 */
@@ -695,7 +739,10 @@ function renderTempCard(state) {
   </div>`;
 }
 
-/** 风扇状态：每条通道一根细进度条。值是后端换算好的百分比（原始 0-15 档位在解析层已经换算）。 */
+/** 风扇状态：每条通道一根细进度条。值是后端换算好的百分比（原始 0-15 档位在解析层已经换算）。
+ *
+ *  值为 null 表示机器没装这一件（左侧辅助风扇 / 外排风扇都是选配件），
+ *  这时不画进度条，直接写「未安装」—— 画成 0% 会让人以为是风扇停了。 */
 function renderFanCard(state, printer) {
   const fans = state.fans || {};
   const rows = fanChannels(printer).filter(([key, , required]) => required || fans[key] != null);
@@ -703,6 +750,13 @@ function renderFanCard(state, printer) {
   return `<div class="pcard">
     <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
     ${rows.map(([key, label]) => {
+      if (fans[key] == null) {
+        return `<div class="fan-row missing">
+          <span class="fan-name">${esc(label)}</span>
+          <span class="fan-bar"></span>
+          <span class="fan-val">未安装</span>
+        </div>`;
+      }
       const value = Math.max(0, Math.min(100, Number(fans[key]) || 0));
       return `<div class="fan-row">
         <span class="fan-name">${esc(label)}</span>
@@ -769,11 +823,13 @@ function renderTrayCard(unit, tray, printer) {
   const low = !!(spool && spool.is_low);
   const labelBg = low ? "#b42318" : shade(color, 0.78);
   const labelInk = low ? "#ffffff" : inkOn(labelBg);
+  const fill = filFill(spool, tray);
 
   return `<div class="tray-card ${tray.is_active ? "active" : ""} ${spool ? "" : "unbound"}" ${click}>
     <div class="tray-top"><span class="tray-code">${esc(code)}</span>${trayFlag(true, !!spool, !!tray.is_active)}</div>
     <div class="tray-fil">
-      <div class="fil-body" style="background:${esc(color)}"></div>
+      <div class="fil-body ${fill.known ? "" : "unknown"}"
+           style="background:${esc(color)};height:${fill.pct.toFixed(1)}%"></div>
       ${grams ? `<div class="fil-weight" style="background:${labelBg};color:${labelInk}">${esc(grams)}</div>` : ""}
     </div>
     <div class="fil-name" style="background:${tint(color, 0.16)}">${esc(material)}</div>
@@ -788,6 +844,9 @@ function renderExternalCard(ext, printer) {
   const grams = ext.remain_weight_g != null ? `${Math.round(ext.remain_weight_g)}g` : "";
   const material = occupied ? (ext.tray_type || ext.label || "未知") : "空";
   const label = shade(color, 0.78);
+  // 外挂那一路的绑定键就是 ams_id=-1（与 openSlotDialog 用的口径一致）
+  const boundSpool = ((S.bindingMap || {})[`${printer.id}:-1:0`] || {}).spool;
+  const fill = filFill(boundSpool, ext);
 
   return `<div class="pcard unit-card">
     <div class="pcard-head"><b>外挂料盘</b>
@@ -799,7 +858,8 @@ function renderExternalCard(ext, printer) {
           ${trayFlag(occupied, occupied, !!ext.is_active)}</div>
         <div class="tray-fil ${occupied ? "" : "empty"}">
           ${occupied
-            ? `<div class="fil-body" style="background:${esc(color)}"></div>`
+            ? `<div class="fil-body ${fill.known ? "" : "unknown"}"
+                 style="background:${esc(color)};height:${fill.pct.toFixed(1)}%"></div>`
             : "<span>空</span>"}
           ${occupied && grams ? `<div class="fil-weight" style="background:${label};color:${inkOn(label)}">${esc(grams)}</div>` : ""}
         </div>
@@ -915,9 +975,11 @@ function spoolRowHtml(spool) {
     ? `首次 ${first}${last ? `<br>最后 ${last}` : ""}`
     : '<span class="tag">未使用</span>';
 
+  // data-label 给窄屏卡片式布局用（CSS 里 td::before 取 attr(data-label)）：
+  // 手机上一行 9 列横向塞不下，会把表格拉出屏幕，所以窄屏改成竖排卡片。
   return `<tr class="clickable" onclick="openSpoolDetail(${spool.id})">
-    <td class="small muted">${spool.id}</td>
-    <td>
+    <td class="small muted" data-label="ID">${spool.id}</td>
+    <td class="cell-main">
       <div class="cell-name">
         <span class="swatch" style="background:${esc(spool.color_hex)}"></span>
         <div class="nm">
@@ -926,11 +988,11 @@ function spoolRowHtml(spool) {
         </div>
       </div>
     </td>
-    <td><span class="tag">${esc(spool.material)}</span></td>
-    <td><span class="hex-pill"><i style="background:${esc(spool.color_hex)}"></i>${esc((spool.color_hex || "").toUpperCase())}</span></td>
-    <td class="small muted">${esc(spool.finish || "普通")}</td>
-    <td class="num">${hasPrice ? "¥" + spool.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
-    <td>
+    <td data-label="类型"><span class="tag">${esc(spool.material)}</span></td>
+    <td data-label="颜色"><span class="hex-pill"><i style="background:${esc(spool.color_hex)}"></i>${esc((spool.color_hex || "").toUpperCase())}</span></td>
+    <td class="small muted" data-label="外观">${esc(spool.finish || "普通")}</td>
+    <td class="num" data-label="价格">${hasPrice ? "¥" + spool.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
+    <td data-label="剩余">
       <div class="bar-cell">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
           <span class="small">${spool.remaining_weight.toFixed(0)} g</span>
@@ -942,8 +1004,8 @@ function spoolRowHtml(spool) {
         </div>
       </div>
     </td>
-    <td class="tiny muted">${usage}</td>
-    <td onclick="event.stopPropagation()">
+    <td class="tiny muted" data-label="使用时间">${usage}</td>
+    <td class="cell-actions" onclick="event.stopPropagation()">
       <div class="row-actions">
         <button title="打印或导出这盘料的标签" onclick="openLabelDialog(${spool.id})">${ICO.tag}标签</button>
         <button title="手动补录消耗" onclick="openUseDialog(${spool.id})">${ICO.pencil}补录</button>
@@ -1544,15 +1606,15 @@ function renderJobs() {
     </tr></thead>
     <tbody>${slice.map((job) => `
       <tr class="clickable" onclick="openJobDetail(${job.id})">
-        <td class="small muted">${esc(job.task_id || job.cloud_task_id || job.id)}</td>
-        <td><div>${esc(job.title)}</div>
+        <td class="small muted" data-label="任务 ID">${esc(job.task_id || job.cloud_task_id || job.id)}</td>
+        <td class="cell-main"><div>${esc(job.title)}</div>
             <div class="tiny muted">${esc(fmtDuration(job.duration_seconds))} · 结束于 ${esc(job.progress_at_end)}%</div></td>
-        <td class="small">${esc(job.printer_name || "")}</td>
-        <td class="small muted">${esc(fmtTime(job.started_at))}</td>
-        <td class="num">${job.total_weight_g ? job.total_weight_g.toFixed(2) + " g" : "—"}</td>
-        <td class="num">${job.cost_total ? "¥" + job.cost_total.toFixed(2) : "—"}</td>
-        <td>${jobStatusTag(job.status, job.pending)}</td>
-        <td class="small muted">${job.source === "cloud_task" ? "云端任务记录"
+        <td class="small" data-label="打印机">${esc(job.printer_name || "")}</td>
+        <td class="small muted" data-label="时间">${esc(fmtTime(job.started_at))}</td>
+        <td class="num" data-label="耗材">${job.total_weight_g ? job.total_weight_g.toFixed(2) + " g" : "—"}</td>
+        <td class="num" data-label="耗材费">${job.cost_total ? "¥" + job.cost_total.toFixed(2) : "—"}</td>
+        <td data-label="状态">${jobStatusTag(job.status, job.pending)}</td>
+        <td class="small muted" data-label="数据来源">${job.source === "cloud_task" ? "云端任务记录"
           : job.source === "manual" ? "手动录入" : "无数据"}</td>
       </tr>`).join("")}</tbody></table>`;
   renderTableFoot("jobFooter", "", S.jobs.length, page, size, "job");
@@ -1755,17 +1817,19 @@ function renderSettings() {
     </tbody></table>`;
 
   const printers = system.printers || [];
+  // data-label 给窄屏卡片式布局用（CSS 里 #deviceBox td::before 取 attr(data-label)）：
+  // 这张表 5 列，在 360px 手机上会把整页推出屏幕，所以窄屏改成竖排卡片。
   document.getElementById("deviceBox").innerHTML = printers.length
     ? `<table><thead><tr><th>名称</th><th>机型</th><th>序列号</th><th>状态</th><th></th></tr></thead>
         <tbody>${printers.map((entry) => `
           <tr>
-            <td><input value="${esc(entry.printer.name)}" style="max-width:180px"
+            <td class="cell-main"><input value="${esc(entry.printer.name)}" style="max-width:180px"
                  onchange="renameDevice(${entry.printer.id}, this.value)" /></td>
-            <td class="small">${esc(entry.printer.model || "未知")}</td>
-            <td class="small muted">${esc(entry.printer.serial)}</td>
-            <td><span class="tag ${entry.printer.enabled ? "green" : ""}">
+            <td class="small" data-label="机型">${esc(entry.printer.model || "未知")}</td>
+            <td class="small muted" data-label="序列号">${esc(entry.printer.serial)}</td>
+            <td data-label="状态"><span class="tag ${entry.printer.enabled ? "green" : ""}">
               ${entry.printer.enabled ? "已启用" : "已停用"}</span></td>
-            <td>
+            <td class="cell-actions">
               <button class="sm ghost" onclick="toggleDevice(${entry.printer.id}, ${!entry.printer.enabled})">
                 ${entry.printer.enabled ? "停用" : "启用"}</button>
             </td>
@@ -2543,5 +2607,9 @@ async function boot() {
 
 // 定时兜底刷新（WebSocket 断线时也能保持数据新鲜）
 setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {}); }, 45000);
+
+// 无头自测钩子（tests/test_panel_fill.mjs 直跑 node 校验用，浏览器里没有副作用）。
+// 风扇四行命名与料条高度口径是照着用户反馈改的，纯函数肉眼很难盯住，钉在这里。
+window.panelDebug = { fanChannels, filFill, MIN_FILL_PCT };
 
 boot();

@@ -459,10 +459,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* 风扇四条通道 */
 .fan-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
-.fan-name { color: var(--text-2); min-width: 72px; }
+.fan-name { color: var(--text-2); min-width: 76px; }
 .fan-bar { flex: 1; height: 5px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .fan-bar > span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .35s; }
 .fan-val { color: var(--text-2); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+/* 选配件没装：不画成 0%（那会让人以为风扇停了），写「未安装」并把条压成虚线 */
+.fan-row.missing .fan-bar {
+  background: transparent; border: 1px dashed var(--border-strong); height: 6px;
+}
+.fan-row.missing .fan-val { color: var(--text-3); }
 
 /* ── AMS / AMS HT / 外挂料盘的槽位 ─────────────────── */
 .unit-card .pcard-head { margin-bottom: 12px; }
@@ -501,16 +506,35 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tray-flag.live::after { content: ""; position: absolute; inset: 3.6px; border-radius: 50%; background: var(--accent-2); }
 .tray-flag.off { border-style: dashed; opacity: .55; }
 
-/* 竖直料条：色块居中，克重标签压在色条下端 */
-.tray-fil { position: relative; height: 96px; display: flex; align-items: center; justify-content: center; }
-.fil-body { width: 46px; height: 96px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1); }
+/* 竖直料条：槽位底色 = 满盘容量，彩色填充 = 当前剩余量，从底部往上长。
+   填充高度由 renderTrayCard 按「剩余克重 ÷ 满盘克重」写成内联 height。
+   以前 .fil-body 写死 96px，所以不论剩多少都画成满的 —— 已改。 */
+.tray-fil {
+  position: relative; height: 96px;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.tray-fil:not(.empty)::before {
+  content: ""; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 46px; height: 96px; border-radius: 6px;
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .06);
+}
+.fil-body {
+  position: relative; z-index: 1;
+  width: 46px; height: 96px; min-height: 6px;
+  border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1);
+  transition: height .3s;
+}
+/* 没登记余量、机器也没上报 → 不给满格假象，压暗表示「量未知」 */
+.fil-body.unknown { opacity: .45; }
 .tray-fil.empty {
   width: 46px; margin: 0 auto;
   border: 1px dashed var(--border-strong); border-radius: 6px;
   color: var(--text-3); font-size: 12px;
+  align-items: center;
 }
 .fil-weight {
-  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 5px; transform: translateX(-50%);
+  z-index: 2;
   padding: 1px 7px; border-radius: 999px; white-space: nowrap;
   font-size: 11.5px; font-weight: 600; box-shadow: 0 1px 3px rgba(15, 23, 42, .18);
 }
@@ -778,4 +802,96 @@ label.field.check > span { display: inline; margin-bottom: 0; }
   .user-chip .uname { display: none; }
   .auth-card { padding: 24px 20px 20px; }
   .card, .filter-card, .table-card { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ── 手机端：表格改竖排卡片 ──────────────────────────────
+   料盘表一行 9 列、任务表 8 列，手机上怎么收都会把表格拉出屏幕
+   （右侧「外观/价格」直接被裁掉）。窄屏下把每行变成一张卡片，
+   列名由 td::before 从 data-label 取，不用改 JS 结构。 */
+@media (max-width: 700px) {
+  /* 兜底：任何一处还超宽的表格/长串都不该把整页推出屏幕。
+     用 clip 而不是 hidden —— hidden 会建滚动容器，顶栏的 sticky 会失效。 */
+  body { overflow-x: clip; }
+  .table-card { padding-left: 12px; padding-right: 12px; }
+  /* 窄屏下把「列多到放不下」的表格统一改成竖排卡片：一行一张卡，
+     列名靠 td::before 取 data-label 显示。两个位置都要覆盖：
+       .table-card —— 料盘库存 / 打印记录（本身带 data-label）
+       #deviceBox  —— 设置页的设备表（5 列：名称/机型/序列号/状态/操作）
+     ⚠️ 设置页那张表在普通 .card 里、不是 .table-card，所以漏了它会在 360px
+     屏上把整页推出 44px（真机截图里看得见横向滚动条）。 */
+  :is(.table-card, #deviceBox) table,
+  :is(.table-card, #deviceBox) tbody,
+  :is(.table-card, #deviceBox) tr,
+  :is(.table-card, #deviceBox) td { display: block; width: auto; }
+  :is(.table-card, #deviceBox) thead { display: none; }
+  :is(.table-card, #deviceBox) tbody tr {
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--surface); padding: 10px 12px 6px; margin-bottom: 10px;
+  }
+  :is(.table-card, #deviceBox) tbody tr:last-child { margin-bottom: 0; }
+  :is(.table-card, #deviceBox) tbody tr:hover { background: var(--surface); }
+  :is(.table-card, #deviceBox) tbody td {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 4px 0; border-bottom: 0;
+  }
+  :is(.table-card, #deviceBox) tbody td::before {
+    content: attr(data-label);
+    flex: none; width: 62px;
+    font-size: 11.5px; color: var(--text-3);
+  }
+  /* 主标题行与操作行占满整行，且不要列名 */
+  :is(.table-card, #deviceBox) tbody td.cell-main { display: block; padding-bottom: 8px; }
+  :is(.table-card, #deviceBox) tbody td.cell-main::before { display: none; }
+  :is(.table-card, #deviceBox) tbody td.cell-actions {
+    display: block; padding-top: 8px; border-top: 1px dashed var(--border);
+  }
+  :is(.table-card, #deviceBox) tbody td.cell-actions::before { display: none; }
+  :is(.table-card, #deviceBox) td.num { text-align: left; }
+  /* 操作按钮摊满一行，手指好点 */
+  .table-card .row-actions { flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
+  .table-card .row-actions button {
+    flex: 1 1 auto; justify-content: center; padding: 7px 10px;
+    border-color: var(--border); background: var(--surface-2);
+  }
+  /* 筛选区在手机上改成两列，否则 8 个筛选框会把首屏占满 */
+  .filter-card { padding: 14px 14px 16px; }
+  .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .filter-grid .fld.wide { grid-column: span 2; }
+  .filter-grid .fld-actions { grid-column: span 2; }
+  /* 页面标题区的按钮换行但不撑破 */
+  .page-head { flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .page-head h1 { font-size: 19px; }
+  .page-actions { width: 100%; gap: 8px; }
+  .page-actions button, .page-actions a { flex: 1 1 auto; justify-content: center; }
+  /* 设置页的「系统信息」是两列表，本来就窄，不用卡片化；
+     只要保证长值（时间串、错误消息）能换行，别把这一列撑宽。 */
+  #systemBox td { word-break: break-word; }
+  /* 弹窗里的表格形态太杂（有的是编辑表、有的是清单），一律卡片化反而更乱；
+     给弹窗内容自己一片横向滚动区，别把整页推出去。顺便收一收内边距，
+     360px 屏上 overlay 16px + modal 22px 的留白太奢侈。 */
+  .overlay { padding: 20px 10px; }
+  .modal { padding: 16px 14px; border-radius: 14px; }
+  #modalBody { overflow-x: auto; }
+}
+
+@media (max-width: 430px) {
+  /* 极小屏再退一档：筛选单列，风扇/温度属性单列 */
+  .filter-grid { grid-template-columns: 1fr; }
+  .filter-grid .fld.wide, .filter-grid .fld-actions { grid-column: span 1; }
+  .kv-grid { grid-template-columns: 1fr; }
+  :is(.table-card, #deviceBox) tbody td::before { width: 54px; }
+  /* 顶栏在 360px 上装不下一条：logo + 4 个导航图标 + 连接状态 + 刷新 + 账号 + 退出
+     一共要 410px 左右，flex 会把连接状态那两个字压成一列竖字（顶栏高度是写死的
+     60px，于是看起来像一堆叠字）。
+     改成两行：第一行 logo / 连接状态 / 刷新 / 账号，第二行导航铺满整行。
+     这样 4 个图标还能均匀分布，手指也好点。 */
+  .topbar-inner {
+    height: auto; flex-wrap: wrap;
+    padding: 8px 10px; gap: 6px; row-gap: 6px;
+  }
+  .topbar .spacer { display: none; }
+  .conn { margin-left: auto; }
+  .nav { order: 3; width: 100%; justify-content: space-between; }
+  .nav button { padding: 8px 14px; }
+  .user-chip .btn { padding: 6px 8px; }
 }

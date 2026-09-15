@@ -5,13 +5,21 @@
     heatbreak_fan_speed 上报的是 **0-15 的 PWM 档位**，不是百分比。
     直接当百分比显示就会变成「14%」这种明显不对的数字（实际是 90%）。
     口径与官方 App、ha-bambulab 一致：value / 15 * 100 再按 10% 取整。
-  - airduct_fans：自适应风道切换组件（P2S / X2）的风扇转速。
-    真机 P2S 样本（ha-bambulab MOCK-P2S.json）里
-        parts = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
-    所以判定依据是 **func==0 表示风扇、func==6 表示风门**，另外兼容 ha-bambulab
-    用的 id==160。`state` 本身就是百分比，**不能再除以 15**。
+  - airduct_*：自适应风道切换组件（P2S / X2）里各部件的转速。
+    真机 P2S 样本（research/_MOCK-P2S.json）里
+        parts    = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
+        modeList = [{"ctrl":[16,32,160]}, {"ctrl":[16,32],"off":[160]}]
+    **按部件 id 认身份**（func 在不同固件版本间会漂：风门既报过 6 也报过 8）：
+        16  → 右(辅助)，组件自带那台
+        32  → 风门，不是风扇，界面不显示
+        160 → 左(辅助)，选配
+        其余 func==0 的部件 → 当外排（外排套件并入空调系统后新增的部件）
+    `state` 本身就是百分比，**不能再除以 15**。
     ⚠️ 关键：P2S 真机上 big_fan1_speed / big_fan2_speed 恒为 0，
-    它的辅助部件冷却风扇只在 airduct 里报 —— 只看 big_fan1 会永远显示 0%。
+    它的辅助风扇只在 airduct 里报 —— 只看 big_fan1 会永远显示 0%。
+  - 面板四行命名照抄拓竹官方 App / 打印机屏幕「空调系统」页：
+    部件 / 右(辅助) / 左(辅助) / 外排。后两行是选配件，没装要下发 null，
+    界面写「未安装」而不是假装 0%。
   - 仓温：P2S / 新固件在 device.ctc.info.temp（低 16 位=当前值、高 16 位=目标值），
     X1 等机型在 print.chamber_temper。只认后者的话 P2S 上仓温永远是「—」。
   - state_dict：fans 五个通道与 chamber_target 都要下发，且 aux 要用 airduct 的值。
@@ -31,8 +39,14 @@ os.environ["DATA_DIR"] = os.path.join(ROOT, "data", "testfans")
 
 from app.core.hub import hub  # noqa: E402
 from app.core.status import (  # noqa: E402
+    AIRDUCT_PART_FLAP,
+    AIRDUCT_PART_LEFT_AUX,
+    AIRDUCT_PART_RIGHT_AUX,
     airduct_fan_percent,
     airduct_fans,
+    airduct_left_aux_percent,
+    airduct_other_fan_percent,
+    airduct_part_states,
     fan_percent,
     parse_report,
 )
@@ -88,28 +102,98 @@ def test_airduct_fans() -> None:
 
     # 真机 P2S 样本：func 0 = 风扇（state 90），func 6 = 风门
     real = parts((0, 16, 90), (6, 32, 0))
-    check("真机 P2S 只认 func==0 那台风扇", airduct_fans(real) == [90], str(airduct_fans(real)))
-    check("真机样本取第一台就是辅助部件冷却风扇", airduct_fan_percent(real) == 90)
+    check("真机 P2S 只收风扇，风门被排掉", airduct_fans(real) == [90], str(airduct_fans(real)))
+    check("真机样本的右(辅助)就是 90%", airduct_fan_percent(real) == 90)
 
     check("state 已是百分比，直接透传", airduct_fans(parts((0, 16, 70))) == [70])
     check("state=0 也认（风扇停转）", airduct_fans(parts((0, 16, 0))) == [0])
-    check("风门 func==6 不当风扇", airduct_fans(parts((6, 32, 90))) == [])
+    check("风门 id==32 不当风扇", airduct_fans(parts((6, 32, 90))) == [])
+    check("风门换个 func 报也照样不当风扇", airduct_fans(parts((8, 32, 90))) == [])
     check("没装的机型 → 空列表", airduct_fans({"device": {}}) == [])
     check("整条 device 缺失 → 空列表", airduct_fans({}) == [])
     check("老机型没有 device 块 → 空列表", airduct_fans({"big_fan1_speed": "5"}) == [])
     check("没有组件时单值接口返回 None", airduct_fan_percent({"big_fan1_speed": "5"}) is None)
     check("state 超范围封顶 100", airduct_fans(parts((0, 16, 150))) == [100])
 
-    # 兼容：ha-bambulab 用 id==160 认「第二辅助风扇」
+    # 兼容：ha-bambulab 用 id==160 认「左侧辅助风扇」
     check("id==160 即使 func 非 0 也认", airduct_fans(parts((9, 160, 40))) == [40])
 
     # 装了左侧那台选配风扇就有两台
     two = parts((0, 16, 90), (0, 160, 40))
     check("两台风扇按上报顺序返回", airduct_fans(two) == [90, 40], str(airduct_fans(two)))
-    check("单值接口只取第一台", airduct_fan_percent(two) == 90)
+    check("右(辅助) 仍只取 id==16 那台", airduct_fan_percent(two) == 90)
 
     check("部件不是字典也不炸", airduct_fans({"device": {"airduct": {"parts": ["x"]}}}) == [])
     check("parts 缺失不炸", airduct_fans({"device": {"airduct": {}}}) == [])
+    check("部件缺 id 但有 func==0 → 仍按风扇认（拿不到通道归属）",
+          airduct_fans({"device": {"airduct": {"parts": [{"func": 0, "state": 55}]}}}) == [55],
+          str(airduct_fans({"device": {"airduct": {"parts": [{"func": 0, "state": 55}]}}})))
+    check("部件既缺 id 又缺 func → 不认",
+          airduct_fans({"device": {"airduct": {"parts": [{"state": 55}]}}}) == [])
+
+
+# ── 2b. 面板四行：部件 / 右(辅助) / 左(辅助) / 外排 ───────────────
+def test_panel_four_channels() -> None:
+    print("== 面板四路（部件 / 右(辅助) / 左(辅助) / 外排） ==")
+    st = airduct_part_states(parts((0, 16, 90), (6, 32, 0), (0, 160, 40)))
+    check("按 id 索引各部件的 state",
+          st == {AIRDUCT_PART_RIGHT_AUX: 90, AIRDUCT_PART_FLAP: 0,
+                 AIRDUCT_PART_LEFT_AUX: 40},
+          str(st))
+    check("空组件 → 空字典", airduct_part_states({"device": {}}) == {})
+    check("state 越界也夹到 100",
+          airduct_part_states(parts((0, 16, 300)))[AIRDUCT_PART_RIGHT_AUX] == 100)
+
+    # 左(辅助)：选配件，没装必须是 None（界面据此写「未安装」）
+    check("没装左(辅助) → None", airduct_left_aux_percent(parts((0, 16, 90))) is None)
+    check("装了左(辅助) → 取到 40", airduct_left_aux_percent(parts((0, 16, 90), (0, 160, 40))) == 40)
+    check("左(辅助) 不会被右(辅助) 顶替",
+          airduct_left_aux_percent(parts((0, 16, 90))) is None)
+    check("风门不会被当作左(辅助)", airduct_left_aux_percent(parts((6, 32, 0))) is None)
+
+    # 外排：先在 airduct 里找「多出来的风扇部件」，找不到由 parse_report 退回 big_fan2
+    check("没有额外部件 → None（交给 big_fan2 兜底）",
+          airduct_other_fan_percent(parts((0, 16, 90), (6, 32, 0))) is None)
+    check("多出来的风扇部件当外排",
+          airduct_other_fan_percent(parts((0, 16, 90), (0, 200, 60))) == 60)
+    check("右/左(辅助) 与风门都排除在外",
+          airduct_other_fan_percent(parts((0, 16, 90), (0, 160, 40), (6, 32, 0))) is None)
+    check("多出来的部件但 func 不是 0 → 不当外排",
+          airduct_other_fan_percent(parts((0, 16, 90), (6, 200, 60))) is None)
+
+
+def test_exhaust_fallback() -> None:
+    print("== 外排（airduct 额外部件 → big_fan2 兜底） ==")
+    # 装了外排套件、固件以新增部件上报
+    s = parse_report({"print": {
+        "big_fan1_speed": "0",
+        "big_fan2_speed": "0",
+        "device": {"airduct": {"parts": [
+            {"func": 0, "id": 16, "state": 90},
+            {"func": 0, "id": 200, "state": 60},
+            {"func": 6, "id": 32, "state": 0},
+        ]}},
+    }})
+    check("airduct 里的额外风扇部件优先当外排",
+          s is not None and s.exhaust_fan_pct == 60, str(s and s.exhaust_fan_pct))
+
+    # 认不出部件（老固件 / X 系列）：退回 big_fan2 档位
+    s2 = parse_report({"print": {
+        "big_fan1_speed": "0",
+        "big_fan2_speed": "9",
+        "device": {"airduct": {"parts": [{"func": 0, "id": 16, "state": 90}]}},
+    }})
+    check("认不出部件时外排退回 big_fan2（9/15 → 60%）",
+          s2 is not None and s2.exhaust_fan_pct == 60, str(s2 and s2.exhaust_fan_pct))
+
+    # 两路都没有（P1/A1 这类没有 big_fan2 的机器）→ None，界面写「未安装」
+    s3 = parse_report({"print": {"big_fan1_speed": "5"}})
+    check("两路都没有 → None", s3 is not None and s3.exhaust_fan_pct is None,
+          str(s3 and s3.exhaust_fan_pct))
+
+    s4 = parse_report({"print": {"big_fan2_speed": "0"}})
+    check("big_fan2 报 0 也算装了（0% 而不是未安装）",
+          s4 is not None and s4.exhaust_fan_pct == 0, str(s4 and s4.exhaust_fan_pct))
 
 
 # ── 3. 仓温两个来源 ─────────────────────────────────────────────
@@ -177,24 +261,27 @@ def test_real_p2s_report() -> None:
     check("热端风扇 100%（15/15）", state.heatbreak_fan_pct == 100, str(state.heatbreak_fan_pct))
     check("big_fan1 真机为 0，不能拿它当辅助风扇",
           state.aux_fan_pct == 0, str(state.aux_fan_pct))
-    check("辅助部件冷却风扇从 airduct 取到 90%",
+    check("右(辅助) 从 airduct 取到 90%",
           state.airduct_fan_pct == 90, str(state.airduct_fan_pct))
-    check("真机 P2S 没装左侧选配风扇 → secondary 为 None",
+    check("真机 P2S 没装左(辅助) → secondary 为 None",
           state.secondary_aux_fan_pct is None, str(state.secondary_aux_fan_pct))
+    check("外排退回 big_fan2（真机 0）→ 0%", state.exhaust_fan_pct == 0,
+          str(state.exhaust_fan_pct))
     check("仓温 37℃", state.chamber_temper == 37.0, str(state.chamber_temper))
     check("热床 55/55℃", state.bed_temper == 55.0 and state.bed_target == 55.0)
     check("喷嘴 220/220℃", state.nozzle_temper == 220.0 and state.nozzle_target == 220.0)
 
     payload = hub.state_dict(state, 1)
     fans = payload.get("fans") or {}
-    for key in ("cooling", "aux", "chamber", "heatbreak", "secondary"):
+    for key in ("cooling", "aux", "chamber", "heatbreak", "secondary", "exhaust"):
         check(f"下发风扇通道 {key}", key in fans, str(fans))
     check("下发的 aux 用的是 airduct 的值（90）而不是 big_fan1（0）",
           fans.get("aux") == 90, str(fans))
     check("下发 chamber（真机 0，P2S 无此硬件）", fans.get("chamber") == 0, str(fans))
+    check("下发 exhaust（真机退回 big_fan2 = 0）", fans.get("exhaust") == 0, str(fans))
     check("下发 chamber_target", payload.get("chamber_target") == 0.0, str(payload.get("chamber_target")))
     check("下发仓温", payload.get("chamber_temper") == 37.0, str(payload.get("chamber_temper")))
-    check("P2S 三台风扇都能取到值（部件 / 辅助 / 热端）",
+    check("P2S 三台风扇都能取到值（部件 / 右(辅助) / 热端）",
           fans.get("cooling") == 70 and fans.get("aux") == 90 and fans.get("heatbreak") == 100,
           str(fans))
 
@@ -207,16 +294,25 @@ def test_real_p2s_report() -> None:
             {"func": 6, "id": 32, "state": 0},
         ]},
     }}})
-    check("装了左侧风扇时 secondary 取到 40%",
+    check("装了左(辅助) 时 secondary 取到 40%",
           with_left is not None and with_left.secondary_aux_fan_pct == 40,
           str(with_left and with_left.secondary_aux_fan_pct))
-    check("装了左侧风扇时 aux 仍是 90%",
+    check("装了左(辅助) 时 aux 仍是 90%",
           with_left is not None and (hub.state_dict(with_left, 1)["fans"] or {}).get("aux") == 90)
+    check("装了左(辅助) 后该通道下发 40 而不是 null",
+          with_left is not None and (hub.state_dict(with_left, 1)["fans"] or {}).get("secondary") == 40,
+          str(with_left and (hub.state_dict(with_left, 1)["fans"] or {}).get("secondary")))
+
+    # 左(辅助) 没装：下发 null，前端据此写「未安装」
+    check("没装左(辅助) 时下发 null",
+          (fans.get("secondary") is None), str(fans.get("secondary")))
 
 
 if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
+    test_panel_four_channels()
+    test_exhaust_fallback()
     test_chamber_temp()
     test_real_p2s_report()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")

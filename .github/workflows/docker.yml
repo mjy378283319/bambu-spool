@@ -60,6 +60,9 @@ jobs:
       - name: 运行标签光栅打包自测
         run: node tests/test_label_raster.mjs
 
+      - name: 运行设备面板口径自测（风扇命名 / 料条高度）
+        run: node tests/test_panel_fill.mjs
+
   build:
     name: 构建并推送镜像
     runs-on: ubuntu-latest

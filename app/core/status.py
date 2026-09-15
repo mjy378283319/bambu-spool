@@ -74,17 +74,35 @@ def _bit_set(bits_hex: str, index: int) -> Optional[bool]:
     return bool((value >> index) & 1)
 
 
-# ── 自适应风道切换组件（P2S / X2）里的风扇 ──────────────────────
-# device.airduct.parts[] 是真机报文里实际存在的部件列表，两个字段区分身份：
+# ── 自适应风道切换组件（P2S / X2）里的部件 ──────────────────────
+# device.airduct.parts[] 是真机报文里的部件列表，靠 id 认身份、靠 func 区分品类：
 #   func == 0  → 风扇类部件，state 就是转速百分比
-#   func == 6  → 风门 / 风道切换机构（例如 P2S 真机的 {"func":6,"id":32}）
-# 真机 P2S 样本（ha-bambulab MOCK-P2S.json）:
-#   parts = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
-# 注意这一档 **big_fan1_speed / big_fan2_speed 都是 0** —— P2S 的辅助部件冷却风扇
-# 不在 big_fan1 里报，而是在 airduct 里报，所以光看 big_fan1 会永远显示 0%。
+#   func == 6 / 8 → 风门 / 风道切换机构（真机 P2S 是 {"func":6,"id":32}，
+#                  另一个固件版本报 func 8，所以只按 id 认、不靠 func 认）
+#
+# 真机 P2S 样本（research/_MOCK-P2S.json）:
+#   parts   = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
+#   modeList= [{"ctrl":[16,32,160]}, {"ctrl":[16,32],"off":[160]}]
+# 注意 **big_fan1_speed / big_fan2_speed 在这份真机报文里都是 0** —— P2S 的
+# 辅助风扇不在 big_fan1 里报，而是在 airduct 里报，所以光看 big_fan1 永远显示 0%。
+#
+# 拓竹官方 App「空调系统 / 冷却模式」对 P2S 显示 4 行，命名与本文件一致：
+#   部件 / 右(辅助) / 左(辅助) / 外排
+# 官方 Wiki（P2S 冷却风扇系统、风扇介绍）说明：
+#   - 部件冷却风扇：工具头前盖组件内置（M106 P1）
+#   - 右(辅助)：自适应风道切换组件自带的风扇，装在腔室右侧（M106 P2）
+#   - 左(辅助)：选配的 12W 左侧辅助风扇（M106 P10），没装就不该显示数值
+#   - 外排：选配的外排风扇套件，装在背板，自带控制板（M142 自动外排）
+#     → 套件装好后会被并入空调系统，外排不在 parts 的固定三个 id 里。
 AIRDUCT_FAN_FUNC = 0
-# ha-bambulab 另外用 id==160 认「第二辅助风扇」，一并兼容
-AIRDUCT_FAN_ID = 160
+# 自适应风道切换组件自带的辅助风扇 → 面板「右(辅助)」
+AIRDUCT_PART_RIGHT_AUX = 16
+# 风道切换风门，不是风扇，面板不显示
+AIRDUCT_PART_FLAP = 32
+# 左侧选配辅助风扇 → 面板「左(辅助)」；ha-bambulab 用 id==160 认这台
+AIRDUCT_PART_LEFT_AUX = 160
+# 已知的非风扇部件，识别「剩余的风扇部件」时要排掉
+AIRDUCT_NON_FAN_IDS = frozenset({AIRDUCT_PART_FLAP})
 
 
 def fan_percent(raw: Any) -> int:
@@ -103,38 +121,87 @@ def fan_percent(raw: Any) -> int:
     return max(0, min(100, int(round(percent / 10.0)) * 10))
 
 
-def airduct_fans(block: dict) -> list[int]:
-    """自适应风道切换组件里各风扇的转速（百分比）。
+def airduct_part_states(block: dict) -> dict[int, int]:
+    """自适应风道切换组件里各部件的 state（百分比），按部件 id 索引。
 
     `state` 本身就是百分比（0-100），**不能再除以 15**，直接透传。
-    返回顺序与上报顺序一致：第 1 个是组件自带的辅助部件冷却风扇，
-    若还装了左侧那台选配风扇则会多一个。
-    没装这个组件的机型（X1 / P1 / A1）不上报 device.airduct，返回空列表，
+    没装这个组件的机型（X1 / P1 / A1）不上报 device.airduct，返回空字典，
     界面据此隐藏这些行。
     """
     device = block.get("device")
     if not isinstance(device, dict):
-        return []
+        return {}
     airduct = device.get("airduct")
     if not isinstance(airduct, dict):
-        return []
-    out: list[int] = []
+        return {}
+    out: dict[int, int] = {}
     for part in airduct.get("parts") or []:
         if not isinstance(part, dict):
             continue
+        part_id = _as_int(part.get("id"), -1)
+        if part_id < 0:
+            continue
+        out[part_id] = max(0, min(100, _as_int(part.get("state"))))
+    return out
+
+
+def airduct_fans(block: dict) -> list[int]:
+    """组件里的**风扇**转速（百分比），按上报顺序。
+
+    风门（id 32）不算风扇，会被排掉；其余部件一律按风扇看待 ——
+    这样选了外排套件、固件多报一个部件时也能自动带出来。
+    func 存在且等于 0 的部件也算（兜底认法，id 表没覆盖的机型靠它）。
+    """
+    parts = _airduct_parts(block)
+    out: list[int] = []
+    for part in parts:
+        part_id = _as_int(part.get("id"), -1)
+        if part_id in AIRDUCT_NON_FAN_IDS:
+            continue
         is_fan = (
             _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC
-            or _as_int(part.get("id"), -1) == AIRDUCT_FAN_ID
+            or part_id in (AIRDUCT_PART_RIGHT_AUX, AIRDUCT_PART_LEFT_AUX)
         )
         if is_fan:
             out.append(max(0, min(100, _as_int(part.get("state")))))
     return out
 
 
+def _airduct_parts(block: dict) -> list[dict]:
+    """取 device.airduct.parts 里结构合法的条目。"""
+    device = block.get("device")
+    if not isinstance(device, dict):
+        return []
+    airduct = device.get("airduct")
+    if not isinstance(airduct, dict):
+        return []
+    return [p for p in (airduct.get("parts") or []) if isinstance(p, dict)]
+
+
 def airduct_fan_percent(block: dict) -> Optional[int]:
-    """组件自带那台辅助部件冷却风扇的转速；机型没有该组件时返回 None。"""
-    fans = airduct_fans(block)
-    return fans[0] if fans else None
+    """组件自带那台辅助部件冷却风扇（右辅助）的转速；没有该组件时返回 None。"""
+    return airduct_part_states(block).get(AIRDUCT_PART_RIGHT_AUX)
+
+
+def airduct_left_aux_percent(block: dict) -> Optional[int]:
+    """左侧选配辅助风扇的转速；没装返回 None。"""
+    return airduct_part_states(block).get(AIRDUCT_PART_LEFT_AUX)
+
+
+def airduct_other_fan_percent(block: dict) -> Optional[int]:
+    """除右/左辅助、风门之外的**额外风扇部件**的转速。
+
+    外排风扇套件自带控制板、并入空调系统后，很可能就以新增部件的形式出现。
+    认出来就优先用它当「外排」的读数，认不出来再退回 big_fan2。
+    """
+    known = {AIRDUCT_PART_RIGHT_AUX, AIRDUCT_PART_LEFT_AUX} | set(AIRDUCT_NON_FAN_IDS)
+    for part in _airduct_parts(block):
+        part_id = _as_int(part.get("id"), -1)
+        if part_id in known or part_id < 0:
+            continue
+        if _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC:
+            return max(0, min(100, _as_int(part.get("state"))))
+    return None
 
 
 @dataclass
@@ -224,10 +291,12 @@ class PrinterState:
     aux_fan_pct: int = 0
     chamber_fan_pct: int = 0
     heatbreak_fan_pct: int = 0
-    # 自适应风道切换组件自带的辅助部件冷却风扇（P2S/X2）；机型没有该组件时为 None
+    # 自适应风道切换组件自带的辅助风扇（P2S/X2「右(辅助)」）；没有该组件时为 None
     airduct_fan_pct: Optional[int] = None
-    # 组件里的第二台风扇（左侧选配那台）；只有上报了才不是 None
+    # 「左(辅助)」——左侧选配那台；只有上报了才不是 None
     secondary_aux_fan_pct: Optional[int] = None
+    # 「外排」——外排风扇套件；没装 / 没上报时退回 big_fan2 档位，再没有才是 None
+    exhaust_fan_pct: Optional[int] = None
 
     wifi_signal: str = ""
     lights: list[str] = field(default_factory=list)
@@ -341,9 +410,19 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     state.aux_fan_pct = fan_percent(block.get("big_fan1_speed"))
     state.chamber_fan_pct = fan_percent(block.get("big_fan2_speed"))
     state.heatbreak_fan_pct = fan_percent(block.get("heatbreak_fan_speed"))
-    duct = airduct_fans(block)
-    state.airduct_fan_pct = duct[0] if duct else None
-    state.secondary_aux_fan_pct = duct[1] if len(duct) > 1 else None
+
+    # P2S/X2 的辅助风扇报在自适应风道组件里，按部件 id 取，比 big_fan1 可靠。
+    # 没装该组件的机型（X1/P1/A1）这里就是 None，界面改走 big_fan1。
+    state.airduct_fan_pct = airduct_fan_percent(block)
+    state.secondary_aux_fan_pct = airduct_left_aux_percent(block)
+
+    # 外排：套件并入空调系统后会多报一个风扇部件，优先用它；
+    # 没有就退回 big_fan2（X 系列与 P2S 外排/腔体都走这一路档位）
+    extra = airduct_other_fan_percent(block)
+    if extra is not None:
+        state.exhaust_fan_pct = extra
+    elif block.get("big_fan2_speed") is not None:
+        state.exhaust_fan_pct = state.chamber_fan_pct
 
     state.wifi_signal = _as_str(block.get("wifi_signal"))
 
