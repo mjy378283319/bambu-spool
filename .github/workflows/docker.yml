@@ -46,6 +46,9 @@ jobs:
       - name: 运行 AMS / AMS HT 状态归一自测
         run: python tests/test_ams.py
 
+      - name: 运行风扇档位与仓温解析自测
+        run: python tests/test_fans_temps.py
+
       - name: 运行标签二维码自测
         run: python tests/test_labels.py
 

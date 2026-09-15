@@ -47,6 +47,9 @@ MOCK_EXT_TRAY = {
     "tray_weight": "1000",
 }
 
+# 仓温 32 位打包值：低 16 位 = 当前 27℃，高 16 位 = 目标 0（P2S 的 ctc 口径）
+MOCK_CHAMBER_TEMP = 27
+
 
 class MockSource:
     def __init__(self, serial: str = "01S00A0000000000"):
@@ -122,11 +125,27 @@ class MockSource:
             "nozzle_target_temper": 0,
             "bed_temper": 26.0,
             "bed_target_temper": 0,
-            "chamber_temper": 27.0,
+            # 风扇上报的是 0-15 的 PWM 档位（15 = 100%），不是百分比。
+            # P2S 的辅助部件冷却风扇**不在 big_fan1 里报** —— 真机上 big_fan1/big_fan2
+            # 恒为 0，它报在自适应风道切换组件的 parts 里，且 state 本身就是百分比。
             "cooling_fan_speed": "0",
             "big_fan1_speed": "0",
             "big_fan2_speed": "0",
-            "heatbreak_fan_speed": "0",
+            "heatbreak_fan_speed": "15",
+            # P2S 真机结构：仓温在 device.ctc.info.temp（低 16 位当前值、高 16 位目标值）；
+            # airduct.parts 里 func 0 是风扇、func 6 是风门机构。
+            "device": {
+                "ctc": {"info": {"temp": MOCK_CHAMBER_TEMP}, "state": 0},
+                "airduct": {
+                    "modeCur": 0,
+                    "modeList": [{"modeId": 0, "ctrl": [16, 32], "off": []}],
+                    "parts": [
+                        {"func": 0, "id": 16, "state": 0},
+                        {"func": 6, "id": 32, "state": 0},
+                    ],
+                },
+            },
+            "aux_part_fan": True,
             "wifi_signal": "-45dBm",
             "lights_report": [{"node": "chamber_light", "mode": "on"}],
             "hms": [],
@@ -177,9 +196,13 @@ class MockSource:
                             "nozzle_target_temper": 220,
                             "bed_temper": 59.8,
                             "bed_target_temper": 60,
-                            "cooling_fan_speed": "100",
-                            "big_fan1_speed": "30",
+                            # 打印中：部件冷却风扇 10/15 ≈ 70%，
+                            # 自适应风道组件里的辅助部件冷却风扇 90%（已是百分比）
+                            "cooling_fan_speed": "10",
+                            "heatbreak_fan_speed": "15",
                         })
+                        block["device"]["ctc"]["info"]["temp"] = MOCK_CHAMBER_TEMP + 8
+                        block["device"]["airduct"]["parts"][0]["state"] = 90
                         # 官方 RFID 料盘的余量随打印缓慢下降
                         block["ams"]["tray_now"] = "0"
                         block["ams"]["ams"][0]["tray"][0]["remain"] = 82 - int(percent / 12)

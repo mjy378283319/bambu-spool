@@ -147,7 +147,7 @@ def test_state_dict() -> None:
     check("外挂料盘带材料", ext.get("tray_type") == "PLA", str(ext))
 
     fans = payload.get("fans") or {}
-    for key in ("cooling", "aux", "chamber", "heatbreak"):
+    for key in ("cooling", "aux", "chamber", "heatbreak", "secondary"):
         check(f"风扇通道含 {key}", key in fans)
 
 

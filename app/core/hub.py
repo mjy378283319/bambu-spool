@@ -738,6 +738,13 @@ class PrinterHub:
 
     # ══ 对外快照 ═══════════════════════════════════════════
     def state_dict(self, state: PrinterState, printer_id: int) -> dict:
+        # 辅助部件冷却风扇：P2S / X2 把它报在自适应风道组件里（state 已是百分比），
+        # 其它机型走 big_fan1（0-15 档位）。谁有就用谁，两者都没有则为 0。
+        aux_pct = (
+            state.airduct_fan_pct
+            if state.airduct_fan_pct is not None
+            else state.aux_fan_pct
+        )
         return {
             "printer_id": printer_id,
             "serial": state.serial,
@@ -756,11 +763,14 @@ class PrinterHub:
             "bed_temper": state.bed_temper,
             "bed_target": state.bed_target,
             "chamber_temper": state.chamber_temper,
+            "chamber_target": state.chamber_target,
+            # 全部为百分比（0/10/…/100）；secondary 为 null 表示机器没装左侧那台选配风扇
             "fans": {
-                "cooling": state.cooling_fan,
-                "aux": state.aux_fan,
-                "chamber": state.chamber_fan,
-                "heatbreak": state.heatbreak_fan,
+                "cooling": state.cooling_fan_pct,
+                "aux": aux_pct,
+                "chamber": state.chamber_fan_pct,
+                "heatbreak": state.heatbreak_fan_pct,
+                "secondary": state.secondary_aux_fan_pct,
             },
             "wifi_signal": state.wifi_signal,
             "lights": state.lights,

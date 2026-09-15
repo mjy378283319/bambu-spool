@@ -433,6 +433,22 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .printer-art { width: 100%; max-width: 240px; height: 292px; display: block; }
 
+/* 机器示意图上的浮标温度（喷嘴 / 仓温 / 热床），跟官方 App 一样直接标在机器旁边 */
+.art-wrap { position: relative; display: inline-block; line-height: 0; }
+.art-chips { position: absolute; inset: 0; pointer-events: none; }
+.art-chip {
+  position: absolute; display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  font-size: 11.5px; line-height: 1.2; box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+}
+.art-chip svg { width: 12px; height: 12px; color: var(--text-3); flex: none; }
+.art-chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.art-chip i { font-style: normal; font-size: 10.5px; color: var(--text-3); }
+.art-chip.nozzle { top: 6px; left: 0; }
+.art-chip.chamber { bottom: 96px; left: 0; }
+.art-chip.bed { bottom: 62px; right: 0; }
+
 .dual { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .dual .right { text-align: right; }
 .kv-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }

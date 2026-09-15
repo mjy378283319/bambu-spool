@@ -494,13 +494,33 @@ function stateTag(state) {
    右列：AMS / AMS HT / 外挂料盘的槽位卡片（竖直料条）
    ─────────────────────────────────────────────────────── */
 
-/** 风扇通道与中文名，字段取自 state.fans。 */
-const FAN_CHANNELS = [
-  ["cooling", "部件风扇"],
-  ["aux", "辅助风扇"],
-  ["chamber", "腔体风扇"],
-  ["heatbreak", "热端风扇"],
-];
+/** 风扇通道：[state.fans 的键, 中文名, 是否必须显示]。
+ *
+ *  名字按拓竹官方口径（P2S 技术参数页 / 冷却风扇系统 Wiki / 屏幕操作指南）：
+ *   - 部件冷却风扇：工具头前盖里那台，MQTT 里的 cooling_fan_speed；
+ *   - 辅助部件冷却风扇：MQTT 里的 big_fan1_speed；P2S / X2 把它报在自适应风道
+ *     切换组件里（device.airduct.parts），后端已经把这一路并进 aux；
+ *   - 热端风扇：heatbreak_fan_speed。
+ *  机型差异（官方 FAQ 原话：P2S「整机共 3 个风扇 —— 工具头上的部件冷却风扇、
+ *  热端附近的热端风扇、装在自适应风道组件里的辅助部件冷却风扇」）：
+ *   - P2S / X2 不配外排风扇（外排风扇是选配套件），所以这一档没有「腔体风扇」；
+ *     装了左侧那台选配风扇才会多出一行，没装就自动隐藏；
+ *   - X1 / P1 / A1 / H2 等：big_fan2 就是腔体风扇，照常显示。 */
+function fanChannels(printer) {
+  const model = String((printer && printer.model) || "").toUpperCase();
+  const airduct = model.startsWith("P2") || model.startsWith("X2");
+  const rows = [
+    ["cooling", "部件冷却风扇", true],
+    ["aux", "辅助部件冷却风扇", true],
+  ];
+  if (airduct) {
+    rows.push(["secondary", "左侧辅助风扇", false]);
+  } else {
+    rows.push(["chamber", "腔体风扇", true]);
+  }
+  rows.push(["heatbreak", "热端风扇", true]);
+  return rows;
+}
 
 /** #rrggbb → rgba(r,g,b,alpha)。解析失败退回中性灰。 */
 function tint(hex, alpha) {
@@ -608,6 +628,19 @@ function fmtTemp(value, target) {
   return target ? `${current} / ${Number(target).toFixed(0)}°C` : current;
 }
 
+/** 机器示意图上的浮标温度（喷嘴 / 仓温 / 热床），排布对齐官方 App。
+ *  读数为 0 的通道（没通电或没这个传感器）直接不画，免得挂一串 0°C。 */
+function renderArtChips(state) {
+  const rows = [
+    ["nozzle", "喷嘴", Number(state.nozzle_temper) || 0, fmtTemp(state.nozzle_temper, state.nozzle_target)],
+    ["chamber", "仓温", Number(state.chamber_temper) || 0, fmtTemp(state.chamber_temper, state.chamber_target)],
+    ["bed", "热床", Number(state.bed_temper) || 0, fmtTemp(state.bed_temper, state.bed_target)],
+  ].filter(([, , value]) => value > 0);
+  if (!rows.length) return "";
+  return `<div class="art-chips">${rows.map(([cls, label, , text]) =>
+    `<span class="art-chip ${cls}">${ICO.thermo}<b>${esc(text)}</b><i>${esc(label)}</i></span>`).join("")}</div>`;
+}
+
 /** 打印状态 + 层数 + 进度条。 */
 function renderRunCard(state) {
   const progCls = state.gcode_state === "FAILED" ? "failed"
@@ -646,9 +679,10 @@ function renderRunCard(state) {
 
 /** 温度属性：热床 / 仓温 / 喷嘴 / 信号。 */
 function renderTempCard(state) {
+  const chamber = Number(state.chamber_temper) || 0;
   const items = [
     ["热床", fmtTemp(state.bed_temper, state.bed_target)],
-    ["仓温", state.chamber_temper ? `${Number(state.chamber_temper).toFixed(0)}°C` : "—"],
+    ["仓温", chamber ? fmtTemp(chamber, state.chamber_target) : "—"],
     ["喷嘴", fmtTemp(state.nozzle_temper, state.nozzle_target)],
     ["信号", state.wifi_signal || "—"],
   ];
@@ -661,12 +695,14 @@ function renderTempCard(state) {
   </div>`;
 }
 
-/** 风扇状态：四条通道各配一根细进度条。 */
-function renderFanCard(state) {
+/** 风扇状态：每条通道一根细进度条。值是后端换算好的百分比（原始 0-15 档位在解析层已经换算）。 */
+function renderFanCard(state, printer) {
   const fans = state.fans || {};
+  const rows = fanChannels(printer).filter(([key, , required]) => required || fans[key] != null);
+  if (!rows.length) return "";
   return `<div class="pcard">
     <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
-    ${FAN_CHANNELS.map(([key, label]) => {
+    ${rows.map(([key, label]) => {
       const value = Math.max(0, Math.min(100, Number(fans[key]) || 0));
       return `<div class="fan-row">
         <span class="fan-name">${esc(label)}</span>
@@ -800,10 +836,12 @@ function renderPrinterCard(entry) {
   return `<div class="printer-block">${bar}
     <div class="printer-layout">
       <div class="printer-col">
-        <div class="pcard photo-card">${printerArt(esc(p.model || "P2S"), p.id)}</div>
+        <div class="pcard photo-card">
+          <div class="art-wrap">${printerArt(esc(p.model || "P2S"), p.id)}${renderArtChips(state)}</div>
+        </div>
         ${renderRunCard(state)}
         ${renderTempCard(state)}
-        ${renderFanCard(state)}
+        ${renderFanCard(state, p)}
       </div>
       ${renderUnits(state, p)}
     </div>

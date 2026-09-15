@@ -31,13 +31,8 @@
   const LABEL_FAMILY =
     '"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Source Han Sans SC",system-ui,sans-serif';
 
-  // 4×4 有序抖动矩阵，用来把「耗材颜色深浅」表现成 1 位打印机上可打印的网点
-  const BAYER4 = [
-    [0, 8, 2, 10],
-    [12, 4, 14, 6],
-    [3, 11, 1, 9],
-    [15, 7, 13, 5],
-  ];
+  // 4×4 有序抖动矩阵已随色块一起移除：热敏打印机只有黑白两色，
+  // 打印出来的「颜色深浅」网点既认不出颜色、又占版面。
 
   const LABEL_PRESETS = [
     { w: 40, h: 30 },
@@ -46,10 +41,12 @@
     { w: 50, h: 40 },
   ];
 
-  // 二维码单个模块的目标物理尺寸。太小（<0.3mm）手机难扫，太大占版面。
-  // 按它反推「每模块几个点」，而不是按总点宽反推 —— 后者会让二维码的实际
-  // 物理尺寸随 dpi 漂移（203dpi 只有 2 点/模块 ≈ 0.25mm，偏小且难扫）。
-  const QR_MODULE_MM = 0.34;
+  // 二维码在标签上占的版面：宽最多取 62%、高最多占满（留上下留白）。
+  // 之前按「模块 0.34mm」反推，203dpi 下二维码只有 11mm 见方，比手机屏幕上的
+  // 小程序码还小、扫起来要贴很近；现在直接按版面反推倍率，实际结果是
+  // 「宽度的 50%~58%」——50×30 标签上约 27.8mm 见方，接近半张标签。
+  // 每模块仍是整数个点、绝不缩放，所以取到的是不超过目标尺寸的最大整数倍率。
+  const QR_WIDTH_RATIO = 0.62;
 
   // 已知的热敏打印机 BLE 服务。ff00 是 Marklife/Phomemo/汉印 HM300L 那一系，
   // 18f0 是 WebBluetoothCG 示例里的打印服务，ffe0/fff0 是常见透传服务。
@@ -95,17 +92,6 @@
 
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
-  }
-
-  function hexToRgb(hex) {
-    const s = String(hex || "").replace("#", "").trim();
-    if (s.length === 3) {
-      return [parseInt(s[0] + s[0], 16), parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16)];
-    }
-    if (s.length >= 6) {
-      return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
-    }
-    return [128, 128, 128];
   }
 
   function concatBytes(parts) {
@@ -176,64 +162,50 @@
   /* ── 渲染 ───────────────────────────────────────────────── */
 
   /** 版式全部用毫米算，再换算成点，这样换尺寸/换 dpi 都不用改代码。
-   *  二维码固定在右下角：右上角留给料盘名，长名字才不会被压到看不清。 */
+   *  二维码固定在右侧、占满整个高度；左侧留一列放文字。
+   *  （早期版本二维码在右下角、高只占 25%，203dpi 下只有 11mm 见方，太难扫。） */
   function layoutOf(wMm, hMm) {
     return {
       pad: Math.max(1.1, wMm * 0.032),
-      swMm: Math.min(hMm * 0.25, wMm * 0.15),
-      name: hMm * 0.163,
-      sub: hMm * 0.31,
-      main: hMm * 0.473,
-      loc: hMm * 0.63,
-      foot: hMm * 0.9,
+      name: hMm * 0.155,
+      sub: hMm * 0.285,
+      main: hMm * 0.475,
+      total: hMm * 0.575,
+      loc: hMm * 0.7,
+      foot: hMm * 0.91,
     };
   }
 
-  /** 色块：用有序抖动把颜色的深浅画成网点，1 位热敏纸上也能看出「深/浅」。 */
-  function drawSwatch(ctx, xMm, yMm, sizeMm, hex, dpi) {
-    const x0 = Math.round(mm2dot(xMm, dpi));
-    const y0 = Math.round(mm2dot(yMm, dpi));
-    const px = Math.max(4, Math.round(mm2dot(sizeMm, dpi)));
-    const [r, g, b] = hexToRgb(hex);
-    // Rec.709 亮度 → 墨量：颜色越深，网点越密
-    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-    const ink = Math.max(0, Math.min(1, 1 - lum));
+/** 写字：超宽先缩字号，还超就截断加省略号。返回最终画出的文本。
+ *
+ *  收缩下限取 62%：二维码放大到近半张标签后，文字列只剩 ~21mm（50×30 标签），
+ *  像「Polymaker PETG 黑色」这种 16 字符的名字按原字号放不下。原来下限是 70%，
+ *  缩到底仍会截断；放到 62% 这类名字刚好能整串放下（实测 264 点 → 164 点 < 169 点），
+ *  而 62% 在 203dpi 下仍有 15.6px，热敏纸上依然清楚。 */
+function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
+  opt = opt || {};
+  const s = String(text == null ? "" : text);
+  const weight = opt.bold ? "700" : "400";
+  const fontAt = (mm) => `${weight} ${mm2dot(mm, dpi)}px ${LABEL_FAMILY}`;
 
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(x0, y0, px, px);
-    ctx.fillStyle = "#000";
-    for (let y = 0; y < px; y++) {
-      for (let x = 0; x < px; x++) {
-        if (BAYER4[y & 3][x & 3] < ink * 16) ctx.fillRect(x0 + x, y0 + y, 1, 1);
-      }
+  let size = sizeMm;
+  let out = s;
+  ctx.font = fontAt(size);
+  const maxDots = opt.maxMm ? mm2dot(opt.maxMm, dpi) : 0;
+  if (maxDots && ctx.measureText(out).width > maxDots) {
+    while (size > sizeMm * 0.62) {
+      size -= 0.1;
+      ctx.font = fontAt(size);
+      if (ctx.measureText(out).width <= maxDots) break;
     }
-    const lw = Math.max(1, Math.round(mm2dot(0.22, dpi)));
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = "#000";
-    ctx.strokeRect(x0 + lw / 2, y0 + lw / 2, px - lw, px - lw);
-  }
-
-  /** 写字：超宽先缩字号到 70%，还超就截断加省略号。返回最终画出的文本。 */
-  function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
-    opt = opt || {};
-    const s = String(text == null ? "" : text);
-    const weight = opt.bold ? "700" : "400";
-    const fontAt = (mm) => `${weight} ${mm2dot(mm, dpi)}px ${LABEL_FAMILY}`;
-
-    let size = sizeMm;
-    let out = s;
-    ctx.font = fontAt(size);
-    const maxDots = opt.maxMm ? mm2dot(opt.maxMm, dpi) : 0;
-    if (maxDots && ctx.measureText(out).width > maxDots) {
-      while (size > sizeMm * 0.7) {
-        size -= 0.1;
-        ctx.font = fontAt(size);
-        if (ctx.measureText(out).width <= maxDots) break;
+      // 缩到下限后仍然放不下才截断。缩完能放下就别碰它 —— 否则会为了给
+      // 省略号腾地方白砍掉几个字（整串明明塞得下），这是之前的一个真 bug。
+      if (ctx.measureText(out).width > maxDots) {
+        while (out.length > 1 && ctx.measureText(out + "…").width > maxDots) {
+          out = out.slice(0, -1);
+        }
+        if (out !== s) out += "…";
       }
-      while (out.length > 1 && ctx.measureText(out + "…").width > maxDots) {
-        out = out.slice(0, -1);
-      }
-      if (out !== s) out += "…";
     }
 
     ctx.fillStyle = "#000";
@@ -255,6 +227,16 @@
     });
   }
 
+  /** 由「目标点数」和「模块数」反推每模块几个点。
+
+   *  取不超过目标的**最大整数倍率**（至少 1），这样二维码 1:1 贴上去即可，
+   *  绝不缩放；代价是实际尺寸可能比目标小一点，但绝不会糊掉扫描不出。
+   *  没有模块数（取图失败）时退回 4，跟旧默认一致。 */
+  function qrBoxFor(targetDots, modules) {
+    if (!modules || modules <= 0) return 4;
+    return Math.max(1, Math.floor(targetDots / modules));
+  }
+
   /** 画一张料盘标签。返回 canvas（尺寸 = 标签实际点数）。 */
   async function renderLabel(spool, cfg) {
     const dpi = cfg.dpi;
@@ -271,52 +253,52 @@
     const L = layoutOf(cfg.wMm, cfg.hMm);
 
     // 二维码：服务端按整数倍模块出图，这里 1:1 贴上去，绝不缩放。
-    // 倍率由「模块目标物理尺寸」反推；内容特别长导致二维码过大时退回一档再取一次。
-    let box = Math.max(2, Math.min(4, Math.round(mm2dot(QR_MODULE_MM, dpi))));
-    let qr = await loadQrImage(spool.id, box);
-    let qrMm = qr ? qr.naturalWidth / mm2dot(1, dpi) : 0;
-    if (qr && qrMm > cfg.wMm * 0.42 && box > 1) {
-      box -= 1;
-      qr = await loadQrImage(spool.id, box);
-      qrMm = qr ? qr.naturalWidth / mm2dot(1, dpi) : 0;
-    }
-    const qrTopMm = cfg.hMm - L.pad - qrMm;
+    // 先用 box=4 探出模块数（模块数只跟内容/静区有关，跟 box 无关），
+    // 再由「想要多大」反推倍率，取不超过目标尺寸的最大整数倍率。
+    const probe = await loadQrImage(spool.id, 4);
+    const modules = probe ? Math.round(probe.naturalWidth / 4) : 0;
+    const padDots = mm2dot(L.pad, dpi);
+    const targetDots = Math.min(wDots * QR_WIDTH_RATIO, hDots - padDots * 2);
+    const box = qrBoxFor(targetDots, modules);
+    const qr = (probe && box === 4 ? probe : await loadQrImage(spool.id, box)) || probe;
+    const qrDots = qr ? qr.naturalWidth : 0;
+    const qrMm = qrDots / mm2dot(1, dpi);
     if (qr) {
-      ctx.drawImage(qr, Math.round(mm2dot(cfg.wMm - L.pad - qrMm, dpi)), Math.round(mm2dot(qrTopMm, dpi)));
+      ctx.drawImage(qr, wDots - Math.round(padDots) - qrDots, Math.round(padDots));
     }
-    // 与二维码同一水平带的文字必须让开它的左边界
-    const lowerMax = (qr ? cfg.wMm - L.pad - qrMm - 0.8 : cfg.wMm - L.pad) - L.pad;
+    // 文字列的右边界：让开二维码
+    const textMax = (qr ? cfg.wMm - L.pad - qrMm - 0.8 : cfg.wMm - L.pad) - L.pad;
 
-    drawSwatch(ctx, L.pad, L.pad, L.swMm, spool.color_hex, dpi);
-
-    const textX = L.pad + L.swMm + Math.max(0.8, cfg.wMm * 0.032);
-    const nameMax = cfg.wMm - L.pad - textX;
-    drawText(ctx, dpi, spool.name, textX, L.name, cfg.hMm * 0.11, { bold: true, maxMm: nameMax });
+    const textX = L.pad;
+    drawText(ctx, dpi, spool.name, textX, L.name, cfg.hMm * 0.105, { bold: true, maxMm: textMax });
 
     const parts = [spool.brand, spool.material].filter(Boolean);
     if (spool.finish && spool.finish !== "普通") parts.push(spool.finish);
-    const sub = parts.join(" · ");
-    drawText(ctx, dpi, sub, textX, L.sub, cfg.hMm * 0.077, { maxMm: nameMax });
+    drawText(ctx, dpi, parts.join(" · "), textX, L.sub, cfg.hMm * 0.072, { maxMm: textMax });
 
-    // 余量：左边「余 x / 总」，右边百分比 + 偏低标记
+    // 余量：主行「余 x g」+ 右对齐百分比；下一行「/ 总量」+ 偏低标记
     const remain = Math.round(spool.remaining_weight);
     const initial = Math.round(spool.initial_weight);
-    drawText(ctx, dpi, "余 " + remain + " g / " + initial + " g", L.pad, L.main,
-      cfg.hMm * 0.103, { bold: true, maxMm: cfg.wMm * 0.6 });
     const pct = Math.round(spool.remaining_percent || 0) + "%";
-    drawText(ctx, dpi, (spool.is_low ? "偏低 " : "") + pct, cfg.wMm - L.pad, L.main,
-      cfg.hMm * 0.09, { align: "right", bold: spool.is_low, maxMm: cfg.wMm * 0.3 });
+    const mainSize = cfg.hMm * 0.115;
+    drawText(ctx, dpi, "余 " + remain + " g", textX, L.main, mainSize, { bold: true, maxMm: textMax * 0.62 });
+    drawText(ctx, dpi, pct, cfg.wMm - L.pad - qrMm - 0.8, L.main, cfg.hMm * 0.10,
+      { align: "right", bold: true, maxMm: textMax * 0.34 });
+    drawText(ctx, dpi, "/ " + initial + " g", textX, L.total, cfg.hMm * 0.072, { maxMm: textMax * 0.6 });
+    if (spool.is_low) {
+      drawText(ctx, dpi, "偏低", cfg.wMm - L.pad - qrMm - 0.8, L.total, cfg.hMm * 0.08,
+        { align: "right", bold: true, maxMm: textMax * 0.4 });
+    }
 
     if (spool.location) {
-      drawText(ctx, dpi, "位置 " + spool.location, L.pad, L.loc, cfg.hMm * 0.08,
-        { maxMm: lowerMax });
+      drawText(ctx, dpi, "位置 " + spool.location, textX, L.loc, cfg.hMm * 0.075, { maxMm: textMax });
     }
 
     // 编号放在页脚开头（原来贴在二维码上，会压坏码）
     const foot = ["#" + spool.id];
     if (spool.color_name) foot.push(spool.color_name);
     if (spool.color_hex) foot.push(String(spool.color_hex).toUpperCase());
-    drawText(ctx, dpi, foot.join(" · "), L.pad, L.foot, cfg.hMm * 0.067, { maxMm: lowerMax });
+    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, cfg.hMm * 0.067, { maxMm: textMax });
 
     return canvas;
   }
@@ -895,7 +877,7 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor };
 
   Object.assign(window, {
     openLabelDialog,

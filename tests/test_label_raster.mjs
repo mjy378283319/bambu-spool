@@ -87,6 +87,9 @@ function testExports() {
   check("mm2dot 可调用", typeof mm2dot === "function");
   check("packRaster 可调用", typeof packRaster === "function");
   check("buildEscPosJob 可调用", typeof buildEscPosJob === "function");
+  check("renderLabel 可调用", typeof sandbox.labelDebug.renderLabel === "function");
+  check("layoutOf 可调用", typeof sandbox.labelDebug.layoutOf === "function");
+  check("qrBoxFor 可调用", typeof sandbox.labelDebug.qrBoxFor === "function");
   const missing = REQUIRED_HANDLERS.filter((n) => typeof sandbox[n] !== "function");
   check(`onclick 处理器全部导出（${REQUIRED_HANDLERS.length} 个）`, missing.length === 0,
     "缺失：" + missing.join(","));
@@ -289,12 +292,135 @@ async function testDialogHtml() {
   }
 }
 
+/* ── 5. 版式与二维码倍率（桩 canvas / Image，真跑 renderLabel） ──── */
+// 二维码必须 1:1 贴进 1 位位图：一旦缩放，模块边界糊成灰边就扫不出来。
+// 所以倍率只能是整数；这里用桩把 drawImage / fillText 的实际坐标记下来，
+// 直接验「二维码多大、贴在哪、有没有压到文字」，比对着预览图目测可靠。
+const MODULES = 33; // 服务端 X-QR-Modules 的实测值（已含静区）
+
+function fakeImage() {
+  const img = { naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null, _src: "" };
+  Object.defineProperty(img, "src", {
+    get: () => img._src,
+    set: (value) => {
+      img._src = value;
+      const m = /box=(\d+)/.exec(value);
+      const box = m ? Number(m[1]) : 4;
+      // 服务端就是按「模块数 × 整数倍率」出图的
+      img.naturalWidth = MODULES * box;
+      img.naturalHeight = MODULES * box;
+      setTimeout(() => img.onload && img.onload(), 0);
+    },
+  });
+  return img;
+}
+
+function fakeContext(log) {
+  const ctx = {
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    textBaseline: "",
+    fillRect: (x, y, w, h) => log.fills.push({ x, y, w, h }),
+    strokeRect: () => { log.strokes += 1; },
+    fillText: (text, x, y) => log.texts.push({ text, x, y, width: ctx.measureText(text).width, size: ctx._size }),
+    drawImage: (img, x, y) => log.images.push({ x, y, w: img.naturalWidth, h: img.naturalHeight, src: img.src }),
+    measureText: (text) => {
+      const size = ctx._size || 16;
+      let width = 0;
+      for (const ch of String(text)) width += /[\u2e80-\uffff]/.test(ch) ? size : size * 0.55;
+      return { width };
+    },
+  };
+  Object.defineProperty(ctx, "font", {
+    get: () => ctx._font || "",
+    set: (value) => {
+      ctx._font = value;
+      const m = /(\d+(?:\.\d+)?)px/.exec(value);
+      ctx._size = m ? parseFloat(m[1]) : 16;
+    },
+  });
+  return ctx;
+}
+
+async function testRenderedLayout() {
+  console.log("== 实际渲染版式（50×30 @203dpi） ==");
+  const log = { fills: [], texts: [], images: [], strokes: 0 };
+  sandbox.Image = function Image() { return fakeImage(); };
+  sandbox.document.createElement = () => ({
+    width: 0,
+    height: 0,
+    style: {},
+    getContext: () => fakeContext(log),
+  });
+
+  const spool = {
+    id: 3, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通",
+    color_name: "天蓝色", color_hex: "#147DB5", location: "",
+    remaining_weight: 218, initial_weight: 1000, remaining_percent: 22, is_low: true,
+  };
+  const cfg = { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, showAll: false };
+  const canvas = await sandbox.labelDebug.renderLabel(spool, cfg);
+
+  check("画布 = 标签实际点数 400×240", canvas.width === 400 && canvas.height === 240,
+    `${canvas.width}×${canvas.height}`);
+
+  check("只贴了一张图（二维码），没有别的图片元素", log.images.length === 1, String(log.images.length));
+  const qr = log.images[0] || { x: 0, y: 0, w: 0, h: 0, src: "" };
+  check("二维码是正方形", qr.w === qr.h, `${qr.w}×${qr.h}`);
+  check("二维码 1:1 贴入（未缩放 = 服务端出图尺寸）", qr.w === MODULES * Math.round(qr.w / MODULES) && qr.w > 0,
+    String(qr.w));
+  check("二维码至少占标签宽度 45%", qr.w / canvas.width >= 0.45,
+    `${((qr.w / canvas.width) * 100).toFixed(0)}%`);
+  check("二维码不超出标签高度", qr.h <= canvas.height, String(qr.h));
+  const padMm = Math.max(1.1, 50 * 0.032);
+  const padDots = Math.round(mm2dot(padMm, 203));
+  check("二维码贴在右侧（留出左边距）", qr.x === canvas.width - padDots - qr.w, String(qr.x));
+  check("二维码自上边距开始，占满整列", qr.y === padDots, String(qr.y));
+
+  const boxes = log.images.concat().map((i) => /box=(\d+)/.exec(i.src)).map((m) => (m ? Number(m[1]) : 0));
+  check("只按整数倍率取图", boxes.every((b) => Number.isInteger(b) && b >= 1), boxes.join(","));
+
+  check("画了文字", log.texts.length >= 5, String(log.texts.length));
+  check("名字从最左边距开始（色块已移除）",
+    log.texts.length > 0 && Math.abs(log.texts[0].x - mm2dot(padMm, 203)) < 0.5,
+    log.texts.length ? String(log.texts[0].x) : "无文字");
+  check("名字没被截断", log.texts.length > 0 && log.texts[0].text === spool.name,
+    log.texts.length ? log.texts[0].text : "");
+  const overflow = log.texts.filter((t) => t.x + t.width > qr.x - 1);
+  check("文字都让开了二维码", overflow.length === 0,
+    overflow.map((t) => `${t.text}@${Math.round(t.x + t.width)}>${qr.x}`).join(","));
+  check("页脚带编号、颜色名与色值",
+    log.texts.some((t) => t.text.includes("#3") && t.text.includes("天蓝色") && t.text.includes("#147DB5")),
+    log.texts.map((t) => t.text).join(" | "));
+  check("低余量有偏低标记", log.texts.some((t) => t.text.includes("偏低")),
+    log.texts.map((t) => t.text).join(" | "));
+  check("没有画色块（fillRect 只有铺白底）", log.fills.length <= 1 && log.strokes === 0,
+    `fills=${log.fills.length} strokes=${log.strokes}`);
+
+  // 二维码放大到近半张标签后，文字列只剩 ~21mm —— 长名字必须靠缩字号整串放下，
+  // 一旦被截成「Polymaker PETG …」就白瞎了一行（第二行还是同样的品牌·材料）。
+  const log2 = { fills: [], texts: [], images: [], strokes: 0 };
+  sandbox.document.createElement = () => ({
+    width: 0,
+    height: 0,
+    style: {},
+    getContext: () => fakeContext(log2),
+  });
+  const longSpool = Object.assign({}, spool, { name: "Polymaker PETG 黑色" });
+  await sandbox.labelDebug.renderLabel(longSpool, cfg);
+  check("长名字不被截断（缩到 62% 下限仍放得下）",
+    log2.texts.length > 0 && log2.texts[0].text === longSpool.name,
+    log2.texts.length ? log2.texts[0].text : "无文字");
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testMm2dot();
   testPackRaster();
   testEscPosJob();
   await testDialogHtml();
+  await testRenderedLayout();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {
     console.log("失败项：", FAILED);

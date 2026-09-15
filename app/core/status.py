@@ -9,6 +9,9 @@
 - tray_now: 255=无料，254=外挂料盘，其余 = ams_id*4 + tray_id
 - tray_exist_bits: 十六进制位串，第 (ams_id*4+tray_id) 位为 1 表示该槽位有料
 - tray[].remain: 剩余百分比（100=满卷）。无 RFID 的第三方料盘为 -1
+- 风扇 *fan_speed 上报的是 0-15 的 PWM 档位，不是百分比（见 fan_percent）
+- 仓温：P2S/新固件在 device.ctc.info.temp（低 16 位当前值、高 16 位目标值），
+  X1 等机型在 print.chamber_temper
 """
 from __future__ import annotations
 
@@ -69,6 +72,69 @@ def _bit_set(bits_hex: str, index: int) -> Optional[bool]:
     if index >= len(text) * 4:
         return None
     return bool((value >> index) & 1)
+
+
+# ── 自适应风道切换组件（P2S / X2）里的风扇 ──────────────────────
+# device.airduct.parts[] 是真机报文里实际存在的部件列表，两个字段区分身份：
+#   func == 0  → 风扇类部件，state 就是转速百分比
+#   func == 6  → 风门 / 风道切换机构（例如 P2S 真机的 {"func":6,"id":32}）
+# 真机 P2S 样本（ha-bambulab MOCK-P2S.json）:
+#   parts = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
+# 注意这一档 **big_fan1_speed / big_fan2_speed 都是 0** —— P2S 的辅助部件冷却风扇
+# 不在 big_fan1 里报，而是在 airduct 里报，所以光看 big_fan1 会永远显示 0%。
+AIRDUCT_FAN_FUNC = 0
+# ha-bambulab 另外用 id==160 认「第二辅助风扇」，一并兼容
+AIRDUCT_FAN_ID = 160
+
+
+def fan_percent(raw: Any) -> int:
+    """把风扇上报值换算成百分比。
+
+    拓竹的 cooling_fan_speed / big_fan1_speed / big_fan2_speed / heatbreak_fan_speed
+    上报的是 **0-15 的 PWM 档位**，不是百分比——直接当百分比显示会变成
+    「14%」这种明显不对的数字（实际是 93%）。官方 App 与 ha-bambulab 都按
+    value / 15 * 100 换算、再按 10% 取整（风扇本身就按 10% 一档调节），这里照做：
+    14 → 90%、15 → 100%、10 → 70%、0 → 0%。
+    """
+    value = _as_int(raw, -1)
+    if value < 0:
+        return 0
+    percent = min(value, 15) / 15 * 100
+    return max(0, min(100, int(round(percent / 10.0)) * 10))
+
+
+def airduct_fans(block: dict) -> list[int]:
+    """自适应风道切换组件里各风扇的转速（百分比）。
+
+    `state` 本身就是百分比（0-100），**不能再除以 15**，直接透传。
+    返回顺序与上报顺序一致：第 1 个是组件自带的辅助部件冷却风扇，
+    若还装了左侧那台选配风扇则会多一个。
+    没装这个组件的机型（X1 / P1 / A1）不上报 device.airduct，返回空列表，
+    界面据此隐藏这些行。
+    """
+    device = block.get("device")
+    if not isinstance(device, dict):
+        return []
+    airduct = device.get("airduct")
+    if not isinstance(airduct, dict):
+        return []
+    out: list[int] = []
+    for part in airduct.get("parts") or []:
+        if not isinstance(part, dict):
+            continue
+        is_fan = (
+            _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC
+            or _as_int(part.get("id"), -1) == AIRDUCT_FAN_ID
+        )
+        if is_fan:
+            out.append(max(0, min(100, _as_int(part.get("state")))))
+    return out
+
+
+def airduct_fan_percent(block: dict) -> Optional[int]:
+    """组件自带那台辅助部件冷却风扇的转速；机型没有该组件时返回 None。"""
+    fans = airduct_fans(block)
+    return fans[0] if fans else None
 
 
 @dataclass
@@ -151,11 +217,17 @@ class PrinterState:
     bed_temper: float = 0.0
     bed_target: float = 0.0
     chamber_temper: float = 0.0
+    chamber_target: float = 0.0
 
-    cooling_fan: int = 0
-    aux_fan: int = 0
-    chamber_fan: int = 0
-    heatbreak_fan: int = 0
+    # 都是百分比（0/10/…/100），由 fan_percent() 从原始档位换算
+    cooling_fan_pct: int = 0
+    aux_fan_pct: int = 0
+    chamber_fan_pct: int = 0
+    heatbreak_fan_pct: int = 0
+    # 自适应风道切换组件自带的辅助部件冷却风扇（P2S/X2）；机型没有该组件时为 None
+    airduct_fan_pct: Optional[int] = None
+    # 组件里的第二台风扇（左侧选配那台）；只有上报了才不是 None
+    secondary_aux_fan_pct: Optional[int] = None
 
     wifi_signal: str = ""
     lights: list[str] = field(default_factory=list)
@@ -249,12 +321,29 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     state.nozzle_target = _as_float(block.get("nozzle_target_temper"))
     state.bed_temper = _as_float(block.get("bed_temper"))
     state.bed_target = _as_float(block.get("bed_target_temper"))
-    state.chamber_temper = _as_float(block.get("chamber_temper"))
 
-    state.cooling_fan = _as_int(block.get("cooling_fan_speed"))
-    state.aux_fan = _as_int(block.get("big_fan1_speed"))
-    state.chamber_fan = _as_int(block.get("big_fan2_speed"))
-    state.heatbreak_fan = _as_int(block.get("heatbreak_fan_speed"))
+    # 仓温：P2S / 新固件放在 device.ctc.info.temp，是个 32 位打包值
+    # （低 16 位 = 当前温度，高 16 位 = 目标温度）；X1 等老机型直接在
+    # print.chamber_temper。原来只读后者，所以 P2S 上仓温一直是「—」。
+    if block.get("chamber_temper") is not None:
+        state.chamber_temper = _as_float(block.get("chamber_temper"))
+    else:
+        ctc = block.get("device")
+        ctc = ctc.get("ctc") if isinstance(ctc, dict) else None
+        ctc = ctc.get("info") if isinstance(ctc, dict) else None
+        packed = ctc.get("temp") if isinstance(ctc, dict) else None
+        if packed is not None:
+            value = _as_int(packed)
+            state.chamber_temper = float(value & 0xFFFF)
+            state.chamber_target = float((value >> 16) & 0xFFFF)
+
+    state.cooling_fan_pct = fan_percent(block.get("cooling_fan_speed"))
+    state.aux_fan_pct = fan_percent(block.get("big_fan1_speed"))
+    state.chamber_fan_pct = fan_percent(block.get("big_fan2_speed"))
+    state.heatbreak_fan_pct = fan_percent(block.get("heatbreak_fan_speed"))
+    duct = airduct_fans(block)
+    state.airduct_fan_pct = duct[0] if duct else None
+    state.secondary_aux_fan_pct = duct[1] if len(duct) > 1 else None
 
     state.wifi_signal = _as_str(block.get("wifi_signal"))
 
