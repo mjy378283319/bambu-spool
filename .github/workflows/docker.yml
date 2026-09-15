@@ -34,6 +34,9 @@ jobs:
       - name: 运行访问控制自测
         run: python tests/test_auth.py
 
+      - name: 前端 JS 语法检查
+        run: node --check app/static/app.js
+
   build:
     name: 构建并推送镜像
     runs-on: ubuntu-latest

@@ -694,14 +694,8 @@ function openSpoolDialog(spool, forceNew) {
         <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
     </div>
     <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
-    <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
-  `, `<button onclick="closeModal()">取消</button>
-      <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
-  renderColorPresets();
-}
-      <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
-    <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
+    <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
   renderColorPresets();
