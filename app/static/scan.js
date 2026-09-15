@@ -56,6 +56,39 @@
     return "";
   }
 
+  /** 相机被拒时，替用户判断出「到底是哪一层拦的」。
+   *
+   *  手机上的相机权限有两层，任何一层没开，网页拿到的都是同一句 NotAllowedError：
+   *    ① 站点层：浏览器把这个站点的相机记成了「已阻止」；
+   *    ② 应用层：系统没把相机权限给浏览器这个 App 本身。
+   *  前两版只丢一句「去站点设置里允许相机」，人照着改完还是不行 —— 因为拦他的
+   *  其实是另一层。手机浏览器又没有控制台可看，所以这里用 permissions.query
+   *  把两层分开，把该点哪里直接写进提示里。 */
+  async function cameraDeniedHint(err) {
+    const name = (err && err.name) || "";
+    const code = name ? `（错误码 ${name}）` : "";
+    let site = "";
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const status = await navigator.permissions.query({ name: "camera" });
+        site = (status && status.state) || "";
+      }
+    } catch (e) {
+      // 有的浏览器不认 camera 这个权限名，查不到就退回下面那句通用提示
+    }
+    if (site === "denied") {
+      return `浏览器把这个网站的相机记成「已阻止」了${code}。`
+        + "点地址栏左边的图标 → 权限 → 相机 → 改成「允许」，刷新页面再点「重试相机」。";
+    }
+    if (site === "prompt" || site === "granted") {
+      return `网站这边没被拦，是手机没把相机权限给浏览器 App${code}。`
+        + "到「系统设置 → 应用 → 浏览器 → 权限 → 相机」里允许，回来点「重试相机」。";
+    }
+    return `没有拿到相机权限${code}。两处都要看：`
+      + "① 地址栏左边的图标 → 权限 → 相机 → 允许；"
+      + "② 系统设置 → 应用 → 浏览器 → 权限 → 相机 → 允许。改完刷新页面再点「重试相机」。";
+  }
+
   /* ── 运行时状态 ─────────────────────────────────────── */
   const state = {
     overlay: null,
@@ -386,6 +419,9 @@
     parseScan,
     cameraBlockReason,
     // 自测用：tests/test_ui_polish.mjs 的「扫码认码」「相机可用性」两组会调这几个
-    _internals: { state, LIVE_MAX_WIDTH, PHOTO_MAX_WIDTH, FRAME_INTERVAL },
+    _internals: {
+      state, LIVE_MAX_WIDTH, PHOTO_MAX_WIDTH, FRAME_INTERVAL,
+      cameraDeniedHint,
+    },
   };
 })();

@@ -252,6 +252,31 @@ check("扫码取样宽度留了余量（逐帧解码别用原图）",
   scanner._internals.LIVE_MAX_WIDTH <= 720 && scanner._internals.LIVE_MAX_WIDTH >= 320,
   String(scanner._internals.LIVE_MAX_WIDTH));
 
+// ── 6.5 相机被拒时，必须能说出是「哪一层」拦的 ──────────────────
+// 手机上相机权限有两层（站点层 / 系统给浏览器 App 的权限），表现却是同一句
+// NotAllowedError。只说「去站点设置里允许相机」，用户改完还是不行就会来回问。
+console.log("== 相机被拒：分清站点层与系统层 ==");
+
+sandbox.navigator.permissions = { query: async () => ({ state: "denied" }) };
+const hintSite = await scanner._internals.cameraDeniedHint({ name: "NotAllowedError" });
+check("站点层被记成「已阻止」-> 指向地址栏图标",
+  hintSite.includes("已阻止") && hintSite.includes("地址栏") && !hintSite.includes("系统设置"),
+  hintSite);
+
+sandbox.navigator.permissions = { query: async () => ({ state: "prompt" }) };
+const hintApp = await scanner._internals.cameraDeniedHint({ name: "NotAllowedError" });
+check("站点没拦 -> 说明是系统没给浏览器相机权限",
+  hintApp.includes("系统设置") && !hintApp.includes("地址栏"), hintApp);
+
+sandbox.navigator.permissions = { query: async () => { throw new Error("unsupported"); } };
+const hintUnknown = await scanner._internals.cameraDeniedHint({ name: "NotAllowedError" });
+check("查不到权限状态 -> 两处都列出来",
+  hintUnknown.includes("①") && hintUnknown.includes("②"), hintUnknown);
+check("提示带上错误码（手机没法开控制台，只能靠截图）",
+  hintUnknown.includes("NotAllowedError"), hintUnknown);
+
+sandbox.navigator.permissions = undefined;
+
 // ── 7. 扫码深链在「应用已经开着」时也要生效 ─────────────────────
 console.log("== 扫码深链（系统相机扫出来的 #spool= / #bind= 要能被应用接住） ==");
 
