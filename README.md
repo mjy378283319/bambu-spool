@@ -138,7 +138,9 @@ app/static/printer/a1mini.png  →  A1MINI
 
 仓库里带的 P2S 照片来自拓竹官方商城的产品图，用 `scripts/build_printer_photo.py` 处理过：
 裁掉商品图上的型号字、按界面展示框（240×292，输出 720×876）居中缩放、四周补上取样出来的
-影棚底色，这样浮标刚好落在机器两侧而不是压在机器身上。
+影棚底色，这样浮标刚好落在机器两侧而不是压在机器身上。底图（2400×2400）取自
+`https://store.bblcdn.com/s7/default/a47bdb7ac6804dc78416d8901a71aba1/P2S.jpg`，
+想重新生成对着下面第 2 步跑一遍即可，不必把原图留在仓库里。
 
 想换成自己的照片（比如自己那台机器的实拍）：
 
@@ -510,6 +512,17 @@ PYTHON=python node scripts/shot_ui.mjs
 > `tests/*.mjs` 是纯函数自测（跑在 node 的 vm 沙箱里，不需要浏览器），CI 里跑的是这些；
 > `scripts/shot_ui.mjs` 走真浏览器 + 真服务，用来抓「截图看着还行但其实是坏的」那类问题
 > （图片 404 了布局还在、温度浮标飘出卡片、hash 深链没跳转）。两者互补。
+
+`data/` 整个目录都是**运行时可再生的**（自测库、截图工装的临时浏览器 profile），已被 gitignore，
+随时可以整个清空，下次启动会自己重建（`app/config.py` 里 `mkdir(parents=True, exist_ok=True)`）。
+注意别把手工起的验证用服务留在后台——它们各自用 `DATA_DIR` 指着 `data/` 下的子目录，
+不退出就会一直占着端口和那些 SQLite 文件（表现为目录删不掉、`Device or resource busy`）：
+
+```bash
+# 看一眼有没有遗留的验证服务
+ps -W | grep -i "uvicorn"          # Git Bash
+# Windows：Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? CommandLine -match 'uvicorn'
+```
 
 代码结构：
 
