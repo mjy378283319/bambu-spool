@@ -196,6 +196,23 @@ main { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; paddin
 }
 .stat .ico svg { width: 15px; height: 15px; }
 .stat.accent .value { color: var(--accent); }
+/* 本周概览三张卡：数值再大一号，观感对齐官方 App */
+.stat.big .value { font-size: 30px; }
+.stat.big .value small { font-size: 13.5px; }
+
+/* 自定义品牌的小标签（设置页） */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.brand-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  border-radius: 999px; padding: 3px 6px 3px 12px; font-size: 12.5px;
+}
+.brand-chip .chip-x {
+  border: 0; background: transparent; color: var(--text-3); cursor: pointer;
+  width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.brand-chip .chip-x:hover { background: var(--red-soft); color: var(--red); }
 
 /* ── 按钮 ───────────────────────────────────────────── */
 button, .btn {
@@ -432,6 +449,18 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
 }
 .printer-art { width: 100%; max-width: 240px; height: 292px; display: block; }
+
+/* 真机照片：照片和 SVG 示意图同时渲染，靠 .art-broken 切。
+   照片按 240x292 的展示框出图（scripts/build_printer_photo.py --canvas 720x876），
+   所以 contain 正好铺满；用户塞了比例不一样的图也只是留白，不会被裁掉机器。 */
+.printer-art-wrap { display: block; line-height: 0; }
+.printer-art-wrap .printer-photo {
+  object-fit: contain; border-radius: 10px;
+  background: var(--surface-2);
+}
+.printer-art-wrap > svg { display: none; }
+.printer-art-wrap.art-broken > .printer-photo { display: none; }
+.printer-art-wrap.art-broken > svg { display: block; }
 
 /* 机器示意图上的浮标温度（喷嘴 / 仓温 / 热床），跟官方 App 一样直接标在机器旁边 */
 .art-wrap { position: relative; display: inline-block; line-height: 0; }
@@ -783,6 +812,62 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 label.field.check { display: flex; align-items: center; gap: 7px; }
 label.field.check input { width: auto; margin: 0; flex: none; }
 label.field.check > span { display: inline; margin-bottom: 0; }
+
+/* ── 手机扫码 ───────────────────────────────────────── */
+/* hidden 属性必须真能藏住：下面这些按钮从 .btn 拿到了 display:inline-flex，
+   权重比浏览器默认的 [hidden]{display:none} 高，不写 !important 就是「藏不住」，
+   会出现「重试相机」和「切换摄像头」两个按钮同时在相机正常时也挂在那里。 */
+[hidden] { display: none !important; }
+
+.scan-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(15, 23, 42, .72);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+}
+/* 扫码时锁住背景滚动：手机上取景框跟着页面滑走很难对准 */
+body.scan-open { overflow: hidden; }
+
+.scan-panel {
+  width: min(430px, 100%); max-height: 100%;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border-radius: var(--radius);
+  padding: 14px; box-shadow: var(--shadow-lg);
+}
+.scan-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scan-head b { font-size: 14.5px; }
+.scan-close {
+  border: 0; background: transparent; color: var(--text-3);
+  font-size: 15px; line-height: 1; padding: 2px 6px; cursor: pointer;
+}
+.scan-close:hover { color: var(--text); }
+
+.scan-stage {
+  position: relative; overflow: hidden; border-radius: var(--radius-md);
+  background: #0b1220; aspect-ratio: 4 / 3;
+  display: flex; align-items: center; justify-content: center; min-height: 180px;
+}
+.scan-video { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* 取景框：外圈用超大 box-shadow 压暗，比再叠一层半透明遮罩省事 */
+.scan-frame {
+  position: absolute; width: 62%; aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, .92); border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, .22);
+  pointer-events: none;
+}
+.scan-note {
+  position: absolute; left: 8px; right: 8px; bottom: 8px;
+  padding: 6px 9px; border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, .78); color: #fff;
+  font-size: 12px; line-height: 1.55; text-align: center;
+}
+.scan-note:empty { display: none; }
+/* 失败提示换成琥珀底：一眼能分辨「还没扫到」和「根本开不了相机」 */
+.scan-note.warn { background: #92400e; text-align: left; }
+
+.scan-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.scan-actions .btn { flex: 1 1 auto; min-width: 120px; }
+.scan-hint { font-size: 12px; color: var(--text-3); line-height: 1.6; }
 
 /* ── 窄屏 ───────────────────────────────────────────── */
 @media (max-width: 860px) {

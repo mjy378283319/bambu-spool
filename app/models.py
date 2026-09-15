@@ -92,6 +92,9 @@ class Spool(SQLModel, table=True):
     name: str = ""
     brand: str = ""
     material: str = ""
+    # 外观（也叫表面工艺）：普通 / 亮面 / 哑光 / 丝绸 / 磨砂 … 自填值也允许。
+    # 单独成一列而不是从 color_name 里猜：同一种颜色可能同时有哑光和丝绸两种货。
+    finish: str = ""
     color_name: str = ""
     color_hex: str = "#000000"
 

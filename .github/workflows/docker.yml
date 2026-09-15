@@ -52,16 +52,24 @@ jobs:
       - name: 运行标签二维码自测
         run: python tests/test_labels.py
 
+      - name: 运行外观字段 / 自定义品牌 / 区域显示 / 耗材汇总自测
+        run: python tests/test_finish_summary.py
+
       - name: 前端 JS 语法检查
         run: |
           node --check app/static/app.js
           node --check app/static/label.js
+          node --check app/static/scan.js
+          node --check app/static/vendor/jsQR.js
 
       - name: 运行标签光栅打包自测
         run: node tests/test_label_raster.mjs
 
       - name: 运行设备面板口径自测（风扇命名 / 料条高度）
         run: node tests/test_panel_fill.mjs
+
+      - name: 运行界面口径自测（外观预填 / 区域文案 / 真机照片 / 扫码认码）
+        run: node tests/test_ui_polish.mjs
 
   build:
     name: 构建并推送镜像

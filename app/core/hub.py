@@ -270,6 +270,46 @@ class PrinterHub:
         )
         self._emit("账号已登出", "本地凭据已清除", level="info")
 
+    async def set_region(self, region: str) -> dict:
+        """切换拓竹账号区域（china / global）。
+
+        拓竹账号只存在于一个区域：区域选错的表现不是登录失败，而是
+        「登录成功却同步不到任何设备」——因为设备列表接口打到了另一个域名上。
+        所以已登录状态下必须允许改区域，否则用户只能靠登出重登来纠正。
+
+        有保存密码就顺手在新区域重新登录并同步设备；没有就只改区域，
+        把旧令牌清掉并提示重新登录（留着旧令牌只会在错误区域上反复报错）。
+        """
+        region = (region or "").strip().lower()
+        if region not in ApiClient.DOMAINS:
+            raise BambuCloudError("区域只能是 china 或 global。")
+        acc = self.account()
+        if acc is None:
+            raise BambuCloudError("尚未登录拓竹账号。")
+        if acc.region == region:
+            return {"region": region, "relogin": "same", "message": "区域没有变化。"}
+
+        password = decrypt(acc.password_enc)
+        self._save_account(region=region)
+        if not password:
+            if self._mqtt:
+                self._mqtt.stop()
+                self._mqtt = None
+            self._save_account(
+                access_token="", refresh_token="", uid="", token_expires_at=None,
+                status="logged_out", status_message="区域已切换，请重新登录。",
+            )
+            self._emit("区域已切换", "请用正确区域的账号重新登录", level="warning")
+            return {"region": region, "relogin": "required", "message": "区域已切换，请重新登录。"}
+
+        result = await self.login(acc.account, password, region, remember=True)
+        return {
+            "region": region,
+            "relogin": "ok",
+            "message": "区域已切换，并已用保存的密码重新登录。",
+            "uid": result.get("uid", ""),
+        }
+
     async def ensure_token(self, force: bool = False) -> str:
         """确保有一枚可用令牌；快过期时用保存的密码自动续期。"""
         async with self._token_lock:

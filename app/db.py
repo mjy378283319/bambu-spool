@@ -31,7 +31,10 @@ def _migrate_columns() -> None:
 
     # 需要补的列：表 -> [(列名, 类型, 默认值)]
     wanted = {
-        "spool": [("price", "REAL NOT NULL DEFAULT 0.0")],
+        "spool": [
+            ("price", "REAL NOT NULL DEFAULT 0.0"),
+            ("finish", "TEXT NOT NULL DEFAULT ''"),
+        ],
     }
     with engine.begin() as conn:
         for table, columns in wanted.items():
@@ -71,12 +74,38 @@ def _migrate_data() -> None:
         logger.warning("品牌归一迁移跳过：%s", exc)
 
 
+def _migrate_finish() -> None:
+    """给老库里的料盘回填「外观」。
+
+    历史版本里外观是接口层现算的（color_name 里含「哑光」就算哑光，否则普通），
+    并不是数据库里的列。列加出来之后要按同一套规则回填一遍，升级后界面才不会
+    突然全变成「普通」。回填只做空的，用户后来手改过的值不会被覆盖。
+    """
+    from sqlmodel import Session as _Session, select
+
+    from .catalog import infer_finish
+    from .models import Spool
+
+    try:
+        with _Session(engine) as session:
+            rows = [s for s in session.exec(select(Spool)).all() if not (s.finish or "").strip()]
+            for spool in rows:
+                spool.finish = infer_finish(spool.color_name)
+                session.add(spool)
+            if rows:
+                session.commit()
+                logger.info("迁移：回填 %s 盘料盘的外观", len(rows))
+    except Exception as exc:  # pragma: no cover - 迁移失败不应阻塞启动
+        logger.warning("外观回填迁移跳过：%s", exc)
+
+
 def init_db() -> None:
     # 确保模型已注册（auth 里的账号/会话表也要建出来）
     from . import auth, models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
     _migrate_columns()
+    _migrate_finish()
     _migrate_data()
 
 

@@ -75,9 +75,6 @@ def test_normalize() -> None:
         ("PolyMaker", "Polymaker"),
         ("kecelled", "Kexcelled"),          # 常见拼写变体
         ("KEXCELLED", "Kexcelled"),
-        ("esun", "eSUN 易生"),
-        ("易生", "eSUN 易生"),
-        ("三绿", "三绿 Sunlu"),
         ("", ""),
     ]
     for raw, want in cases:
@@ -87,6 +84,22 @@ def test_normalize() -> None:
     # 自定义品牌不应被改写
     for raw in ("自家作坊", "MyBrand PLA", "某宝白牌"):
         check(f"自定义品牌保留：{raw}", normalize_brand(raw) == raw, normalize_brand(raw))
+
+    # 用户点名删掉的品牌：不再出现在预设里，也不再被归一成别人的名字。
+    # 这一条是防回归的 —— 品牌表在 catalog.py 里，删掉之后如果别名表没跟着删，
+    # 老写法还会被「复活」成已删除的品牌名，界面上就又冒出来了。
+    removed = ["eSUN 易生", "三绿 Sunlu", "创想三维 Creality", "JAYO", "Overture", "Prusament"]
+    for name in removed:
+        check(f"已删除品牌不在预设里：{name}", name not in BRAND_PRESETS, str(BRAND_PRESETS))
+    for raw in ("esun", "易生", "三绿", "sunlu", "creality", "创想三维",
+                "jayo", "jayooh", "overture", "prusament"):
+        got = normalize_brand(raw)
+        check(f"已删除品牌的写法原样保留：{raw}", got == raw, f"实际 {got!r}")
+
+    # 保留的品牌照旧
+    for name in ("拓竹", "Polymaker", "大简", "爱丽兹 Allizz", "Kexcelled", "兰博", "魔创"):
+        check(f"品牌预设里有：{name}", name in BRAND_PRESETS, str(BRAND_PRESETS))
+    check("「其他」排在候选末尾", BRAND_PRESETS[-1] == "其他", str(BRAND_PRESETS))
 
 
 # ── 2. 品牌下拉框无重复 ───────────────────────────────────────────

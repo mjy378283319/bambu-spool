@@ -37,6 +37,7 @@ const ICO = {
   fan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.9"/><path d="M10.2 10.2C8.2 7.6 8.6 5.2 10.7 4.6c1.9-.5 3.1 1.2 2.3 3.1"/><path d="M13.8 10.2c2.6-2 5-1.6 5.6.5.5 1.9-1.2 3.1-3.1 2.3"/><path d="M13.8 13.8c2 2.6 1.6 5-.5 5.6-1.9.5-3.1-1.2-2.3-3.1"/><path d="M10.2 13.8c-2.6 2-5 1.6-5.6-.5-.5-1.9 1.2-3.1 3.1-2.3"/></svg>',
   layer: '<svg viewBox="0 0 24 24"><path d="M12 3.6 20 7.9l-8 4.3-8-4.3z"/><path d="m4 12.4 8 4.3 8-4.3"/><path d="m4 16.4 8 4.3 8-4.3"/></svg>',
   drop: '<svg viewBox="0 0 24 24"><path d="M12 3.6c3 4 5.4 6.6 5.4 9.6a5.4 5.4 0 0 1-10.8 0c0-3 2.4-5.6 5.4-9.6z"/></svg>',
+  scan: '<svg viewBox="0 0 24 24"><path d="M4 8.5V5.8c0-1 .8-1.8 1.8-1.8H8.5"/><path d="M15.5 4h2.7c1 0 1.8.8 1.8 1.8v2.7"/><path d="M20 15.5v2.7c0 1-.8 1.8-1.8 1.8h-2.7"/><path d="M8.5 20H5.8c-1 0-1.8-.8-1.8-1.8v-2.7"/><path d="M4 12h16"/></svg>',
 };
 
 
@@ -268,6 +269,7 @@ function switchView(name) {
     b.classList.toggle("active", b.dataset.view === name));
   if (name === "spools") loadSpools();
   if (name === "jobs") loadJobs();
+  if (name === "summary") loadSummary();
   if (name === "settings") { loadStatus(); }
 }
 
@@ -279,28 +281,85 @@ document.querySelectorAll("#spoolTabs .tab").forEach((button) => {
   button.addEventListener("click", () => switchSpoolTab(button.dataset.tab));
 });
 
+/* ── 目录候选：品牌 / 外观 ─────────────────────────────── */
+/** 外观关键词 -> 规范名。必须与后端 catalog._FINISH_KEYWORDS 一致，
+ *  否则「颜色名自动预填外观」在前后端会给出不同的结果。
+ *  顺序敏感：丝绸在哑光前（「丝绸哑光」算丝绸）、半透在透明前（「半透明」算半透）。 */
+const FINISH_KEYWORDS = [
+  ["丝绸", "丝绸"], ["silk", "丝绸"], ["丝滑", "丝绸"], ["丝光", "丝绸"],
+  ["哑光", "哑光"], ["磨砂", "磨砂"], ["matte", "哑光"], ["matt", "哑光"],
+  ["珠光", "珠光"], ["金属", "金属"], ["metallic", "金属"],
+  ["夜光", "夜光"], ["glow", "夜光"], ["luminous", "夜光"],
+  ["半透", "半透"], ["translucent", "半透"],
+  ["透明", "透明"], ["clear", "透明"],
+  ["渐变", "渐变"], ["rainbow", "渐变"], ["gradient", "渐变"],
+  ["双色", "双色"], ["twotone", "双色"],
+  ["木纹", "木纹"], ["wood", "木纹"],
+  ["碳纤", "碳纤"], ["carbon", "碳纤"],
+  ["亮面", "亮面"], ["gloss", "亮面"],
+];
+
+/** 从颜色名里猜外观（「哑光黑」→ 哑光）。用于预填，不覆盖用户已填的值。 */
+function inferFinish(text) {
+  const s = String(text || "").toLowerCase();
+  for (const [keyword, finish] of FINISH_KEYWORDS) {
+    if (s.includes(keyword)) return finish;
+  }
+  return "普通";
+}
+
+/** 品牌候选：目录预设 + 库里实际用过的品牌（历史品牌与自定义品牌也要能筛）。 */
+function brandChoices(extra) {
+  const preset = (S.catalog.brands || []).slice();
+  const pool = S.spools.map((s) => s.brand).filter(Boolean);
+  if (extra) pool.push(extra);
+  const rest = [...new Set(pool)].filter((b) => !preset.includes(b))
+    .sort((a, b) => String(a).localeCompare(String(b), "zh"));
+  return preset.concat(rest);
+}
+
+/** 外观候选：目录预设 + 库里实际用过的（含用户自填的写法）。 */
+function finishChoices(extra) {
+  const preset = (S.catalog.finishes || []).slice();
+  const pool = S.spools.map((s) => s.finish).filter(Boolean);
+  if (extra) pool.push(extra);
+  return preset.concat([...new Set(pool)].filter((f) => !preset.includes(f)));
+}
+
+/** 重填一个下拉：保留用户当前选中的值，且不重复追加（loadCatalog 可能被多次调用）。 */
+function refillSelect(id, values, placeholder) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = (placeholder ? `<option value="">${esc(placeholder)}</option>` : "")
+    + values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  if (current && values.includes(current)) sel.value = current;
+}
+
 /* ── 数据加载 ──────────────────────────────────────────── */
 async function loadCatalog() {
   try {
     S.catalog = await api("/api/catalog");
-    const materialSel = document.getElementById("spoolMaterial");
-    S.catalog.materials.forEach((m) => {
-      const option = document.createElement("option");
-      option.value = m; option.textContent = m;
-      materialSel.appendChild(option);
-    });
-    const brandSel = document.getElementById("spoolBrand");
-    S.catalog.brands.forEach((b) => {
-      const option = document.createElement("option");
-      option.value = b; option.textContent = b;
-      brandSel.appendChild(option);
-    });
+    refillSelect("spoolMaterial", S.catalog.materials, "全部材料");
+    refillSelect("spoolBrand", S.catalog.brands, "全部品牌");
+    refillSelect("spoolFinish", S.catalog.finishes, "全部外观");
   } catch (err) { /* 目录加载失败不阻塞主界面 */ }
+}
+
+/** 库存页筛选项跟着实际数据走：老数据里的品牌/外观不在预设里也要能筛出来。 */
+function syncFilterOptions() {
+  refillSelect("spoolBrand", brandChoices(), "全部品牌");
+  refillSelect("spoolFinish", finishChoices(), "全部外观");
+}
+
+/** 客户端时区（UTC 以东的分钟数）。后端按它切「今天 / 本周」的边界。 */
+function tzMinutes() {
+  return -new Date().getTimezoneOffset();
 }
 
 async function loadStatus() {
   S.status = await api("/api/system/status");
-  try { S.stats = await api("/api/stats"); } catch (err) { S.stats = null; }
+  try { S.stats = await api(`/api/stats?tz_minutes=${tzMinutes()}`); } catch (err) { S.stats = null; }
   // 仪表盘的三栏活动面板要用到在用料盘，顺手取一份不带筛选的
   try { S.dashSpools = (await api("/api/spools?archived=false")).spools || []; }
   catch (err) { /* 非致命：面板会退化成空列表 */ }
@@ -339,6 +398,29 @@ async function loadJobs() {
 }
 
 /* ── 仪表盘 ────────────────────────────────────────────── */
+/** 本周三张卡。版式照官方 App：标题在左上、图标在右上、大号数值 + 单位、底部一行说明。 */
+function renderWeekCards() {
+  const host = document.getElementById("weekStats");
+  if (!host) return;
+  const st = S.stats || {};
+  const week = st.week;
+  if (!week) { host.innerHTML = ""; return; }
+  const cost = sumRecentDays(st.by_day_cost, 7);
+  host.innerHTML = `
+    <div class="stat big"><span class="ico">${ICO.clock}</span>
+      <div class="label">本周打印时长</div>
+      <div class="value">${(Number(week.print_hours) || 0).toFixed(1)}<small> h</small></div>
+      <div class="sub">七日内累计任务耗时${week.job_count ? ` · 共 ${week.job_count} 个任务` : ""}</div></div>
+    <div class="stat big"><span class="ico">${ICO.printer}</span>
+      <div class="label">本周成功打印</div>
+      <div class="value">${week.success_count || 0}<small> 次</small></div>
+      <div class="sub">七日内正常完成次数</div></div>
+    <div class="stat big"><span class="ico">${ICO.weight}</span>
+      <div class="label">本周耗材消耗</div>
+      <div class="value">${(Number(week.used_g) || 0).toFixed(1)}<small> g</small></div>
+      <div class="sub">七日内累计净重消耗${cost > 0 ? ` · 约 ¥${cost.toFixed(2)}` : ""}</div></div>`;
+}
+
 function renderDashboard() {
   if (!S.status) return;
   const stats = S.status.stats || {};
@@ -346,8 +428,13 @@ function renderDashboard() {
   const priceTotal = st.price_total != null ? st.price_total : (stats.price_total || 0);
   const stockValue = st.stock_value != null ? st.stock_value : (stats.stock_value || 0);
   const printCost = st.print_cost_total != null ? st.print_cost_total : 0;
-  const weekUsed = sumRecentDays(st.by_day, 7);
+  // 本周口径优先用后端的 week 块（它按客户端时区切自然日）；
+  // 老版本接口没有 week 时退回本地按日求和。
+  const week = st.week || null;
+  const weekUsed = week ? Number(week.used_g) || 0 : sumRecentDays(st.by_day, 7);
   const weekCost = sumRecentDays(st.by_day_cost, 7);
+
+  renderWeekCards();
 
   document.getElementById("dashStats").innerHTML = `
     <div class="stat"><span class="ico">${ICO.spool}</span>
@@ -629,8 +716,20 @@ function trayFlag(occupied, bound, active) {
   return '<span class="tray-flag warn" title="机器有料，但还没绑定本系统料盘"></span>';
 }
 
-/** P2S 外形示意图：纯内联 SVG，不依赖外部图片，离线也能显示。 */
-function printerArt(model, uid) {
+/** 机型 -> 真机照片 URL。
+ *
+ *  表由后端扫 app/static/printer/ 目录得到（/api/system/status 的 printer_images），
+ *  所以加一台机器只要放一张 <机型>.jpg，不用改代码。没配照片的机型不在表里。
+ */
+function printerPhoto(model, map) {
+  const table = map || (S.status && S.status.printer_images) || {};
+  const key = String(model || "").trim().toUpperCase();
+  return table[key] || "";
+}
+
+/** P2S 外形示意图：纯内联 SVG，不依赖外部图片，离线也能显示。
+ *  现在它退居兜底 —— 有真机照片时用照片（见 printerArt）。 */
+function printerArtSVG(model, uid) {
   const b = `pab-${uid}`, g = `pag-${uid}`;
   return `<svg class="printer-art" viewBox="0 0 230 300" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
     <defs>
@@ -665,6 +764,24 @@ function printerArt(model, uid) {
     <rect x="34" y="284" width="26" height="8" rx="3" fill="#9aa4b0"/>
     <rect x="170" y="284" width="26" height="8" rx="3" fill="#9aa4b0"/>
   </svg>`;
+}
+
+/** 机器示意图：有该机型的真机照片就用照片，否则退回内联 SVG。
+ *
+ *  照片和 SVG 一起渲染，靠 .art-broken 切换 —— onerror 里的兜底不能省：
+ *  机型拼错、照片被删、文件损坏时，界面不能给用户留一块空白，
+ *  这一点在「用户自己往 printer/ 里塞图」的用法下尤其容易踩到。
+ */
+function printerArt(model, uid) {
+  const svg = printerArtSVG(model, uid);
+  const photo = printerPhoto(model);
+  if (!photo) return svg;
+  return `<span class="printer-art-wrap">
+    <img class="printer-art printer-photo" src="${esc(photo)}"
+         alt="${esc(model)} 真机照片" decoding="async"
+         onerror="this.parentNode.classList.add('art-broken')" />
+    ${svg}
+  </span>`;
 }
 
 function fmtTemp(value, target) {
@@ -1018,6 +1135,7 @@ function spoolRowHtml(spool) {
 
 function renderSpools() {
   const host = document.getElementById("spoolTable");
+  syncFilterOptions();
   const list = filteredSpools();
   const size = S.spoolPageSize || 10;
   const pages = Math.max(1, Math.ceil(list.length / size));
@@ -1184,7 +1302,7 @@ function renderColorPresets() {
   const list = document.getElementById("colorList");
   if (!brandEl || !matEl || !box || !list) return;
 
-  const groups = presetGroupsFor(brandEl.value, matEl.value);
+  const groups = presetGroupsFor(currentBrandValue() || brandEl.value, matEl.value);
   if (!groups.length) {
     box.innerHTML = "";
     list.innerHTML = (S.catalog.colors || [])
@@ -1249,49 +1367,89 @@ function openSpoolDialog(spool, forceNew) {
   // forceNew：表单预填了某盘料的参数，但目的是新增（例如图片识色匹配到的色卡）
   const isEdit = !!spool && !forceNew;
   const value = spool || {
-    brand: "", material: "", color_name: "黑色", color_hex: "#1A1A1A",
+    brand: "", material: "", finish: "普通", color_name: "黑色", color_hex: "#1A1A1A",
     spool_weight: 250, initial_weight: 1000, location: "", note: "", name: "",
   };
-  const brandOptions = S.catalog.brands.map((b) =>
-    `<option value="${esc(b)}" ${b === value.brand ? "selected" : ""}>${esc(b)}</option>`).join("");
+  const brands = brandChoices(value.brand);
+  const presetBrands = S.catalog.preset_brands || [];
+  const brandOptions = brands.map((b) =>
+    `<option value="${esc(b)}" ${b === value.brand ? "selected" : ""}>${esc(b)}${presetBrands.includes(b) ? "" : "（自定义）"}</option>`).join("");
   const materialOptions = S.catalog.materials.map((m) =>
     `<option value="${esc(m)}" ${m === value.material ? "selected" : ""}>${esc(m)}</option>`).join("");
+  // 料盘不在候选里（历史自定义品牌）时默认落到「自定义」那一项
+  const customSelected = value.brand && !brands.includes(value.brand) ? " selected" : "";
+  const finish = value.finish || "普通";
 
   openModal(isEdit ? "编辑料盘" : "新增料盘", `
     <label class="field"><span>品牌</span>
-      <select id="f_brand" onchange="renderColorPresets()">${brandOptions}</select></label>
+      <select id="f_brand" onchange="onBrandChoice()">${brandOptions}
+        <option value="__custom__"${customSelected}>＋ 自定义品牌…</option></select></label>
+    <div class="field-row${customSelected ? "" : " hidden"}" id="brandCustomRow">
+      <label class="field"><span>自定义品牌名</span>
+        <input id="f_brand_custom" value="${customSelected ? esc(value.brand) : ""}"
+               placeholder="例如：某某耗材（保存后会自动进品牌下拉）" /></label>
+    </div>
     <div class="field-row">
       <label class="field"><span>材料</span><select id="f_material" onchange="renderColorPresets()">${materialOptions}</select></label>
+      <label class="field"><span>外观</span>
+        <input id="f_finish" list="finishList" value="${esc(finish)}" placeholder="如：丝绸 / 哑光 / 亮面" />
+        <datalist id="finishList">${finishChoices(finish).map((f) => `<option value="${esc(f)}">`).join("")}</datalist>
+      </label>
+    </div>
+    <div class="field-row">
       <label class="field"><span>颜色名称</span>
         <input id="f_color_name" list="colorList" value="${esc(value.color_name)}" oninput="onColorNameInput()" />
         <datalist id="colorList">${S.catalog.colors.map((c) => `<option value="${esc(c.name)}">`).join("")}</datalist>
       </label>
+      <label class="field"><span>颜色</span>
+        <input type="color" id="f_color_hex" value="${esc(value.color_hex)}" style="height:34px;padding:2px" oninput="markActivePreset()" /></label>
     </div>
     <div id="colorPresets"></div>
     <div class="field-row">
-      <label class="field"><span>颜色</span>
-        <input type="color" id="f_color_hex" value="${esc(value.color_hex)}" style="height:34px;padding:2px" oninput="markActivePreset()" /></label>
       <label class="field"><span>空盘皮重（g）</span>
         <input type="number" id="f_spool_weight" value="${value.spool_weight}" step="1" /></label>
-    </div>
-    <div class="field-row">
       <label class="field"><span>满盘净重（g）</span>
         <input type="number" id="f_initial_weight" value="${value.initial_weight}" step="10" /></label>
-      <label class="field"><span>当前余量（g）</span>
-        <input type="number" id="f_remaining_weight" value="${isEdit ? value.remaining_weight : value.initial_weight}" step="1" /></label>
     </div>
     <div class="field-row">
+      <label class="field"><span>当前余量（g）</span>
+        <input type="number" id="f_remaining_weight" value="${isEdit ? value.remaining_weight : value.initial_weight}" step="1" /></label>
       <label class="field"><span>整盘价格（¥）</span>
         <input type="number" id="f_price" value="${value.price != null ? value.price : 0}" step="0.01" min="0" placeholder="如 99.9" /></label>
-      <label class="field"><span>存放位置（可选）</span>
-        <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
     </div>
+    <label class="field"><span>存放位置（可选）</span>
+      <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
     <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
+    <p class="hint">外观是表面工艺：同一材料同一颜色也可能有普通 / 哑光 / 丝绸几种货，价格不一样，
+      所以单独记一列。颜色名里带「哑光」「丝绸」这类词时会自动预填，可以改。</p>
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
     <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
   renderColorPresets();
+}
+
+/** 品牌下拉切到「＋ 自定义品牌…」时露出输入框。 */
+function onBrandChoice() {
+  const sel = document.getElementById("f_brand");
+  const row = document.getElementById("brandCustomRow");
+  if (!sel || !row) return;
+  const isCustom = sel.value === "__custom__";
+  row.classList.toggle("hidden", !isCustom);
+  if (isCustom) {
+    const input = document.getElementById("f_brand_custom");
+    if (input && !input.value) input.focus();
+  }
+  renderColorPresets();
+}
+
+/** 读当前表单里的品牌：选「自定义」时取输入框的值。 */
+function currentBrandValue() {
+  const sel = document.getElementById("f_brand");
+  if (!sel) return "";
+  if (sel.value !== "__custom__") return sel.value.trim();
+  const input = document.getElementById("f_brand_custom");
+  return (input ? input.value : "").trim();
 }
 
 async function saveSpool(id) {
@@ -1485,17 +1643,34 @@ function openSlotDialog(printerId, amsId, trayId) {
     <label class="field"><span>绑定到哪盘料</span>
       <select id="bindSpool"><option value="">— 不绑定 —</option>${options}</select></label>
     <div class="row">
-      <input id="bindScan" placeholder="或扫码：把光标放这里扫料盘二维码" onkeydown="if(event.key==='Enter')handleScan(this.value,'bindSpool')" />
+      <input id="bindScan" placeholder="扫码枪：光标放这里扫料盘码"
+             onkeydown="if(event.key==='Enter')handleScan(this.value,'bindSpool')" />
+      <button class="sm" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
+        ${ICO.scan}相机扫码
+      </button>
+    </div>
+    <div class="row" style="margin-top:8px">
       <button class="sm" onclick="quickCreateSpoolFromSlot(${printerId},${amsId},${trayId})">按槽位信息建料盘</button>
     </div>
     <div class="row" style="margin-top:14px">
       <img src="/api/labels/slot/${printerId}/${amsId}/${trayId}.png" alt="槽位二维码"
            style="width:72px;height:72px;border:1px solid var(--border);border-radius:6px" />
-      <div class="small muted">这是该槽位的二维码，打印出来贴在槽位上，
-        以后拿扫码枪扫料盘码就能直接进绑定页。</div>
+      <div class="small muted">这是该槽位的二维码，打印出来贴在槽位上。
+        以后扫这张码（手机用上面的「相机扫码」，桌面用扫码枪）就能直接进这个槽位的绑定页。</div>
     </div>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveBinding(${printerId},${amsId},${trayId})">保存绑定</button>`);
+}
+
+/** 槽位绑定弹窗里的「相机扫码」：扫到料盘码就填进上面的下拉，
+ *  扫到别的槽位码就直接跳到那个槽位（current 传进去是为了识别「扫的是自己」）。 */
+function scanForSlotBind(printerId, amsId, trayId) {
+  openScan({
+    title: "扫料盘二维码",
+    hint: "对准料盘上贴的二维码。扫到槽位码也可以 —— 会直接跳到那个槽位。",
+    selectId: "bindSpool",
+    current: { printer: printerId, ams: amsId, tray: trayId },
+  });
 }
 
 function findTray(printer, amsId, trayId) {
@@ -1508,16 +1683,110 @@ function findTray(printer, amsId, trayId) {
   return (unit.trays || []).find((t) => t.tray_id === trayId) || null;
 }
 
+/* ── 扫码：扫码枪和手机相机共用同一套「认码 → 落地」──────
+ * 认码在 scan.js（相机扫码那套也放那儿），这里管「认出来之后干嘛」。
+ * 两个入口：扫码枪走输入框回车（handleScan），手机走相机（openScan）。 */
+
+/** 认码。scan.js 没加载时用同规则的兜底实现，免得整条路直接断掉。 */
+function parseScanText(text) {
+  if (window.spoolScanner && window.spoolScanner.parseScan) {
+    return window.spoolScanner.parseScan(text);
+  }
+  const s = String(text || "").trim();
+  let m = s.match(/[#&?]bind=(-?\d+):(-?\d+):(-?\d+)/);
+  if (m) return { kind: "bind", printer: +m[1], ams: +m[2], tray: +m[3] };
+  m = s.match(/[#&?]spool=(\d+)/);
+  if (m) return { kind: "spool", id: +m[1] };
+  return /^\d{1,9}$/.test(s) ? { kind: "spool", id: +s } : null;
+}
+
+/** 把料盘填进某个下拉。
+ *
+ *  下拉里没有这盘时不能直接赋值了事 —— 赋值给一个不存在的 option 等于没赋，
+ *  用户看到的是「扫了但没反应」。所以这里去后端单独取一次补进选项，
+ *  取不到（编号不存在）才报错。
+ */
+async function pickSpoolInSelect(id, selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return false;
+  if (![...sel.options].some((o) => o.value === String(id))) {
+    let spool = null;
+    try { spool = await api(`/api/spools/${id}`); } catch (err) { spool = null; }
+    if (!spool || !spool.id) { toast(`系统里没有 #${id} 这盘料`, "err"); return false; }
+    const option = document.createElement("option");
+    option.value = String(spool.id);
+    option.textContent = `${spool.name}（余 ${Number(spool.remaining_weight || 0).toFixed(0)} g）`;
+    sel.appendChild(option);
+    if (!S.spools) S.spools = [];
+    if (!S.spools.some((s) => s.id === spool.id)) S.spools.push(spool);
+  }
+  sel.value = String(id);
+  toast(`已选中 #${id}`, "ok");
+  return true;
+}
+
+/** 扫到的码怎么落地。
+ *
+ *  - 料盘码：给了 selectId 就填进那个下拉（槽位绑定弹窗用），否则打开料盘详情；
+ *  - 槽位码：跳到那个槽位的绑定弹窗 —— 这张贴纸就贴在槽位上，扫它多半是想绑/换料。
+ *
+ *  @param {string} text 扫到的原始文本
+ *  @param {{selectId?:string, current?:{printer:number,ams:number,tray:number}}} opts
+ */
+async function applyScan(text, opts) {
+  const options = opts || {};
+  const hit = parseScanText(text);
+  if (!hit) { toast("没认出这个码，扫料盘或槽位上那张二维码", "err"); return false; }
+
+  if (hit.kind === "bind") {
+    const cur = options.current;
+    if (cur && cur.printer === hit.printer && cur.ams === hit.ams && cur.tray === hit.tray) {
+      toast("这就是当前这个槽位", "ok");
+      return true;
+    }
+    closeModal();
+    switchView("dashboard");
+    // 打印机状态还没拉过时先把列表取回来，否则弹窗里找不到这台机器
+    if (!(S.printers_full || []).length) await loadPrinters().catch(() => {});
+    openSlotDialog(hit.printer, hit.ams, hit.tray);
+    return true;
+  }
+
+  if (options.selectId) return pickSpoolInSelect(hit.id, options.selectId);
+  if (!(S.spools || []).length) await loadSpools().catch(() => {});
+  switchView("spools");
+  await openSpoolDetail(hit.id);
+  return true;
+}
+
+/** 扫码枪路径：输入框里回车。 */
 function handleScan(value, targetSelectId) {
   const text = (value || "").trim();
   if (!text) return;
-  let spoolId = 0;
-  const match = text.match(/spool=(\d+)/);
-  if (match) spoolId = parseInt(match[1], 10);
-  else if (/^\d+$/.test(text)) spoolId = parseInt(text, 10);
-  if (!spoolId) { toast("没识别出料盘编号", "err"); return; }
-  document.getElementById(targetSelectId).value = spoolId;
-  toast("已选中料盘 #" + spoolId, "ok");
+  applyScan(text, { selectId: targetSelectId });
+}
+
+/** 相机扫码入口。
+ *
+ *  手机浏览器没有键盘，原来那个「把光标放这里扫」的输入框在手机上完全没法用，
+ *  所以凡是能扫码的地方都配一个按钮走这里。
+ */
+function openScan(options) {
+  const opts = options || {};
+  if (!window.spoolScanner) { toast("扫码模块没加载，刷新页面再试", "err"); return; }
+  window.spoolScanner.open({
+    title: opts.title || "扫二维码",
+    hint: opts.hint,
+    onResult: (text) => { applyScan(text, { selectId: opts.selectId, current: opts.current }); },
+  });
+}
+
+/** 库存页工具栏的「扫码」：扫料盘码直接打开那盘料的详情。 */
+function scanSpoolCode() {
+  openScan({
+    title: "扫料盘二维码",
+    hint: "对准料盘上贴的二维码，扫到后直接打开这盘料的详情。",
+  });
 }
 
 async function quickCreateSpoolFromSlot(printerId, amsId, trayId) {
@@ -1746,8 +2015,175 @@ async function submitManual(jobId, printerId) {
   } catch (err) { toast(err.message, "err"); }
 }
 
+/* ── 耗材汇总 ──────────────────────────────────────────── */
+async function loadSummary() {
+  try {
+    S.stats = await api(`/api/stats?tz_minutes=${tzMinutes()}`);
+    renderSummary();
+    renderDashboard();
+  } catch (err) { toast(err.message, "err"); }
+}
+
+/** 分组汇总表：名称 | 盘数 | 已用 | 剩余 | 余量条 | 采购金额 | 余值。
+ *  窄屏会走 .table-card 的卡片式布局，所以每格都要 data-label。 */
+function summaryTable(rows, emptyText) {
+  if (!rows || !rows.length) return `<div class="empty-state">${esc(emptyText)}</div>`;
+  return `<table><thead><tr>
+      <th>名称</th>
+      <th style="text-align:right">盘数</th>
+      <th style="text-align:right">满盘净重</th>
+      <th style="text-align:right">已用</th>
+      <th style="text-align:right">剩余</th>
+      <th>余量</th>
+      <th style="text-align:right">采购金额</th>
+      <th style="text-align:right">余值</th>
+    </tr></thead><tbody>${rows.map((r) => `
+      <tr>
+        <td class="cell-main"><b>${esc(r.name)}</b></td>
+        <td class="num" data-label="盘数">${r.count} 盘</td>
+        <td class="num" data-label="满盘净重">${r.initial_g.toFixed(0)} g</td>
+        <td class="num" data-label="已用">${r.used_g.toFixed(0)} g</td>
+        <td class="num" data-label="剩余">${r.remaining_g.toFixed(0)} g</td>
+        <td data-label="余量">
+          <div class="bar"><div class="${r.remaining_percent <= 10 ? "low" : ""}"
+            style="width:${Math.max(0, Math.min(100, r.remaining_percent))}%"></div></div>
+          <div class="tiny muted" style="margin-top:4px">${r.remaining_percent}%</div>
+        </td>
+        <td class="num" data-label="采购金额">${r.price > 0 ? "¥" + r.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
+        <td class="num" data-label="余值">${r.stock_value > 0 ? "¥" + r.stock_value.toFixed(2) : "—"}</td>
+      </tr>`).join("")}</tbody></table>`;
+}
+
+function renderSummary() {
+  const st = S.stats;
+  const host = document.getElementById("summaryStats");
+  if (!host) return;
+  if (!st) { host.innerHTML = ""; return; }
+
+  const remaining = Number(st.remaining_total) || 0;
+  const used = Number(st.used_total) || 0;
+  const initial = remaining + used;
+  const pct = initial > 0 ? (remaining / initial) * 100 : 0;
+  host.innerHTML = `
+    <div class="stat"><span class="ico">${ICO.spool}</span>
+      <div class="label">在库料盘</div>
+      <div class="value">${st.spool_count || 0}<small> 盘</small></div>
+      <div class="sub">已归档 ${st.archived_count || 0} 盘（不计入下方汇总）</div></div>
+    <div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">采购总额</div>
+      <div class="value">¥${(Number(st.price_total) || 0).toFixed(2)}</div>
+      <div class="sub">按在库料盘的整盘价累加</div></div>
+    <div class="stat"><span class="ico">${ICO.weight}</span>
+      <div class="label">已消耗</div>
+      <div class="value">${used.toFixed(0)}<small> g</small></div>
+      <div class="sub">折算约 ¥${(Number(st.used_value) || 0).toFixed(2)}（按当前单价）</div></div>
+    <div class="stat"><span class="ico">${ICO.weight}</span>
+      <div class="label">剩余</div>
+      <div class="value">${remaining.toFixed(0)}<small> g</small></div>
+      <div class="sub">占采购总量 ${pct.toFixed(1)}%</div></div>
+    <div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">库存余值</div>
+      <div class="value">¥${(Number(st.stock_value) || 0).toFixed(2)}</div>
+      <div class="sub">剩余克重 × 各自单价</div></div>
+    <div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">累计打印耗材费</div>
+      <div class="value">¥${(Number(st.print_cost_total) || 0).toFixed(2)}</div>
+      <div class="sub">按每次任务的实际用量逐笔累计</div></div>`;
+
+  const brands = st.by_brand || [];
+  const materials = st.by_material_detail || [];
+  const finishes = st.by_finish || [];
+  document.getElementById("brandSummary").innerHTML =
+    summaryTable(brands, "还没有料盘。先到「料盘库存」里录一盘。");
+  document.getElementById("materialSummary").innerHTML =
+    summaryTable(materials, "还没有料盘。");
+  document.getElementById("finishSummary").innerHTML =
+    summaryTable(finishes, "还没有料盘。");
+  const setCount = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  setCount("brandSummaryCount", brands.length ? `共 ${brands.length} 个品牌` : "");
+  setCount("materialSummaryCount", materials.length ? `共 ${materials.length} 种材料` : "");
+  setCount("finishSummaryCount", finishes.length ? `共 ${finishes.length} 种外观` : "");
+}
+
+/* ── 自定义品牌 ────────────────────────────────────────── */
+function renderBrandBox() {
+  const host = document.getElementById("brandBox");
+  if (!host) return;
+  const catalog = S.catalog || {};
+  const custom = catalog.custom_brands || [];
+  const presets = catalog.preset_brands || [];
+  host.innerHTML = `
+    <p class="hint">预设品牌 ${presets.length} 个：
+      ${presets.map((b) => esc(b)).join("、")}</p>
+    <div class="row" style="margin:12px 0">
+      <input id="newBrand" placeholder="自定义品牌名，如：某某耗材"
+             onkeydown="if(event.key==='Enter')addBrand()" />
+      <button class="sm primary" onclick="addBrand()">添加</button>
+    </div>
+    ${custom.length
+      ? `<div class="chip-row">${custom.map((b, i) => `
+          <span class="brand-chip">${esc(b)}
+            <button class="chip-x" title="删除这个自定义品牌"
+                    onclick="removeBrand(${i})">×</button></span>`).join("")}</div>`
+      : '<p class="hint">还没有自定义品牌。新增料盘时品牌选「＋ 自定义品牌…」填的名字会自动记到这里。</p>'}
+    <p class="hint">删除只影响下拉候选：已经用这个品牌录好的料盘照旧保留，需要时可以再加回来。</p>`;
+}
+
+async function addBrand() {
+  const input = document.getElementById("newBrand");
+  const name = (input ? input.value : "").trim();
+  if (!name) { toast("请填写品牌名", "err"); return; }
+  try {
+    const data = await api("/api/brands", { method: "POST", body: JSON.stringify({ name }) });
+    S.catalog = { ...(S.catalog || {}), brands: data.brands, custom_brands: data.custom_brands };
+    renderBrandBox();
+    toast(`已添加品牌「${name}」`, "ok");
+  } catch (err) { toast(err.message, "err"); }
+}
+
+async function removeBrand(index) {
+  const custom = (S.catalog && S.catalog.custom_brands) || [];
+  const name = custom[index];
+  if (!name) return;
+  try {
+    const data = await api(`/api/brands/${encodeURIComponent(name)}`, { method: "DELETE" });
+    S.catalog = { ...(S.catalog || {}), brands: data.brands, custom_brands: data.custom_brands };
+    renderBrandBox();
+    toast(`已移除「${name}」`, "ok");
+  } catch (err) { toast(err.message, "err"); }
+}
+
 /* ── 设置 ──────────────────────────────────────────────── */
+/** 区域标签。只认两个已知值，其余原样显示。
+ *
+ *  以前写成 `region === "china" ? "中国大陆" : "海外"`，导致任何非 china 的值
+ *  （包括 undefined）都会被说成「海外」—— 设置页因此永远显示海外，与账号真实
+ *  区域无关。现在未知值会被显式标出来，不会再冒充某个区域。 */
+function regionLabel(region) {
+  const key = String(region || "").trim().toLowerCase();
+  if (key === "china") return "中国大陆";
+  if (key === "global") return "海外";
+  return key ? `未知（${region}）` : "未设置";
+}
+
+function toggleRegionSwitch() {
+  const box = document.getElementById("regionSwitchBox");
+  if (box) box.classList.toggle("hidden");
+}
+
+async function switchRegion() {
+  const region = document.getElementById("regionSwitch").value;
+  try {
+    const result = await api("/api/account/region", {
+      method: "POST", body: JSON.stringify({ region }),
+    });
+    toast(result.message || "区域已切换", "ok");
+    await loadStatus();
+  } catch (err) { toast(err.message, "err"); }
+}
+
 function renderSettings() {
+  renderBrandBox();
   if (!S.status) return;
   const account = S.status.account || {};
   const box = document.getElementById("accountBox");
@@ -1762,7 +2198,7 @@ function renderSettings() {
         <div>
           <div>${esc(account.account)}</div>
           <div class="small muted">用户 ID ${esc(account.uid)} ·
-            区域 ${account.region === "china" ? "中国大陆" : "海外"}</div>
+            区域 ${esc(regionLabel(account.region))}</div>
         </div>
       </div>
       <div class="small muted" style="margin-bottom:14px">
@@ -1774,6 +2210,18 @@ function renderSettings() {
       <div class="row">
         <button class="sm" onclick="syncDevices()">同步设备</button>
         <button class="sm danger" onclick="logoutAccount()">退出登录</button>
+        <button class="sm ghost" onclick="toggleRegionSwitch()">区域不对？</button>
+      </div>
+      <div class="hidden" id="regionSwitchBox" style="margin-top:12px">
+        <label class="field"><span>切换到哪个区域</span>
+          <select id="regionSwitch">
+            <option value="china" ${account.region === "china" ? "" : "selected"}>中国大陆</option>
+            <option value="global" ${account.region === "global" ? "selected" : ""}>海外</option>
+          </select></label>
+        <p class="hint">拓竹账号只属于一个区域：选错区域时能登录成功，但设备列表永远是空的
+          （接口打到了另一个域名）。切换后若之前保存过密码，会自动在新区域重新登录并同步设备；
+          没保存密码就切到登录表单重新登一次。</p>
+        <button class="sm" onclick="switchRegion()">切换并重新同步</button>
       </div>`;
   } else {
     box.innerHTML = `
@@ -2470,6 +2918,14 @@ document.addEventListener("paste", (ev) => {
   }
 });
 
+/* 运行中 hash 变化：手机上用系统相机扫料盘/槽位二维码就会走到这里。
+ *
+ * 浏览器换 hash 不会重新加载页面，没有这个监听的话，「应用已经开着 + 扫码」
+ * 就完全没有反应（用户以为扫码坏了）。放在应用外层，登录态都没进也无妨：
+ * 那时页面还是登录页，switchView 找不到容器自然什么都不做。
+ */
+window.addEventListener("hashchange", () => { applyHashRoute(); });
+
 function connectSocket() {
   if (S.socket) { try { S.socket.close(); } catch (e) { /* 忽略 */ } }
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -2544,23 +3000,48 @@ function addEvent(event) {
 }
 
 /* ── 启动 ──────────────────────────────────────────────── */
-function applyHashRoute() {
+/** 按 location.hash 落到对应页面 / 弹窗。
+ *
+ *  这个函数不只服务「首次打开带 hash 的链接」，也服务**运行中改 hash**：
+ *  手机上最常见的用法是用系统相机（或微信）扫料盘/槽位上那张二维码，
+ *  扫出来就是 `http://nas:8000/#spool=12`。如果应用此刻正开着，浏览器只会
+ *  换一段 hash 而不会重新加载页面 —— 没人监听 hashchange 的话，用户看到的是
+ *  「扫了，什么都没发生」。所以下面在启动时挂了 hashchange（见 bindGlobalEvents）。
+ *
+ *  弹窗依赖的数据（打印机列表 / 料盘列表）在这里按需补齐：直接开链接时
+ *  enterApp 已经拉过一遍，但运行中改 hash 时不能假设一定有。
+ *
+ *  @param {{initial?:boolean}} [options] initial=true 表示这是启动时那次调用：
+ *    此时 hash 为空要落到仪表盘（首次打开的默认页）；运行中改 hash 时
+ *    hash 变空（比如用户按了浏览器回退）则什么都不做，免得把人从当前页拽走。
+ */
+async function applyHashRoute(options) {
+  const opts = options || {};
   const knownViews = ["dashboard", "spools", "jobs", "settings"];
   const hash = location.hash.slice(1);
   if (knownViews.includes(hash)) {
     switchView(hash);
-  } else if (hash.startsWith("spool=")) {
+    return;
+  }
+  if (hash.startsWith("spool=")) {
     const id = parseInt(hash.slice(6), 10);
-    if (id) { switchView("spools"); openSpoolDetail(id); }
-  } else if (hash.startsWith("bind=")) {
+    if (!id) return;
+    if (!(S.spools || []).length) await loadSpools().catch(() => {});
+    switchView("spools");
+    await openSpoolDetail(id);
+    return;
+  }
+  if (hash.startsWith("bind=")) {
     const parts = hash.slice(5).split(":").map(Number);
     if (parts.length === 3 && parts.every((n) => !isNaN(n))) {
+      // 打印机状态还没拉过时先取回来，否则弹窗里找不到这台机器
+      if (!(S.printers_full || []).length) await loadPrinters().catch(() => {});
       switchView("dashboard");
       openSlotDialog(parts[0], parts[1], parts[2]);
+      return;
     }
-  } else {
-    switchView("dashboard");
   }
+  if (opts.initial) switchView("dashboard");
 }
 
 /** 登录成功后进入应用：拉取数据并建立实时连接。 */
@@ -2581,7 +3062,7 @@ async function enterApp() {
     toast(err.message, "err");
   }
   connectSocket();
-  applyHashRoute();
+  await applyHashRoute({ initial: true });
   return true;
 }
 
@@ -2608,8 +3089,15 @@ async function boot() {
 // 定时兜底刷新（WebSocket 断线时也能保持数据新鲜）
 setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {}); }, 45000);
 
-// 无头自测钩子（tests/test_panel_fill.mjs 直跑 node 校验用，浏览器里没有副作用）。
-// 风扇四行命名与料条高度口径是照着用户反馈改的，纯函数肉眼很难盯住，钉在这里。
-window.panelDebug = { fanChannels, filFill, MIN_FILL_PCT };
+// 无头自测钩子（tests/test_panel_fill.mjs、tests/test_ui_polish.mjs 直跑 node 校验用，
+// 浏览器里没有副作用）。这几组纯函数要么是照着用户反馈改的、要么决定界面显示什么，
+// 肉眼很难盯住，钉在这里。
+window.panelDebug = {
+  fanChannels, filFill, MIN_FILL_PCT,
+  // 外观预填、区域文案、机型照片、扫码认码 —— 错了都是「界面看着正常但不对」
+  inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText,
+  // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
+  state: S,
+};
 
 boot();

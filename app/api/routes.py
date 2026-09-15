@@ -8,7 +8,7 @@ import base64
 import io
 import json
 import qrcode
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
@@ -25,10 +25,13 @@ from ..auth import (
     resolve_session,
     token_from_request,
 )
+from ..brands import add_custom_brand, brand_choices, load_custom_brands, remove_custom_brand
+from ..printer_art import printer_image_map
 from ..catalog import (
     BRAND_COLOR_SERIES,
     BRAND_PRESETS,
     COLOR_PRESETS,
+    FINISH_PRESETS,
     MATERIAL_COLOR_SERIES,
     MATERIALS,
     MODEL_CODE_TO_NAME,
@@ -36,6 +39,7 @@ from ..catalog import (
     model_display_name,
     normalize_brand,
     normalize_color,
+    normalize_finish,
     spool_weight_options,
 )
 from ..colors import (
@@ -98,7 +102,9 @@ def spool_dict(spool: Spool) -> dict:
         "location": spool.location,
         "note": spool.note,
         "archived": spool.archived,
-        "finish": "哑光" if "哑光" in (spool.color_name or "") else "普通",
+        # 真实字段。历史上的实现是从 color_name 里现算（含「哑光」就是哑光），
+        # 那种猜法没法表示丝绸、亮面这些工艺，也没法给同色的两盘料分别标。
+        "finish": spool.finish or "普通",
         "created_at": spool.created_at.isoformat(),
         "updated_at": spool.updated_at.isoformat(),
     }
@@ -182,7 +188,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.2.0",
+        "version": "0.3.0",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -195,6 +201,10 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
             "logged_in": bool(acc and acc.access_token),
             "account": acc.account if acc else "",
             "uid": acc.uid if acc else "",
+            # region 必须带上：设置页要显示「中国大陆 / 海外」。
+            # 漏掉这一项的后果是前端拿到 undefined，`undefined === "china"` 为假，
+            # 于是无论账号真实区域是什么，设置页都写「海外」。
+            "region": acc.region if acc else settings.region,
             "status": acc.status if acc else "logged_out",
             "status_message": acc.status_message if acc else "",
             "has_password_saved": bool(acc.password_enc) if acc else False,
@@ -208,6 +218,9 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
             "price_total": round(sum(s.price for s in spools if not s.archived), 2),
             "stock_value": round(sum(s.stock_value for s in spools if not s.archived), 2),
         },
+        # 仪表盘用的真机照片：目录里有什么就报什么，前端按机型取；
+        # 没配照片的机型前端会自动退回内联 SVG 示意图。
+        "printer_images": printer_image_map(),
         "recent_jobs": [job_dict(j, session, with_filaments=False) for j in jobs],
         "events": hub.events()[:60],
         **snapshot,
@@ -380,6 +393,16 @@ async def account_login_tfa(payload: dict = Body(...)) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/api/account/region")
+async def account_set_region(payload: dict = Body(...)) -> dict:
+    """切换拓竹账号区域。区域选错会导致「登录成功但同步不到设备」。"""
+    region = str(payload.get("region") or "").strip().lower()
+    try:
+        return await hub.set_region(region)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/api/account/logout")
 async def account_logout() -> dict:
     await hub.logout()
@@ -539,6 +562,7 @@ def list_spools(
 class SpoolCreate(BaseModel):
     brand: str = ""
     material: str = ""
+    finish: str = ""
     color_name: str = ""
     color_hex: str = "#000000"
     name: str = ""
@@ -558,10 +582,15 @@ def create_spool(payload: SpoolCreate, session: Session = Depends(get_session)) 
         remaining = payload.initial_weight
     # 品牌统一成规范名，避免「Bambu Lab」和「拓竹」两套写法并存
     brand = normalize_brand(payload.brand)
+    finish = normalize_finish(payload.finish) or "普通"
+    # 手打的品牌顺手记进自定义清单，下次新增时就能在下拉里直接选到
+    if brand and brand not in BRAND_PRESETS:
+        add_custom_brand(session, brand)
     spool = Spool(
-        name=payload.name or build_spool_name(brand, payload.material, payload.color_name),
+        name=payload.name or build_spool_name(brand, payload.material, payload.color_name, finish),
         brand=brand,
         material=payload.material,
+        finish=finish,
         color_name=payload.color_name,
         color_hex=normalize_color(payload.color_hex),
         spool_weight=payload.spool_weight,
@@ -582,6 +611,7 @@ def create_spool(payload: SpoolCreate, session: Session = Depends(get_session)) 
 class SpoolPatch(BaseModel):
     brand: Optional[str] = None
     material: Optional[str] = None
+    finish: Optional[str] = None
     color_name: Optional[str] = None
     color_hex: Optional[str] = None
     name: Optional[str] = None
@@ -646,6 +676,10 @@ def patch_spool(
             setattr(spool, field, value)
     if payload.brand is not None:
         spool.brand = normalize_brand(payload.brand)
+        if spool.brand and spool.brand not in BRAND_PRESETS:
+            add_custom_brand(session, spool.brand)
+    if payload.finish is not None:
+        spool.finish = normalize_finish(payload.finish) or "普通"
     if payload.color_hex is not None:
         spool.color_hex = normalize_color(payload.color_hex)
     if payload.spool_weight is not None:
@@ -1031,8 +1065,81 @@ def move_usage(
 
 
 # ══ 统计与目录 ═════════════════════════════════════════════
+def _client_tz(tz_minutes) -> timezone:
+    """客户端时区。JS 传的是「UTC 以东多少分钟」（北京时间 = 480）。
+
+    库里的时间一律是无时区 UTC，而「今天」「本周」是**用户本地**的概念。
+    东八区晚上 8 点看到的「今天」在 UTC 里已经是明天，不换算就会算错桶。
+
+    为什么不直接写 `int(tz_minutes)`：自测里是 `routes.stats(session)` 直接调函数，
+    这时 FastAPI 的默认值是个 Query 对象而不是 0，int() 会 TypeError。
+    转不动就当 0（=UTC），比让整个统计接口 500 好。
+    """
+    try:
+        minutes = int(tz_minutes or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    return timezone(timedelta(minutes=max(-840, min(840, minutes))))
+
+
+def _local_day(moment: Optional[datetime], tz: timezone) -> str:
+    """把库里的 naive-UTC 时间换算成客户端本地日期（YYYY-MM-DD）。"""
+    if moment is None:
+        return ""
+    return moment.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%Y-%m-%d")
+
+
+def _local_day_start(days: int, tz: timezone) -> datetime:
+    """最近 N 个自然日（含今天）的起点，返回 naive UTC 供查询使用。"""
+    now_local = datetime.now(timezone.utc).astimezone(tz)
+    start_local = (now_local - timedelta(days=max(0, days - 1))).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _group_summary(spools: list[Spool], key_of) -> list[dict]:
+    """按某个维度（品牌 / 材料 / 外观）把料盘分组汇总。
+
+    每组给出：多少盘、满盘净重、已用、剩余、采购金额、剩余价值，
+    以及余量百分比（按组内满盘总重折算），方便直接画条形图。
+    """
+    buckets: dict[str, dict] = {}
+    for spool in spools:
+        name = (key_of(spool) or "").strip() or "未填写"
+        item = buckets.setdefault(name, {
+            "name": name, "count": 0, "initial_g": 0.0, "remaining_g": 0.0,
+            "used_g": 0.0, "price": 0.0, "stock_value": 0.0,
+        })
+        item["count"] += 1
+        item["initial_g"] += spool.initial_weight
+        item["remaining_g"] += spool.remaining_weight
+        item["used_g"] += spool.used_weight
+        item["price"] += spool.price
+        item["stock_value"] += spool.stock_value
+    out: list[dict] = []
+    for item in buckets.values():
+        item["initial_g"] = round(item["initial_g"], 1)
+        item["remaining_g"] = round(item["remaining_g"], 1)
+        item["used_g"] = round(item["used_g"], 1)
+        item["price"] = round(item["price"], 2)
+        item["stock_value"] = round(item["stock_value"], 2)
+        item["remaining_percent"] = (
+            round(item["remaining_g"] / item["initial_g"] * 100, 1) if item["initial_g"] > 0 else 0.0
+        )
+        out.append(item)
+    out.sort(key=lambda x: (-x["count"], -x["remaining_g"]))
+    return out
+
+
 @router.get("/api/stats")
-def stats(session: Session = Depends(get_session)) -> dict:
+def stats(
+    # session 必须留在第一位：自测里直接 routes.stats(session) 位置传参，
+    # 把 tz_minutes 放前面会让 Session 被当成时区解析（踩过一次）。
+    session: Session = Depends(get_session),
+    tz_minutes: int = Query(0, description="客户端时区（UTC 以东的分钟数，北京时间 = 480）"),
+) -> dict:
+    tz = _client_tz(tz_minutes)
     spools = session.exec(select(Spool)).all()
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(200)).all()  # type: ignore[attr-defined]
     records = session.exec(select(UsageRecord).order_by(UsageRecord.id.desc()).limit(1000)).all()  # type: ignore[attr-defined]
@@ -1070,14 +1177,44 @@ def stats(session: Session = Depends(get_session)) -> dict:
             cost = round(cost, 2)
             print_cost_total += cost
             if job.started_at:
-                day = job.started_at.strftime("%Y-%m-%d")
+                day = _local_day(job.started_at, tz)
                 by_day_cost[day] = round(by_day_cost.get(day, 0.0) + cost, 2)
 
     by_day: dict[str, float] = {}
     for record in records:
         if record.source in ("auto", "manual"):
-            day = record.created_at.strftime("%Y-%m-%d")
+            day = _local_day(record.created_at, tz)
             by_day[day] = round(by_day.get(day, 0.0) + max(0.0, record.weight_g), 1)
+
+    # ── 本周（最近 7 个自然日，含今天）：概览页三张卡的数据源 ──
+    week_start = _local_day_start(7, tz)
+    week_jobs = session.exec(
+        select(PrintJob).where(PrintJob.started_at >= week_start)  # type: ignore[arg-type]
+    ).all()
+    now_utc = utcnow()
+    week_seconds = 0
+    week_success = 0
+    for job in week_jobs:
+        seconds = int(job.duration_seconds or 0)
+        # 正在打印的任务还没有落 duration，按「开始到现在」实时算，卡上不会一直显示 0
+        if job.status == "running" and job.started_at:
+            seconds = max(seconds, int((now_utc - job.started_at).total_seconds()))
+        week_seconds += max(0, seconds)
+        if job.status == "finished":
+            week_success += 1
+
+    week_records = session.exec(
+        select(UsageRecord).where(UsageRecord.created_at >= week_start)  # type: ignore[arg-type]
+    ).all()
+    week_used = round(
+        sum(max(0.0, r.weight_g) for r in week_records if r.source in ("auto", "manual")), 1
+    )
+
+    # ── 分组汇总（耗材汇总页） ──
+    live = [s for s in spools if not s.archived]
+    by_brand = _group_summary(live, lambda s: s.brand)
+    by_material_detail = _group_summary(live, lambda s: s.material)
+    by_finish = _group_summary(live, lambda s: s.finish or "普通")
 
     return {
         "spool_count": len([s for s in spools if not s.archived]),
@@ -1095,20 +1232,71 @@ def stats(session: Session = Depends(get_session)) -> dict:
         "print_cost_total": round(print_cost_total, 2),
         "by_day": dict(sorted(by_day.items())[-30:]),
         "by_day_cost": dict(sorted(by_day_cost.items())[-30:]),
+        # 最近 7 个自然日（含今天）。日期按客户端时区切，否则东八区晚上看到的
+        # 「今天」会被算到上一个桶里。
+        "week": {
+            "days": 7,
+            "start": week_start,
+            "print_seconds": week_seconds,
+            "print_hours": round(week_seconds / 3600, 1),
+            "success_count": week_success,
+            "job_count": len(week_jobs),
+            "used_g": week_used,
+        },
+        # 分组汇总：每个维度一组（在库料盘，不含已归档）
+        "by_brand": by_brand,
+        "by_material_detail": by_material_detail,
+        "by_finish": by_finish,
     }
 
 
 @router.get("/api/catalog")
-def catalog() -> dict:
+def catalog(session: Session = Depends(get_session)) -> dict:
+    brands = brand_choices(session)
     return {
-        "brands": BRAND_PRESETS,
+        "brands": brands,
+        "preset_brands": BRAND_PRESETS,
+        "custom_brands": load_custom_brands(session),
         "materials": MATERIALS,
+        "finishes": FINISH_PRESETS,
         "colors": COLOR_PRESETS,
         "color_series": BRAND_COLOR_SERIES,
         "material_color_series": MATERIAL_COLOR_SERIES,
-        "spool_weights": {b: spool_weight_options(b) for b in BRAND_PRESETS},
+        "spool_weights": {b: spool_weight_options(b) for b in brands},
         "model_codes": MODEL_CODE_TO_NAME,
     }
+
+
+# ══ 自定义品牌 ═══════════════════════════════════════════
+@router.get("/api/brands")
+def list_brands(session: Session = Depends(get_session)) -> dict:
+    return {
+        "brands": brand_choices(session),
+        "preset_brands": BRAND_PRESETS,
+        "custom_brands": load_custom_brands(session),
+    }
+
+
+@router.post("/api/brands")
+def create_brand(payload: dict = Body(...), session: Session = Depends(get_session)) -> dict:
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请填写品牌名")
+    custom = add_custom_brand(session, name)
+    session.commit()
+    return {"custom_brands": custom, "brands": brand_choices(session)}
+
+
+@router.delete("/api/brands/{name}")
+def delete_brand(name: str, session: Session = Depends(get_session)) -> dict:
+    """删除自定义品牌。
+
+    只从下拉候选里移除，**不动已经录好的料盘**——那些料盘的品牌字段照旧，
+    只是变成「不在候选里」的写法，新建时仍可重新加回来。
+    """
+    custom = remove_custom_brand(session, name)
+    session.commit()
+    return {"custom_brands": custom, "brands": brand_choices(session)}
 
 
 # ══ 图片识色：配色匹配 ═══════════════════════════════════════

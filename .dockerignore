@@ -1,0 +1,19 @@
+# 构建上下文里不该出现的东西。
+# Dockerfile 只 COPY app/ 和 tests/，但整个目录都会被当上下文发给守护进程 ——
+# data/ 里有运行时 SQLite 与截图，白传几十兆还会让每次构建都换一次缓存键。
+.git
+.github
+data
+shots
+docs
+scripts
+tests/__pycache__
+**/__pycache__
+**/*.pyc
+*.db
+*.log
+.venv
+venv
+.env
+.edgeprof
+.DS_Store

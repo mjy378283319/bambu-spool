@@ -108,6 +108,90 @@ MATERIALS = [
     "HIPS", "PPS", "PPS-CF", "PPA-CF", "PP", "PCTG", "PE", "EVA", "PHA", "其他",
 ]
 
+# ── 外观（表面工艺） ────────────────────────────────────────────
+# 「外观」是耗材的表面质感，和材料、颜色各自独立：同样是 PLA 黑色，
+# 普通、哑光、丝绸是三种不同的货，价格也不一样。所以要单独存一列。
+FINISH_PRESETS = [
+    "普通", "亮面", "哑光", "磨砂", "丝绸", "珠光", "金属",
+    "半透", "透明", "渐变", "双色", "木纹", "碳纤", "夜光", "其他",
+]
+
+# 中英别名 -> 规范名（键按「小写 + 去空格」归一）
+FINISH_ALIASES: dict[str, str] = {
+    "matte": "哑光",
+    "matt": "哑光",
+    "silk": "丝绸",
+    "silky": "丝绸",
+    "glossy": "亮面",
+    "gloss": "亮面",
+    "basic": "普通",
+    "standard": "普通",
+    "normal": "普通",
+    "frosted": "磨砂",
+    "translucent": "半透",
+    "transparent": "透明",
+    "clear": "透明",
+    "metallic": "金属",
+    "sparkle": "珠光",
+    "glow": "夜光",
+    "luminous": "夜光",
+    "wood": "木纹",
+    "cf": "碳纤",
+    "carbon": "碳纤",
+    "rainbow": "渐变",
+    "gradient": "渐变",
+    "dualtone": "双色",
+    "twotone": "双色",
+    # 中文写法：牌子上印的是「丝滑」「丝光」的比「丝绸」还多
+    "丝滑": "丝绸",
+    "丝光": "丝绸",
+    "丝绸面": "丝绸",
+    "磨砂面": "磨砂",
+    "半透明": "半透",
+}
+_FINISH_LOOKUP: dict[str, str] = {f.lower().replace(" ", ""): f for f in FINISH_PRESETS}
+_FINISH_LOOKUP.update({k.lower().replace(" ", ""): v for k, v in FINISH_ALIASES.items()})
+
+# 从颜色名里反推外观的关键词，**顺序敏感**：
+#   - 丝绸要在哑光前面：「丝绸哑光」该算丝绸（那是丝绸料的表面光泽）；
+#   - 半透要在透明前面：「半透明黑」里同时含「半透」和「透明」，
+#     透明排在前面的话半透盘会被判成全透明（踩过）。
+_FINISH_KEYWORDS = [
+    ("丝绸", "丝绸"), ("silk", "丝绸"), ("丝滑", "丝绸"), ("丝光", "丝绸"),
+    ("哑光", "哑光"), ("磨砂", "磨砂"), ("matte", "哑光"), ("matt", "哑光"),
+    ("珠光", "珠光"), ("金属", "金属"), ("metallic", "金属"),
+    ("夜光", "夜光"), ("glow", "夜光"), ("luminous", "夜光"),
+    ("半透", "半透"), ("translucent", "半透"),
+    ("透明", "透明"), ("clear", "透明"),
+    ("渐变", "渐变"), ("rainbow", "渐变"), ("gradient", "渐变"),
+    ("双色", "双色"), ("twotone", "双色"),
+    ("木纹", "木纹"), ("wood", "木纹"),
+    ("碳纤", "碳纤"), ("carbon", "碳纤"),
+    ("亮面", "亮面"), ("gloss", "亮面"),
+]
+
+
+def normalize_finish(value: str) -> str:
+    """把外观写法归一到预设名（matte → 哑光），未收录的自定义值原样保留。"""
+    name = (value or "").strip()
+    if not name:
+        return ""
+    return _FINISH_LOOKUP.get(name.lower().replace(" ", ""), name)
+
+
+def infer_finish(color_name: str) -> str:
+    """从颜色名里猜外观。只用于老数据回填与「按槽位建料盘」的预填。
+
+    历史版本里「外观」是接口层用 `"哑光" in color_name` 现算的假字段，
+    回填时沿用同一套规则，升级后界面显示不变。
+    """
+    text = (color_name or "").lower()
+    for keyword, finish in _FINISH_KEYWORDS:
+        if keyword in text:
+            return finish
+    return "普通"
+
+
 # 品牌 -> 空盘皮重（g）。多数塑料盘在 190~250g，纸质盘更轻。
 # 官方数据来自厂商规格，未覆盖的品牌用户可手工填写。
 #
@@ -116,19 +200,17 @@ MATERIALS = [
 # 历史数据里的英文写法由下面的 BRAND_ALIASES 统一归并。
 BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "拓竹": [250.0, 190.0],            # 塑料盘 250g / 可重复使用盘 190g
-    "eSUN 易生": [230.0, 200.0],
     "Polymaker": [140.0, 220.0],      # 纸盘 140±7g（官方，PolyTerra/PolyLite 1kg）/ 旧塑料盘 220g
     "大简": [200.0, 150.0],            # 塑料盘约 200g / 纸盘约 150g（估算，建议用称重校准修正）
     "爱丽兹 Allizz": [200.0],
     "Kexcelled": [240.0],
     "兰博": [200.0],                   # 官网未公布空盘重量，估算值，建议称重校准
     "魔创": [200.0],                   # 官网未公布空盘重量，估算值，建议称重校准
-    "三绿 Sunlu": [180.0, 200.0],
-    "创想三维 Creality": [200.0],
-    "JAYO": [180.0],
-    "Overture": [220.0],
-    "Prusament": [200.0],
 }
+# 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / JAYO / Overture / Prusament
+# 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
+# 老库里若有这些品牌的料盘，数据不动，只是不再出现在预设中；
+# 用户如果想再要，可以在「设置 → 自定义品牌」里自己加回来。
 
 # 品牌别名 -> 规范名。键统一按「小写 + 去掉空格」归一，值必须是
 # BRAND_SPOOL_WEIGHTS 里的规范名（或用户自定义的写法）。
@@ -138,20 +220,12 @@ BRAND_ALIASES: dict[str, str] = {
     "bambulab拓竹": "拓竹",
     "拓竹科技": "拓竹",
     "bambu": "拓竹",
-    "esun": "eSUN 易生",
-    "esun易生": "eSUN 易生",
-    "易生": "eSUN 易生",
     "polymaker": "Polymaker",
     "poly maker": "Polymaker",
     "kexcelled": "Kexcelled",
     "kecelled": "Kexcelled",
-    "sunlu": "三绿 Sunlu",
-    "三绿": "三绿 Sunlu",
-    "creality": "创想三维 Creality",
-    "创想三维": "创想三维 Creality",
     "allizz": "爱丽兹 Allizz",
     "爱丽兹": "爱丽兹 Allizz",
-    "jayoo": "JAYO",
     "大简petg": "大简",
 }
 
@@ -390,6 +464,12 @@ def model_display_name(model_code: str) -> str:
     return MODEL_CODE_TO_NAME.get(model_code.upper(), model_code)
 
 
-def build_spool_name(brand: str, material: str, color_name: str) -> str:
-    parts = [p for p in (brand, material, color_name) if p]
+def build_spool_name(brand: str, material: str, color_name: str, finish: str = "") -> str:
+    """默认名：品牌 + 材料 + [外观] + 颜色。
+
+    外观是「普通」或空的时候不写进去，免得每盘料名里都拖一个没信息量的词；
+    丝绸、哑光这类则一定要写 —— 同材料同颜色的两盘货只能靠它区分。
+    """
+    texture = finish if finish and finish != "普通" else ""
+    parts = [p for p in (brand, material, texture, color_name) if p]
     return " ".join(parts)
