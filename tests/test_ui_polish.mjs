@@ -226,7 +226,9 @@ for (const [text, want] of scanCases) {
 }
 
 // 同一套规则必须同时存在于 app.js 和 scan.js，两边不一致就会出现
-// 「相机扫码认得、扫码枪不认得」这种极难排查的现象
+// 「相机扫码认得、手输号码不认得」这种极难排查的现象
+// （2026-09-16：扫码枪输入框已按用户要求从界面移除，这条一致性约束仍然成立 ——
+//  app.js 的兜底 parseScanText 在 scan.js 没加载时要用）
 for (const [text] of scanCases) {
   const a = JSON.stringify(parseScanText(text));
   const b = JSON.stringify(scanner.parseScan(text));
@@ -276,6 +278,20 @@ check("提示带上错误码（手机没法开控制台，只能靠截图）",
   hintUnknown.includes("NotAllowedError"), hintUnknown);
 
 sandbox.navigator.permissions = undefined;
+
+// ── 6.8 扫码入口只剩相机（扫码枪输入框已按用户要求移除）──────────
+// 用户原话：「把这个在界面上删了吧用不到」。那个 input 在手机上就是一块死 UI
+// （没有键盘，光标放进去也没法扫），但它是「扫码」这个功能的原始实现，
+// 以后改槽位弹窗时很容易顺手复制回来，所以钉一条断言。
+console.log("== 扫码入口只剩相机 ==");
+
+const scanGunLeft = (appSrc.match(/id="bindScan"|handleScan/g) || []).join(",");
+check("槽位弹窗里不再有扫码枪输入框", scanGunLeft === "", `残留 ${scanGunLeft}`);
+check("槽位弹窗仍保留「相机扫码」入口",
+  /scanForSlotBind\(/.test(appSrc), "找不到 scanForSlotBind");
+check("料盘页工具栏的扫码按钮也在",
+  /onclick="scanSpoolCode\(\)"/.test(appSrc) || /scanSpoolCode\(/.test(appSrc),
+  "找不到 scanSpoolCode");
 
 // ── 7. 扫码深链在「应用已经开着」时也要生效 ─────────────────────
 console.log("== 扫码深链（系统相机扫出来的 #spool= / #bind= 要能被应用接住） ==");

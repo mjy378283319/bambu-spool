@@ -1643,9 +1643,7 @@ function openSlotDialog(printerId, amsId, trayId) {
     <label class="field"><span>绑定到哪盘料</span>
       <select id="bindSpool"><option value="">— 不绑定 —</option>${options}</select></label>
     <div class="row">
-      <input id="bindScan" placeholder="扫码枪：光标放这里扫料盘码"
-             onkeydown="if(event.key==='Enter')handleScan(this.value,'bindSpool')" />
-      <button class="sm" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
+      <button class="sm primary" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
         ${ICO.scan}相机扫码
       </button>
     </div>
@@ -1656,7 +1654,7 @@ function openSlotDialog(printerId, amsId, trayId) {
       <img src="/api/labels/slot/${printerId}/${amsId}/${trayId}.png" alt="槽位二维码"
            style="width:72px;height:72px;border:1px solid var(--border);border-radius:6px" />
       <div class="small muted">这是该槽位的二维码，打印出来贴在槽位上。
-        以后扫这张码（手机用上面的「相机扫码」，桌面用扫码枪）就能直接进这个槽位的绑定页。</div>
+        以后用上面的「相机扫码」扫这张码，就能直接进这个槽位的绑定页。</div>
     </div>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveBinding(${printerId},${amsId},${trayId})">保存绑定</button>`);
@@ -1683,9 +1681,9 @@ function findTray(printer, amsId, trayId) {
   return (unit.trays || []).find((t) => t.tray_id === trayId) || null;
 }
 
-/* ── 扫码：扫码枪和手机相机共用同一套「认码 → 落地」──────
+/* ── 扫码：认码 → 落地 ────────────────────────────────
  * 认码在 scan.js（相机扫码那套也放那儿），这里管「认出来之后干嘛」。
- * 两个入口：扫码枪走输入框回车（handleScan），手机走相机（openScan）。 */
+ * 入口只有相机（openScan）—— 原来那个「扫码枪：光标放这里」的输入框用户用不到，已删。 */
 
 /** 认码。scan.js 没加载时用同规则的兜底实现，免得整条路直接断掉。 */
 function parseScanText(text) {
@@ -1757,13 +1755,6 @@ async function applyScan(text, opts) {
   switchView("spools");
   await openSpoolDetail(hit.id);
   return true;
-}
-
-/** 扫码枪路径：输入框里回车。 */
-function handleScan(value, targetSelectId) {
-  const text = (value || "").trim();
-  if (!text) return;
-  applyScan(text, { selectId: targetSelectId });
 }
 
 /** 相机扫码入口。
