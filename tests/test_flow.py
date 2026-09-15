@@ -98,10 +98,16 @@ async def main() -> int:
     await hub._apply_payload(serial, {"print": base_block()})
     check("状态已缓存", hub.states.get(printer_id) is not None)
     state = hub.states[printer_id]
-    check("识别到 AMS", len(state.ams_units) == 1, f"实际 {len(state.ams_units)}")
+    check("识别到 2 个 AMS 单元", len(state.ams_units) == 2, f"实际 {len(state.ams_units)}")
     check("槽位 1 有料", state.ams_units[0].trays[0].occupied)
     check("槽位 2 空置", not state.ams_units[0].trays[2].occupied)
     check("耗材编号解析正确", state.ams_units[0].trays[0].info_idx == "GFA00")
+    # AMS HT 的 id 是 128，远超 tray_exist_bits 的位宽，必须靠内容判断装料，
+    # 否则整排槽位会被误判成空（见 app/core/status.py::_bit_set）
+    check("AMS HT 单独成组", state.ams_units[1].ams_id == 128)
+    check("AMS HT 只有一个槽位", len(state.ams_units[1].trays) == 1)
+    check("AMS HT 槽位判定为有料", state.ams_units[1].trays[0].occupied)
+    check("外挂料盘已识别", state.external_spool is not None and state.external_spool.occupied)
 
     print("\n2. 打印开始 → 自动建任务")
     await hub._apply_payload(serial, {"print": base_block(

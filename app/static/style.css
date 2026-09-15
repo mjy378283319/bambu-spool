@@ -374,9 +374,8 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .panel-val { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; text-align: right; }
 .panel-val b { color: var(--text); font-weight: 600; }
 
-/* ── 打印机卡片 ─────────────────────────────────────── */
-.printer-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-.progress { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin: 10px 0 6px; }
+/* ── 打印机面板（Mars Printer Hub 风格） ─────────────── */
+.progress { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; margin: 6px 0 0; }
 .progress > div { height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s; }
 .progress.paused > div { background: #d97706; }
 .progress.failed > div { background: var(--red); }
@@ -385,24 +384,126 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .temps .item { font-size: 12.5px; color: var(--text-2); }
 .temps .item b { color: var(--text); font-weight: 500; }
 
-/* ── AMS 槽位 ───────────────────────────────────────── */
-.ams-group { margin-top: 16px; }
-.ams-title { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
-.slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.slot {
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  padding: 9px; cursor: pointer; background: var(--surface);
-  transition: border-color .13s, background .13s, box-shadow .13s; min-width: 0;
+/* 一台机器 = 一条工具栏 + 左右两列 */
+.printer-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px 16px;
+  margin-bottom: 16px;
 }
-.slot:hover { border-color: var(--accent); background: var(--accent-soft); }
-.slot.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(15, 118, 110, .16); }
-.slot.empty { background: var(--surface-2); opacity: .78; }
-.slot.unbound { border-style: dashed; border-color: #d9a94a; }
-.slot .top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-.slot .idx { font-size: 11px; color: var(--text-3); }
-.slot .mat { font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.slot .spool { font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
-.slot .bar { margin-top: 6px; height: 4px; }
+.printer-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 12px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.printer-bar b { font-size: 14.5px; font-weight: 600; }
+
+.printer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px; align-items: start;
+}
+.printer-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* 列内的小白卡 */
+.pcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.pcard-head {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--text-2); margin-bottom: 10px;
+}
+.pcard-head.tight { margin-top: 14px; margin-bottom: 6px; }
+.pcard-head > b { color: var(--text); font-size: 13.5px; font-weight: 600; }
+.pcard-head svg { width: 14px; height: 14px; color: var(--text-3); flex: none; }
+.pcard-head .metric { display: inline-flex; align-items: center; gap: 4px; }
+.pcard-head .metric svg { width: 13px; height: 13px; }
+.pcard-k { font-size: 12px; color: var(--text-3); }
+
+/* 机器示意图 */
+.photo-card {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.printer-art { width: 100%; max-width: 240px; height: 292px; display: block; }
+
+.dual { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dual .right { text-align: right; }
+.kv-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kv-label { font-size: 11.5px; color: var(--text-3); }
+.kv-value { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.kv-value.xl { font-size: 17px; }
+.dual .kv-label { margin-top: 2px; }
+
+/* 风扇四条通道 */
+.fan-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+.fan-name { color: var(--text-2); min-width: 72px; }
+.fan-bar { flex: 1; height: 5px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.fan-bar > span { display: block; height: 100%; background: var(--accent-2); border-radius: 999px; transition: width .35s; }
+.fan-val { color: var(--text-2); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── AMS / AMS HT / 外挂料盘的槽位 ─────────────────── */
+.unit-card .pcard-head { margin-bottom: 12px; }
+.tray-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tray-grid.single { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.tray-card {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); padding: 8px 8px 0; cursor: pointer;
+  transition: border-color .13s, background .13s, box-shadow .13s;
+  min-width: 0; overflow: hidden;
+}
+.tray-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.tray-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(15, 118, 110, .16); }
+.tray-card.empty { background: var(--surface-2); }
+/* 机器里有料但这盘还没进系统 —— 用琥珀色边框顶一下，别让人以为已经登记了 */
+.tray-card.unbound { border-color: #e8c98a; background: #fffcf5; }
+
+.tray-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 7px; }
+.tray-code { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--text-3); }
+
+/* 右上角状态圈：绿勾=已绑定，黄叹=机器有料未绑定，青实心=使用中，虚线圈=空 */
+.tray-flag { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--border-strong); position: relative; flex: none; }
+.tray-flag.ok { border-color: #4cc38a; }
+.tray-flag.ok::after {
+  content: ""; position: absolute; left: 4.2px; top: 2.2px;
+  width: 3.4px; height: 6.4px;
+  border: solid #16a34a; border-width: 0 1.6px 1.6px 0; transform: rotate(42deg);
+}
+.tray-flag.warn { border-color: #e0a53d; }
+.tray-flag.warn::after {
+  content: ""; position: absolute; left: 6.2px; top: 3px;
+  width: 1.6px; height: 7px; border-radius: 1px; background: #d97706;
+}
+.tray-flag.live { border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+.tray-flag.live::after { content: ""; position: absolute; inset: 3.6px; border-radius: 50%; background: var(--accent-2); }
+.tray-flag.off { border-style: dashed; opacity: .55; }
+
+/* 竖直料条：色块居中，克重标签压在色条下端 */
+.tray-fil { position: relative; height: 96px; display: flex; align-items: center; justify-content: center; }
+.fil-body { width: 46px; height: 96px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .1); }
+.tray-fil.empty {
+  width: 46px; margin: 0 auto;
+  border: 1px dashed var(--border-strong); border-radius: 6px;
+  color: var(--text-3); font-size: 12px;
+}
+.fil-weight {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  font-size: 11.5px; font-weight: 600; box-shadow: 0 1px 3px rgba(15, 23, 42, .18);
+}
+.fil-name {
+  margin: 8px -8px 0; padding: 5px 6px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  text-align: center; font-size: 12px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ── 事件流 ─────────────────────────────────────────── */
 .events { max-height: 320px; overflow-y: auto; }
@@ -627,9 +728,11 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .nav button span { display: none; }
   .nav button { padding: 8px 10px; }
   .fld.wide { grid-column: span 1; }
+  .printer-layout { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 720px) {
-  .slots { grid-template-columns: repeat(2, 1fr); }
+  .tray-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   main { padding: 16px 12px 50px; }
   .field-row { grid-template-columns: 1fr; }
   .user-chip .uname { display: none; }

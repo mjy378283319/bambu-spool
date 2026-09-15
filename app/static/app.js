@@ -31,6 +31,11 @@ const ICO = {
   pencil: '<svg viewBox="0 0 24 24"><path d="M16.4 4.6l3 3L9.6 17.4 5 18.8l1.4-4.6z"/></svg>',
   scale: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.4" r="6"/><path d="M12 10.4v3.3l2.3 1.6"/><path d="M8.4 4.6h7.2l-1.4 3"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.4 7V5.4c0-.8.6-1.4 1.4-1.4h2.4c.8 0 1.4.6 1.4 1.4V7"/><path d="M6.6 7l.9 12.1c.1 1 .9 1.7 1.9 1.7h5.2c1 0 1.8-.7 1.9-1.7L17.4 7"/><path d="M10.4 11v6M13.6 11v6"/></svg>',
+  printer: '<svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="5.5" rx="1.4"/><rect x="3.5" y="10.5" width="17" height="9" rx="2"/><path d="M7 19.5v2h10v-2"/><path d="M17 14.2h.01"/></svg>',
+  thermo: '<svg viewBox="0 0 24 24"><path d="M10.4 13.4V5.6a1.6 1.6 0 0 1 3.2 0v7.8a4 4 0 1 1-3.2 0z"/><path d="M12 9.8v6"/></svg>',
+  fan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.9"/><path d="M10.2 10.2C8.2 7.6 8.6 5.2 10.7 4.6c1.9-.5 3.1 1.2 2.3 3.1"/><path d="M13.8 10.2c2.6-2 5-1.6 5.6.5.5 1.9-1.2 3.1-3.1 2.3"/><path d="M13.8 13.8c2 2.6 1.6 5-.5 5.6-1.9.5-3.1-1.2-2.3-3.1"/><path d="M10.2 13.8c-2.6 2-5 1.6-5.6-.5-.5-1.9 1.2-3.1 3.1-2.3"/></svg>',
+  layer: '<svg viewBox="0 0 24 24"><path d="M12 3.6 20 7.9l-8 4.3-8-4.3z"/><path d="m4 12.4 8 4.3 8-4.3"/><path d="m4 16.4 8 4.3 8-4.3"/></svg>',
+  drop: '<svg viewBox="0 0 24 24"><path d="M12 3.6c3 4 5.4 6.6 5.4 9.6a5.4 5.4 0 0 1-10.8 0c0-3 2.4-5.6 5.4-9.6z"/></svg>',
 };
 
 
@@ -483,125 +488,323 @@ function stateTag(state) {
   return `<span class="tag ${cls}">${esc(state.state_label)}</span>`;
 }
 
-function renderPrinterCard(entry) {
-  const p = entry.printer;
-  const state = entry.state;
-  const onlineDot = (p.online || state) ? "ok" : "bad";
+/* ── 打印机面板（Mars Printer Hub 风格） ─────────────────
+   左列：机器示意图 + 打印状态 / 温度属性 / 风扇状态
+   右列：AMS / AMS HT / 外挂料盘的槽位卡片（竖直料条）
+   ─────────────────────────────────────────────────────── */
 
-  let body = `
-    <div class="row small muted" style="gap:14px">
-      <span><span class="dot ${onlineDot}"></span> ${esc(p.name || p.serial)}</span>
-      <span>${esc(p.model || "未知机型")}</span>
-      <span>编号 ${esc((p.serial || "").slice(-6))}</span>
-    </div>`;
+/** 风扇通道与中文名，字段取自 state.fans。 */
+const FAN_CHANNELS = [
+  ["cooling", "部件风扇"],
+  ["aux", "辅助风扇"],
+  ["chamber", "腔体风扇"],
+  ["heatbreak", "热端风扇"],
+];
 
-  if (!state) {
-    body += `<div class="empty-state">尚未收到状态。若刚登录，稍等十几秒；也可以点右上角「请求全量状态」。</div>`;
-  } else {
-    const running = state.gcode_state === "RUNNING" || state.gcode_state === "PAUSE";
-    const progressCls = state.gcode_state === "FAILED" ? "failed"
-      : state.gcode_state === "FINISH" ? "done"
-      : state.gcode_state === "PAUSE" ? "paused" : "";
-    body += `
-      <div class="row" style="margin-top:10px">
-        ${stateTag(state)}
-        <span class="small muted">${esc(state.stage_label)}</span>
-        <span class="spacer"></span>
-        <span class="small muted">${esc(state.subtask_name || "无任务")}</span>
-      </div>
-      <div class="progress ${progressCls}"><div style="width:${state.progress || 0}%"></div></div>
-      <div class="row small muted">
-        <span>${state.progress || 0}%</span>
-        ${state.total_layer_num ? `<span>第 ${state.layer_num} / ${state.total_layer_num} 层</span>` : ""}
-        ${state.remaining_minutes ? `<span>剩余约 ${state.remaining_minutes} 分钟</span>` : ""}
-      </div>`;
+/** #rrggbb → rgba(r,g,b,alpha)。解析失败退回中性灰。 */
+function tint(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return `rgba(15, 23, 42, ${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
 
-    if (state.hms && state.hms.length) {
-      body += `<div class="row" style="margin-top:8px;gap:6px">
-        ${state.hms.map((h) => `<span class="tag red">${esc(h.module)} · ${esc(h.severity)}</span>`).join("")}
-      </div>`;
-    }
+/** 把耗材色压暗，用作色条上克重标签的底色。 */
+function shade(hex, factor) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return "#334155";
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+    .map((v) => Math.max(0, Math.min(255, Math.round(v * factor))));
+  return `rgb(${ch[0]}, ${ch[1]}, ${ch[2]})`;
+}
 
-    (state.ams || []).forEach((unit) => {
-      body += renderAmsUnit(p, unit, state);
-    });
+/** 按相对亮度挑一个能看清的字色。 */
+function inkOn(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return "#ffffff";
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (r * 299 + g * 587 + b * 114) / 1000 > 160 ? "#111827" : "#ffffff";
+}
 
-    body += `
-      <div class="temps">
-        <div class="item">喷嘴 <b>${fmtTemp(state.nozzle_temper, state.nozzle_target)}</b></div>
-        <div class="item">热床 <b>${fmtTemp(state.bed_temper, state.bed_target)}</b></div>
-        ${state.chamber_temper ? `<div class="item">腔温 <b>${state.chamber_temper.toFixed(0)}°C</b></div>` : ""}
-        <div class="item">信号 <b>${esc(state.wifi_signal || "—")}</b></div>
-      </div>`;
+/** 拓竹湿度有两种口径：普通 AMS 上报 0-5 档位，AMS HT 上报百分比。 */
+function humidityText(value) {
+  if (value === undefined || value === null || value === "") return "湿度 —";
+  const num = Number(value);
+  if (Number.isNaN(num)) return `湿度 ${esc(value)}`;
+  if (num <= 5) {
+    const desc = num <= 2 ? "干燥" : num <= 3 ? "正常" : "偏潮";
+    return `湿度 ${num} 级 · ${desc}`;
   }
+  return `湿度 ${Math.round(num)}%`;
+}
 
-  return `<div class="card">
-    <h2>${esc(p.name || p.serial)} <span class="count">${esc(p.model || "")}</span>
-      <span class="spacer"></span>
-      <button class="sm" onclick="requestPushall(${p.id})">请求全量状态</button>
-    </h2>
-    ${body}
-  </div>`;
+/** 槽位编号：单元字母 + 槽位序号，例如 A1、B3。 */
+function slotCode(unit, tray) {
+  const letter = String((unit && unit.name) || "AMS").split(" ").pop();
+  return `${letter}${tray.tray_id + 1}`;
+}
+
+/** ams_id → 展示名。别直接用 ams_id + 1，AMS HT 的 128 会变成「129」。 */
+function amsSlotLabel(amsId, trayId) {
+  if (amsId < 0) return "外挂料盘";
+  let name;
+  if (amsId >= 128 && amsId <= 131) name = `HT ${"ABCD"[amsId - 128]}`;
+  else if (amsId >= 0 && amsId < 4) name = `AMS ${"ABCD"[amsId]}`;
+  else name = `AMS ${amsId}`;
+  return `${name} 槽位 ${trayId + 1}`;
+}
+
+/** 槽位右上角的状态标记。 */
+function trayFlag(occupied, bound, active) {
+  if (active) return '<span class="tray-flag live" title="当前使用中"></span>';
+  if (!occupied) return '<span class="tray-flag off" title="空槽位"></span>';
+  if (bound) return '<span class="tray-flag ok" title="已绑定本系统料盘"></span>';
+  return '<span class="tray-flag warn" title="机器有料，但还没绑定本系统料盘"></span>';
+}
+
+/** P2S 外形示意图：纯内联 SVG，不依赖外部图片，离线也能显示。 */
+function printerArt(model, uid) {
+  const b = `pab-${uid}`, g = `pag-${uid}`;
+  return `<svg class="printer-art" viewBox="0 0 230 300" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <defs>
+      <linearGradient id="${b}" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#f5f7fa"/><stop offset=".42" stop-color="#e3e8ef"/>
+        <stop offset="1" stop-color="#c6cdd7"/>
+      </linearGradient>
+      <linearGradient id="${g}" x1="0" y1="0" x2=".7" y2="1">
+        <stop offset="0" stop-color="#343c47"/><stop offset=".45" stop-color="#1b2129"/>
+        <stop offset="1" stop-color="#27303a"/>
+      </linearGradient>
+    </defs>
+    <rect x="10" y="8" width="210" height="284" rx="15" fill="url(#${b})" stroke="#b7c0cb" stroke-width="1.2"/>
+    <rect x="10" y="8" width="210" height="36" rx="15" fill="#eaeef3"/>
+    <rect x="10" y="32" width="210" height="12" fill="#eaeef3"/>
+    <line x1="12" y1="44" x2="218" y2="44" stroke="#d3dae3" stroke-width="1"/>
+    <rect x="22" y="15" width="58" height="27" rx="5" fill="#1a1e24"/>
+    <rect x="26" y="19" width="50" height="19" rx="3" fill="#2c3844"/>
+    <rect x="30" y="24" width="26" height="3" rx="1.5" fill="#5c6b7a"/>
+    <circle cx="69" cy="28.5" r="3" fill="#4a90d9" opacity=".9"/>
+    <text x="205" y="32" text-anchor="end" font-size="14" font-weight="600"
+          fill="#7d8794" font-family="system-ui">${model}</text>
+    <rect x="20" y="54" width="190" height="228" rx="10" fill="url(#${g})"/>
+    <rect x="32" y="104" width="166" height="10" rx="3" fill="#4e5762"/>
+    <rect x="120" y="92" width="32" height="34" rx="6" fill="#3b434e"/>
+    <rect x="126" y="100" width="20" height="8" rx="2" fill="#5a636f"/>
+    <rect x="36" y="202" width="158" height="11" rx="3" fill="#616b77"/>
+    <rect x="36" y="213" width="158" height="32" fill="#3d454f"/>
+    <rect x="36" y="245" width="158" height="6" fill="#333a43"/>
+    <rect x="13" y="150" width="8" height="50" rx="4" fill="#aab3bf"/>
+    <rect x="14.5" y="158" width="5" height="34" rx="2.5" fill="#c4ccd6"/>
+    <rect x="34" y="284" width="26" height="8" rx="3" fill="#9aa4b0"/>
+    <rect x="170" y="284" width="26" height="8" rx="3" fill="#9aa4b0"/>
+  </svg>`;
 }
 
 function fmtTemp(value, target) {
-  const current = (value || 0).toFixed(0);
-  return target ? `${current} / ${target.toFixed(0)}°C` : `${current}°C`;
+  const current = `${(Number(value) || 0).toFixed(0)}°C`;
+  return target ? `${current} / ${Number(target).toFixed(0)}°C` : current;
 }
 
-function renderAmsUnit(printer, unit, state) {
-  const slots = (unit.trays || []).map((tray) => renderSlot(printer, unit, tray)).join("");
-  return `<div class="ams-group">
-    <div class="ams-title">
-      <b>${esc(unit.model || "AMS")} ${unit.ams_id + 1}</b>
-      ${unit.temp ? `<span class="tag">${unit.temp.toFixed(0)}°C</span>` : ""}
-      ${unit.humidity !== undefined && unit.humidity !== "" ? `<span class="tag">湿度 ${esc(unit.humidity)}</span>` : ""}
+/** 打印状态 + 层数 + 进度条。 */
+function renderRunCard(state) {
+  const progCls = state.gcode_state === "FAILED" ? "failed"
+    : state.gcode_state === "FINISH" ? "done"
+    : state.gcode_state === "PAUSE" ? "paused" : "";
+  const layers = state.total_layer_num
+    ? `${state.layer_num || 0} / ${state.total_layer_num}`
+    : "—";
+  const stage = [state.stage_label, state.remaining_minutes ? `剩余 ${state.remaining_minutes} 分钟` : ""]
+    .filter(Boolean).join(" · ");
+  const hms = (state.hms && state.hms.length)
+    ? `<div class="row" style="margin-top:10px;gap:6px">
+         ${state.hms.map((h) => `<span class="tag red">${esc(h.module)} · ${esc(h.severity)}</span>`).join("")}
+       </div>`
+    : "";
+
+  return `<div class="pcard">
+    <div class="pcard-head">${ICO.printer}<span>打印状态</span>
+      <span class="spacer"></span><span class="pcard-k">打印层数</span></div>
+    <div class="dual">
+      <div>
+        <div class="kv-value xl">${esc(state.state_label || "—")}</div>
+        <div class="kv-label">${esc(stage || "—")}</div>
+      </div>
+      <div class="right">
+        <div class="kv-value xl">${esc(layers)}</div>
+        <div class="kv-label">${esc(state.subtask_name || "无任务")}</div>
+      </div>
     </div>
-    <div class="slots">${slots}</div>
+    <div class="pcard-head tight">${ICO.layer}<span>打印进度</span>
+      <span class="spacer"></span><b class="kv-value">${state.progress || 0}%</b></div>
+    <div class="progress ${progCls}"><div style="width:${Math.max(0, Math.min(100, state.progress || 0))}%"></div></div>
+    ${hms}
   </div>`;
 }
 
-function renderSlot(printer, unit, tray) {
+/** 温度属性：热床 / 仓温 / 喷嘴 / 信号。 */
+function renderTempCard(state) {
+  const items = [
+    ["热床", fmtTemp(state.bed_temper, state.bed_target)],
+    ["仓温", state.chamber_temper ? `${Number(state.chamber_temper).toFixed(0)}°C` : "—"],
+    ["喷嘴", fmtTemp(state.nozzle_temper, state.nozzle_target)],
+    ["信号", state.wifi_signal || "—"],
+  ];
+  return `<div class="pcard">
+    <div class="pcard-head">${ICO.thermo}<span>温度属性</span></div>
+    <div class="kv-grid">${items.map(([label, value]) => `
+      <div class="kv"><div class="kv-label">${esc(label)}</div>
+        <div class="kv-value">${esc(value)}</div></div>`).join("")}
+    </div>
+  </div>`;
+}
+
+/** 风扇状态：四条通道各配一根细进度条。 */
+function renderFanCard(state) {
+  const fans = state.fans || {};
+  return `<div class="pcard">
+    <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
+    ${FAN_CHANNELS.map(([key, label]) => {
+      const value = Math.max(0, Math.min(100, Number(fans[key]) || 0));
+      return `<div class="fan-row">
+        <span class="fan-name">${esc(label)}</span>
+        <span class="fan-bar"><span style="width:${value}%"></span></span>
+        <span class="fan-val">${value}%</span>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+/** 右列：所有 AMS / AMS HT 单元 + 外挂料盘。 */
+function renderUnits(state, printer) {
+  const cards = (state.ams || []).map((unit) => renderUnitCard(unit, printer)).join("");
+  const ext = renderExternalCard(state.external_spool, printer);
+  const body = cards + ext;
+  return `<div class="printer-col">${body || `<div class="pcard">
+      <div class="empty-state">这台机器没有上报 AMS 单元。</div></div>`}</div>`;
+}
+
+function renderUnitCard(unit, printer) {
+  const isHt = unit.kind === "ht";
+  const trays = (unit.trays || []);
+  const active = trays.find((t) => t.is_active);
+  const letter = String(unit.name || "AMS").split(" ").pop();
+  const usage = active ? `${letter}${active.tray_id + 1}` : "无";
+  const temp = Number(unit.temp) ? `${Number(unit.temp).toFixed(0)}°C` : "—";
+
+  return `<div class="pcard unit-card">
+    <div class="pcard-head">
+      <b>${esc(unit.name || "AMS")}</b>
+      ${unit.model ? `<span class="tag ${isHt ? "teal" : ""}">${esc(unit.model)}</span>` : ""}
+      <span class="spacer"></span>
+      <span class="metric">${ICO.thermo}${esc(temp)}</span>
+      <span class="metric">${ICO.drop}${humidityText(unit.humidity)}</span>
+      <span class="metric">使用 ${esc(usage)}</span>
+    </div>
+    <div class="tray-grid ${isHt ? "single" : ""}">${trays.map((tray) => renderTrayCard(unit, tray, printer)).join("")}</div>
+  </div>`;
+}
+
+/** 单个槽位：竖直料条 + 克重 + 材料名。 */
+function renderTrayCard(unit, tray, printer) {
+  const code = slotCode(unit, tray);
+  const click = `onclick="openSlotDialog(${printer.id}, ${tray.ams_id}, ${tray.tray_id})"`;
   const binding = (S.bindingMap || {})[`${printer.id}:${tray.ams_id}:${tray.tray_id}`];
   const spool = binding && binding.spool;
-  const classes = ["slot"];
-  if (!tray.occupied) classes.push("empty");
-  if (tray.is_active) classes.push("active");
-  if (tray.occupied && !spool) classes.push("unbound");
 
-  let barCls = "";
-  let barWidth = 0;
-  if (spool) {
-    barWidth = spool.remaining_percent;
-    if (spool.is_low) barCls = "low";
-  } else if (tray.remain >= 0) {
-    barWidth = tray.remain;
-    if (tray.remain <= 15) barCls = "low";
-  } else {
-    barCls = "unknown";
+  if (!tray.occupied) {
+    return `<div class="tray-card empty" ${click}>
+      <div class="tray-top"><span class="tray-code">${esc(code)}</span>${trayFlag(false, false, false)}</div>
+      <div class="tray-fil empty"><span>空</span></div>
+      <div class="fil-name">空</div>
+    </div>`;
   }
 
-  const label = tray.occupied ? esc(tray.label) : "空";
-  const sub = spool
-    ? esc(spool.name)
-    : (tray.occupied ? '<span style="color:#b45309">未绑定料盘</span>' : "&nbsp;");
+  const color = (spool && spool.color_hex) || tray.color || "#64748b";
+  const grams = spool && spool.remaining_weight != null
+    ? `${Number(spool.remaining_weight).toFixed(0)}g`
+    : (tray.remain_weight_g != null ? `${Math.round(tray.remain_weight_g)}g` : "");
+  const material = spool
+    ? (spool.material || spool.name || "未知")
+    : (tray.tray_type || tray.label || "未知");
+  // 余量不足的料盘，克重标签直接标红，扫一眼就能发现
+  const low = !!(spool && spool.is_low);
+  const labelBg = low ? "#b42318" : shade(color, 0.78);
+  const labelInk = low ? "#ffffff" : inkOn(labelBg);
 
-  const remainText = spool
-    ? `${spool.remaining_weight.toFixed(0)} g`
-    : (tray.remain >= 0 ? `${tray.remain}%` : "");
-
-  return `<div class="${classes.join(" ")}" onclick='openSlotDialog(${printer.id}, ${tray.ams_id}, ${tray.tray_id})'>
-    <div class="top">
-      <span class="swatch" style="background:${esc(spool ? spool.color_hex : tray.color)}"></span>
-      <span class="mat">${label}</span>
-      <span class="spacer"></span>
-      <span class="idx">${tray.tray_id + 1}</span>
+  return `<div class="tray-card ${tray.is_active ? "active" : ""} ${spool ? "" : "unbound"}" ${click}>
+    <div class="tray-top"><span class="tray-code">${esc(code)}</span>${trayFlag(true, !!spool, !!tray.is_active)}</div>
+    <div class="tray-fil">
+      <div class="fil-body" style="background:${esc(color)}"></div>
+      ${grams ? `<div class="fil-weight" style="background:${labelBg};color:${labelInk}">${esc(grams)}</div>` : ""}
     </div>
-    <div class="spool">${sub}</div>
-    <div class="bar"><div class="${barCls}" style="width:${Math.max(0, Math.min(100, barWidth))}%"></div></div>
-    <div class="row tiny muted" style="justify-content:space-between;margin-top:4px">
-      <span>${remainText}</span>
-      ${tray.has_rfid ? '<span class="tag teal" style="padding:0 5px">RFID</span>' : ""}
+    <div class="fil-name" style="background:${tint(color, 0.16)}">${esc(material)}</div>
+  </div>`;
+}
+
+/** 外挂料盘（没有 AMS 时挂在机器外面的那一路）。 */
+function renderExternalCard(ext, printer) {
+  if (!ext) return "";
+  const occupied = !!ext.occupied;
+  const color = ext.color || "#64748b";
+  const grams = ext.remain_weight_g != null ? `${Math.round(ext.remain_weight_g)}g` : "";
+  const material = occupied ? (ext.tray_type || ext.label || "未知") : "空";
+  const label = shade(color, 0.78);
+
+  return `<div class="pcard unit-card">
+    <div class="pcard-head"><b>外挂料盘</b>
+      <span class="spacer"></span>
+      <span class="metric">使用 ${ext.is_active ? "中" : "无"}</span></div>
+    <div class="tray-grid single">
+      <div class="tray-card ${ext.is_active ? "active" : ""}" onclick="openSlotDialog(${printer.id}, -1, 0)">
+        <div class="tray-top"><span class="tray-code">外挂</span>
+          ${trayFlag(occupied, occupied, !!ext.is_active)}</div>
+        <div class="tray-fil ${occupied ? "" : "empty"}">
+          ${occupied
+            ? `<div class="fil-body" style="background:${esc(color)}"></div>`
+            : "<span>空</span>"}
+          ${occupied && grams ? `<div class="fil-weight" style="background:${label};color:${inkOn(label)}">${esc(grams)}</div>` : ""}
+        </div>
+        <div class="fil-name" style="background:${tint(color, 0.16)}">${esc(material)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPrinterCard(entry) {
+  const p = entry.printer;
+  const state = entry.state;
+  const online = (p.online || state) ? "ok" : "bad";
+
+  const bar = `<div class="printer-bar">
+    <span class="dot ${online}"></span>
+    <b>${esc(p.name || p.serial)}</b>
+    <span class="tag">${esc(p.model || "未知机型")}</span>
+    <span class="small muted">编号 ${esc((p.serial || "").slice(-6))}</span>
+    ${state ? stateTag(state) : ""}
+    <span class="spacer"></span>
+    ${state ? `<span class="small muted">更新于 ${esc(fmtTime(state.updated_at))}</span>` : ""}
+    <button class="sm" onclick="requestPushall(${p.id})">请求全量状态</button>
+  </div>`;
+
+  if (!state) {
+    return `<div class="printer-block">${bar}
+      <div class="pcard"><div class="empty-state">
+        尚未收到状态。若刚登录，稍等十几秒；也可以点右上角「请求全量状态」重新拉取。
+      </div></div>
+    </div>`;
+  }
+
+  return `<div class="printer-block">${bar}
+    <div class="printer-layout">
+      <div class="printer-col">
+        <div class="pcard photo-card">${printerArt(esc(p.model || "P2S"), p.id)}</div>
+        ${renderRunCard(state)}
+        ${renderTempCard(state)}
+        ${renderFanCard(state)}
+      </div>
+      ${renderUnits(state, p)}
     </div>
   </div>`;
 }
@@ -1046,7 +1249,7 @@ async function openSpoolDetail(id) {
         </div>
         <span class="spacer"></span>
         <div class="small muted" style="text-align:right">
-          ${(spool.bindings || []).map((b) => `AMS ${b.ams_id + 1} 槽位 ${b.tray_id + 1}`).join("<br>") || "未装载"}
+          ${(spool.bindings || []).map((b) => esc(amsSlotLabel(b.ams_id, b.tray_id))).join("<br>") || "未装载"}
         </div>
       </div>
       <div class="row" style="margin-bottom:14px">
@@ -1154,12 +1357,17 @@ function openSlotDialog(printerId, amsId, trayId) {
   const binding = (S.bindingMap || {})[`${printerId}:${amsId}:${trayId}`];
   const tray = findTray(printer, amsId, trayId);
   const boundId = binding ? binding.spool_id : 0;
+  // 外挂料盘用 ams_id = -1 表示，标题别写成「AMS 0」
+  const isExt = amsId < 0;
+  const unit = (((printer.state || {}).ams) || []).find((u) => u.ams_id === amsId);
+  const letter = unit ? String(unit.name || "AMS").split(" ").pop() : "";
+  const title = isExt ? "外挂料盘" : `${unit ? unit.name : "AMS"} · 槽位 ${letter}${trayId + 1}`;
 
   const options = S.spools.map((s) =>
     `<option value="${s.id}" ${s.id === boundId ? "selected" : ""}>
        ${esc(s.name)}（余 ${s.remaining_weight.toFixed(0)} g）</option>`).join("");
 
-  openModal(`AMS ${amsId + 1} · 槽位 ${trayId + 1}`, `
+  openModal(title, `
     <div class="row" style="margin-bottom:12px;gap:14px">
       <span class="swatch" style="background:${esc(tray ? tray.color : "#000")};width:24px;height:24px"></span>
       <div>
@@ -1188,7 +1396,9 @@ function openSlotDialog(printerId, amsId, trayId) {
 
 function findTray(printer, amsId, trayId) {
   const state = printer.state;
-  if (!state || !state.ams) return null;
+  if (!state) return null;
+  if (amsId < 0) return state.external_spool || null;   // 外挂料盘是单独一路
+  if (!state.ams) return null;
   const unit = state.ams.find((u) => u.ams_id === amsId);
   if (!unit) return null;
   return (unit.trays || []).find((t) => t.tray_id === trayId) || null;
@@ -1385,7 +1595,7 @@ function openManualDialog(jobId, printerId) {
     (unit.trays || []).forEach((tray) => {
       if (!tray.occupied) return;
       slotRows += `<tr>
-        <td class="small">AMS ${tray.ams_id + 1} 槽位 ${tray.tray_id + 1}
+        <td class="small">${esc(slotCode(unit, tray))} 槽位
           <div class="tiny muted">${esc(tray.label)}</div></td>
         <td><select id="mn_spool_${tray.ams_id}_${tray.tray_id}">
             <option value="">— 不扣减 —</option>${spoolOptions}</select></td>

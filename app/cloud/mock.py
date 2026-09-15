@@ -32,6 +32,21 @@ MOCK_USAGE = [
      "targetColor": "1E88E5FF", "weight": 3.16, "ams": 1},
 ]
 
+# AMS HT 的 ams_id 固定从 128 起，只带一个槽位；湿度按百分比上报（普通 AMS 是 0-5 档位）
+MOCK_HT_ID = 128
+MOCK_HT_TRAY = {
+    "tray_type": "PLA", "tray_sub_brands": "PLA", "tray_color": "4FC3F7FF",
+    "tray_info_idx": "GFA00", "tag_uid": "0000000000000000", "remain": 24,
+    "tray_weight": "1000",
+}
+
+# 外挂料盘（vt_tray）
+MOCK_EXT_TRAY = {
+    "tray_type": "PLA", "tray_sub_brands": "PLA", "tray_color": "1A1A1AFF",
+    "tray_info_idx": "GFA00", "tag_uid": "0000000000000000", "remain": 76,
+    "tray_weight": "1000",
+}
+
 
 class MockSource:
     def __init__(self, serial: str = "01S00A0000000000"):
@@ -77,7 +92,18 @@ class MockSource:
                              "nozzle_temp_max": "240", "tray_uuid": tray["tag_uid"]}
                             for i, tray in enumerate(MOCK_TRAYS)
                         ],
-                    }
+                    },
+                    {
+                        "id": str(MOCK_HT_ID),
+                        "info": "AMS HT",
+                        "humidity": "21",
+                        "temp": "27.9",
+                        "tray": [
+                            {"id": "0", **MOCK_HT_TRAY,
+                             "tray_diameter": "1.75", "nozzle_temp_min": "190",
+                             "nozzle_temp_max": "240", "tray_uuid": "0000000000000000"}
+                        ],
+                    },
                 ],
                 # 位串与 MOCK_TRAYS 对齐：槽位 1/2/4 有料，槽位 3 为空（0b1011）
                 "tray_exist_bits": "b",
@@ -85,7 +111,7 @@ class MockSource:
                 "tray_tar": "255",
                 "ams_exist_bits": "1",
             },
-            "vt_tray": {"tray_type": "", "tray_color": "00000000", "tray_info_idx": ""},
+            "vt_tray": dict(MOCK_EXT_TRAY),
             "gcode_state": "IDLE",
             "stg_cur": 255,
             "mc_percent": 0,

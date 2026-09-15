@@ -56,11 +56,17 @@ def _bit_set(bits_hex: str, index: int) -> Optional[bool]:
     """读取十六进制位串的第 index 位。无法解析时返回 None。"""
     if not bits_hex:
         return None
+    text = str(bits_hex).strip()
     try:
-        value = int(str(bits_hex), 16)
+        value = int(text, 16)
     except (TypeError, ValueError):
         return None
     if index < 0:
+        return None
+    # 位串宽度不够时返回 None：AMS HT 的 id 是 128，算出来是第 512 位，
+    # 远超 tray_exist_bits 的 16 位宽度，硬读只会拿到 0 并把有料的槽位误判成空。
+    # 返回 None 让 _parse_tray 退回「按 tray 内容判断」，HT 槽位才不会整排变空。
+    if index >= len(text) * 4:
         return None
     return bool((value >> index) & 1)
 

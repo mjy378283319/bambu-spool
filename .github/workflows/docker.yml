@@ -43,6 +43,9 @@ jobs:
       - name: 运行料盘管理与品牌归一自测
         run: python tests/test_admin.py
 
+      - name: 运行 AMS / AMS HT 状态归一自测
+        run: python tests/test_ams.py
+
       - name: 前端 JS 语法检查
         run: node --check app/static/app.js
 

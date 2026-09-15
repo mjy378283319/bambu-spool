@@ -44,6 +44,47 @@ FINISH_STATES = {"FINISH"}
 FAIL_STATES = {"FAILED"}
 IDLE_STATES = {"IDLE", "OFFLINE"}
 
+# ── AMS 编号语义 ────────────────────────────────────────
+# 官方上报的 ams[].id：0..3 是普通 AMS（A/B/C/D），128..131 是 AMS HT（HT A..HT D）。
+# tray_now 里 254 表示外挂料盘、255 表示无料。
+# 老代码直接拿 ams_id + 1 当编号，AMS HT 就会显示成「129」，必须归一。
+AMS_LETTERS = "ABCD"
+AMS_HT_FIRST = 128
+AMS_HT_LAST = 131
+AMS_EXTERNAL = 254
+
+
+def ams_kind(ams_id: int) -> str:
+    """归一 AMS 类型：普通 AMS 还是高温烘干版 AMS HT。"""
+    return "ht" if AMS_HT_FIRST <= ams_id <= AMS_HT_LAST else "ams"
+
+
+def ams_display_name(ams_id: int) -> str:
+    """AMS 用 A/B/C/D 编号，AMS HT 用 HT A/HT B 编号。"""
+    if AMS_HT_FIRST <= ams_id <= AMS_HT_LAST:
+        return f"HT {AMS_LETTERS[ams_id - AMS_HT_FIRST]}"
+    if 0 <= ams_id < len(AMS_LETTERS):
+        return f"AMS {AMS_LETTERS[ams_id]}"
+    return f"AMS {ams_id}"
+
+
+def clean_ams_model(raw: str, ams_id: int) -> str:
+    """部分固件把 AMS 序列号塞进 info 字段（纯数字），这种不能当型号展示。"""
+    text = (raw or "").strip()
+    if text.isdigit() and len(text) >= 6:
+        text = ""
+    if text:
+        return text
+    return "AMS HT" if ams_kind(ams_id) == "ht" else "AMS"
+
+
+def remain_grams(tray) -> Optional[float]:
+    """按 remain 百分比 × 官方标称满重估一个克重。未上报 remain 时返回 None。"""
+    if not tray.occupied or tray.remain < 0:
+        return None
+    return round((tray.tray_weight or 1000.0) * tray.remain / 100.0, 1)
+
+
 # 云端任务回查最大次数（每次一个轮询周期）
 MAX_SETTLE_ATTEMPTS = 10
 
@@ -719,6 +760,7 @@ class PrinterHub:
                 "cooling": state.cooling_fan,
                 "aux": state.aux_fan,
                 "chamber": state.chamber_fan,
+                "heatbreak": state.heatbreak_fan,
             },
             "wifi_signal": state.wifi_signal,
             "lights": state.lights,
@@ -728,9 +770,12 @@ class PrinterHub:
             "ams": [
                 {
                     "ams_id": unit.ams_id,
-                    "model": unit.model,
+                    "kind": ams_kind(unit.ams_id),
+                    "name": ams_display_name(unit.ams_id),
+                    "model": clean_ams_model(unit.model, unit.ams_id),
                     "humidity": unit.humidity,
                     "temp": unit.temp,
+                    "slot_count": len(unit.trays),
                     "trays": [
                         {
                             "ams_id": t.ams_id,
@@ -742,6 +787,7 @@ class PrinterHub:
                             "sub_brands": t.sub_brands,
                             "color": t.color,
                             "remain": t.remain,
+                            "remain_weight_g": remain_grams(t),
                             "info_idx": t.info_idx,
                             "has_rfid": t.has_rfid,
                             "tray_weight": t.tray_weight,
@@ -756,9 +802,12 @@ class PrinterHub:
                 {
                     "occupied": state.external_spool.occupied,
                     "label": state.external_spool.label,
+                    "tray_type": state.external_spool.tray_type,
                     "color": state.external_spool.color,
                     "remain": state.external_spool.remain,
-                    "is_active": state.tray_now == 254,
+                    "remain_weight_g": remain_grams(state.external_spool),
+                    "has_rfid": state.external_spool.has_rfid,
+                    "is_active": state.tray_now == AMS_EXTERNAL,
                 }
                 if state.external_spool
                 else None
