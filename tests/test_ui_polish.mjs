@@ -125,6 +125,7 @@ const {
   inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText, state,
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries,
+  spoolOptionHtml, bindCandidates,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -593,6 +594,47 @@ check("料盘库存多了「已用尽」标签页", /data-tab="empty"/.test(html
 check("汇总页有库存概览容器", /id="summaryOverview"/.test(htmlSrc));
 check("汇总页有价格区间分布容器", /id="priceDist"/.test(htmlSrc));
 check("概览的筛选态有清除按钮", /id="overviewClear"/.test(htmlSrc));
+
+// ── 14. 绑定下拉里的料盘候选 ─────────────────────────────────────
+console.log("== 槽位绑定下拉：候选与文案 ==");
+
+const opNormal = spoolOptionHtml({ id: 3, name: "哑光黑", remaining_weight: 640 });
+check("常规料盘：名字 + 余量",
+  /value="3"/.test(opNormal) && /哑光黑（余 640 g）/.test(opNormal), opNormal);
+const opNull = spoolOptionHtml({ id: 4, name: "缺字段", remaining_weight: null });
+check("余量缺失写「余量未知」，不会变成 0 g（Number(null) === 0）",
+  /余量未知/.test(opNull) && !/余 0 g/.test(opNull), opNull);
+const opArch = spoolOptionHtml({ id: 5, name: "旧料", remaining_weight: 100, archived: true });
+check("归档料盘标注「已归档」", /已归档/.test(opArch), opArch);
+const opSel = spoolOptionHtml({ id: 6, name: "当前", remaining_weight: 10 }, true);
+check("被选中的那项带 selected", / selected/.test(opSel), opSel);
+check("没要求选中时不乱加 selected", !/ selected/.test(opNormal), opNormal);
+
+state.spools = [
+  { id: 1, name: "在用", archived: false, remaining_weight: 100 },
+  { id: 2, name: "归档", archived: true, remaining_weight: 50 },
+  { id: 3, name: "归档但正绑着", archived: true, remaining_weight: 30 },
+];
+check("归档料盘不进候选（绑上去没意义）",
+  bindCandidates(0).map((s) => s.id).join(",") === "1",
+  bindCandidates(0).map((s) => s.id).join(","));
+check("当前正绑着的那盘归档料要保留（否则弹窗看着像绑定丢了）",
+  bindCandidates(3).map((s) => s.id).join(",") === "1,3",
+  bindCandidates(3).map((s) => s.id).join(","));
+
+// 源码级：料盘列表不能在「只进过仪表盘」时缺席
+check("启动（enterApp）就把料盘列表拉回来，不再只靠进库存页触发",
+  /await loadSpools\(\)\.catch/.test(appSrc) && /await loadSpools\(\)\.catch/.test(
+    appSrc.slice(appSrc.indexOf("async function enterApp"), appSrc.indexOf("async function enterApp") + 700)),
+  "enterApp 里没看到 loadSpools");
+check("槽位弹窗在列表为空时会自己补拉一次",
+  /if \(!\(S\.spools \|\| \[\]\)\.length\) ensureSpoolOptions\(boundId\)/.test(appSrc));
+check("bind= 深链也会确保料盘列表已加载（与 spool= 分支口径一致）",
+  /loadPrinters\(\)\.catch\(\(\) => \{\}\);\s*\/\/[^\n]*\n\s*if \(!\(S\.spools \|\| \[\]\)\.length\) await loadSpools/.test(appSrc)
+  || (appSrc.match(/if \(!\(S\.spools \|\| \[\]\)\.length\) await loadSpools\(\)\.catch/g) || []).length >= 2,
+  String((appSrc.match(/await loadSpools\(\)\.catch/g) || []).length));
+
+state.spools = [];
 
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");

@@ -1813,14 +1813,15 @@ async function toggleSpoolBinding(spoolId, printerId, amsId, trayId, unbind) {
   } catch (err) { toast(err.message, "err"); }
 }
 
-function usageSourceLabel(source) {  const map = { auto: "自动扣重", manual: "手动补录", calibrate: "称重校准",
+function usageSourceLabel(source) {
+  const map = { auto: "自动扣重", manual: "手动补录", calibrate: "称重校准",
                 correction: "纠错调整", adjust: "手动调整" };
   return map[source] || source;
 }
 
 function openMoveDialog(usageId, spoolId, weight) {
-  const options = S.spools.filter((s) => !s.archived).map((s) =>
-    `<option value="${s.id}">${esc(s.name)}（余 ${s.remaining_weight.toFixed(0)} g）</option>`).join("");
+  const options = (S.spools || []).filter((s) => !s.archived)
+    .map((s) => spoolOptionHtml(s)).join("");
   const current = spoolById(spoolId);
   openModal("把这条消耗转到另一盘料", `
     <p class="hint">将从「${esc(current ? current.name : "")}」返还 ${Math.abs(weight).toFixed(1)} g，
@@ -1898,6 +1899,61 @@ function openLabelSheet() {
 }
 
 /* ── 槽位绑定 ──────────────────────────────────────────── */
+
+/** 下拉里的一项料盘。
+ *
+ *  余量拿不到时写「余量未知」而不是 0 g —— `Number(null) === 0`，直接
+ *  `(x || 0).toFixed(0)` 会把「字段缺失」显示成「0 克」，看着像一盘空料。
+ *  归档的照旧列出来（不然「怎么找不到那盘料」更难查），但标注一下。 */
+function spoolOptionHtml(s, selected) {
+  const raw = s.remaining_weight;
+  const missing = raw === null || raw === undefined || raw === "";
+  const rest = missing ? "余量未知" : `余 ${Number(raw).toFixed(0)} g`;
+  return `<option value="${s.id}"${selected ? " selected" : ""}>${
+    esc(s.name)}（${rest}）${s.archived ? " · 已归档" : ""}</option>`;
+}
+
+/** 能出现在「绑定到哪盘料」里的料盘：归档的不进候选（绑上去没意义），
+ *  但当前正绑着的那一盘例外 —— 否则打开弹窗看到「不绑定」，用户会以为绑定丢了。 */
+function bindCandidates(boundId) {
+  return (S.spools || []).filter((s) => !s.archived || s.id === boundId);
+}
+
+/** 槽位弹窗里那份料盘下拉。
+ *
+ *  取值优先级：下拉里当前选着的（扫码填进来的）> 这个槽位上原有的绑定。
+ *  两者都不在候选里（比如那盘料已归档被过滤掉）才退回「不绑定」。
+ *  @returns {boolean} 是否拿到了真实料盘（false = 候选是空的） */
+function fillBindSpoolSelect(boundId) {
+  const sel = document.getElementById("bindSpool");
+  if (!sel) return false;
+  const keep = sel.value;
+  const list = bindCandidates(boundId);
+  sel.innerHTML = `<option value="">— 不绑定 —</option>`
+    + list.map((s) => spoolOptionHtml(s, s.id === boundId)).join("");
+  const want = list.some((s) => String(s.id) === keep)
+    ? keep
+    : (list.some((s) => s.id === boundId) ? String(boundId || "") : "");
+  sel.value = want;
+  return list.length > 0;
+}
+
+/** 料盘列表还没拉到（应用刚起来、还没进过「料盘库存」页）时补一次再重建下拉。
+ *
+ *  这个坑的来历：`S.spools` 只在 switchView("spools") 里 loadSpools()，
+ *  而仪表盘打印机卡片一点槽位就开这个弹窗、扫槽位二维码走的是 `#bind=` 深链 ——
+ *  两条路都不经过库存页，于是弹窗里只有「— 不绑定 —」，选不了任何耗材。
+ *  这里补拉一次；真的一个料盘都没登记时给一句人话，而不是让人对着空单选发呆。 */
+async function ensureSpoolOptions(boundId) {
+  const hint = document.getElementById("bindSpoolHint");
+  if (hint) hint.textContent = "正在读取料盘列表…";
+  await loadSpools().catch(() => {});
+  const ok = fillBindSpoolSelect(boundId);
+  if (!hint) return;
+  hint.textContent = ok ? ""
+    : "系统里还没有登记任何料盘 —— 可以点下面的「按槽位信息建料盘」，或先去「料盘库存」新增一盘。";
+}
+
 function openSlotDialog(printerId, amsId, trayId) {
   const printer = (S.printers_full || []).find((p) => p.id === printerId) || {};
   const binding = (S.bindingMap || {})[`${printerId}:${amsId}:${trayId}`];
@@ -1909,9 +1965,8 @@ function openSlotDialog(printerId, amsId, trayId) {
   const letter = unit ? String(unit.name || "AMS").split(" ").pop() : "";
   const title = isExt ? "外挂料盘" : `${unit ? unit.name : "AMS"} · 槽位 ${letter}${trayId + 1}`;
 
-  const options = S.spools.map((s) =>
-    `<option value="${s.id}" ${s.id === boundId ? "selected" : ""}>
-       ${esc(s.name)}（余 ${s.remaining_weight.toFixed(0)} g）</option>`).join("");
+  const options = bindCandidates(boundId)
+    .map((s) => spoolOptionHtml(s, s.id === boundId)).join("");
 
   openModal(title, `
     <div class="row" style="margin-bottom:12px;gap:14px">
@@ -1926,6 +1981,7 @@ function openSlotDialog(printerId, amsId, trayId) {
     </div>
     <label class="field"><span>绑定到哪盘料</span>
       <select id="bindSpool"><option value="">— 不绑定 —</option>${options}</select></label>
+    <p class="hint" id="bindSpoolHint"></p>
     <div class="row">
       <button class="sm primary" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
         ${ICO.scan}相机扫码
@@ -1942,6 +1998,10 @@ function openSlotDialog(printerId, amsId, trayId) {
     </div>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveBinding(${printerId},${amsId},${trayId})">保存绑定</button>`);
+
+  // 弹窗先弹出来（不卡手），下拉是空的就异步补一次料盘列表再重建。
+  // 空列表只说明「这次会话还没进过料盘库存」，不代表系统里没有料盘。
+  if (!(S.spools || []).length) ensureSpoolOptions(boundId);
 }
 
 /** 槽位绑定弹窗里的「相机扫码」：扫到料盘码就填进上面的下拉，
@@ -2235,8 +2295,8 @@ async function retryJob(jobId) {
 
 function openManualDialog(jobId, printerId) {
   const printer = (S.printers_full || []).find((p) => p.id === printerId) || {};
-  const spoolOptions = S.spools.map((s) =>
-    `<option value="${s.id}">${esc(s.name)}（余 ${s.remaining_weight.toFixed(0)} g）</option>`).join("");
+  // 同一个下拉口径（余量缺失写「余量未知」而不是 0 g），别再各写一份手拼字符串
+  const spoolOptions = (S.spools || []).map((s) => spoolOptionHtml(s)).join("");
 
   let slotRows = "";
   (printer.state && printer.state.ams ? printer.state.ams : []).forEach((unit) => {
@@ -3509,6 +3569,8 @@ async function applyHashRoute(options) {
     if (parts.length === 3 && parts.every((n) => !isNaN(n))) {
       // 打印机状态还没拉过时先取回来，否则弹窗里找不到这台机器
       if (!(S.printers_full || []).length) await loadPrinters().catch(() => {});
+      // 弹窗里的「绑定到哪盘料」同样要有料盘可选（与上面 spool= 分支同一个道理）
+      if (!(S.spools || []).length) await loadSpools().catch(() => {});
       switchView("dashboard");
       openSlotDialog(parts[0], parts[1], parts[2]);
       return;
@@ -3528,6 +3590,10 @@ async function enterApp() {
     await loadBindings();
     await loadPrinters();
     await loadStatus();
+    // 料盘列表以前只在进「料盘库存」页时才拉（见 switchView）——
+    // 于是「仪表盘点槽位 → 绑定到哪盘料」「打印记录 → 手动补录」这类
+    // 不经过库存页的入口，下拉里可能一个料盘都没有。启动时一并取回。
+    await loadSpools().catch(() => {});
     const me = await api("/api/auth/me").catch(() => null);
     if (me) { S.auth.user = me.user; renderUserChip(); }
   } catch (err) {
@@ -3572,6 +3638,8 @@ window.panelDebug = {
   // 料盘状态口径 / 排序 / 价格分档 / 概览图：库存页与汇总页共用，必须一致
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries, slotKey,
+  // 下拉里的料盘候选：余量缺失别显示成 0 g、归档的除非正绑着否则不进候选
+  spoolOptionHtml, bindCandidates,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

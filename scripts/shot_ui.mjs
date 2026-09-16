@@ -415,6 +415,73 @@ async function main() {
     check("设置页文案里出现「中国大陆」", region.text.includes("中国大陆"), region.text.slice(0, 200));
   }
 
+  /* ── 冷启动直接点槽位绑定（手机上的高频路径） ──
+     场景：打开应用落在仪表盘 → 直接点打印机卡片上的槽位 → 弹窗里挑料盘；
+     或者扫槽位二维码走 `#bind=` 深链进来。
+     `S.spools` 过去只在进「料盘库存」页时才被 loadSpools() 填上（见 switchView），
+     上面两条路都不经过库存页 → 弹窗里只有「— 不绑定 —」，用户反馈「选择不了耗材」。
+     现在启动时就拉料盘，另外弹窗自己也会在空列表时补拉一次（双保险）。 */
+  const freshBind = await cdp.evaluate(sessionId, `(async () => {
+    const before = (window.panelDebug.state.spools || []).length;
+    const printers = (window.panelDebug.state.printers_full || []);
+    const p = printers[0];
+    const ams = ((p || {}).state || {}).ams || [];
+    if (!p || !ams.length) return { reason: "mock 没有打印机 / AMS" };
+    openSlotDialog(p.id, ams[0].ams_id, 0);
+    await new Promise((r) => setTimeout(r, 900));
+    const sel = document.getElementById("bindSpool");
+    const opts = sel ? [...sel.options].map((o) => o.textContent.trim()) : [];
+    const host = document.getElementById("modalBody");
+    return {
+      before, opts: opts.length, sample: opts.slice(0, 3),
+      hint: host ? host.innerText.replace(/\\s+/g, " ").slice(-90) : "",
+    };
+  })()`);
+  console.log("冷启动直接开槽位弹窗：", JSON.stringify(freshBind));
+  if (freshBind.reason) {
+    console.log(`  （跳过冷启动绑定断言：${freshBind.reason}）`);
+  } else {
+    check("启动时就把料盘列表拉好了（这一步之前没进过「料盘库存」）",
+      freshBind.before >= 1, String(freshBind.before));
+    check("弹窗里的料盘下拉有选项", freshBind.opts >= 2, JSON.stringify(freshBind));
+    check("选项是真实的料盘（「名字（余 xx g）」），不是只有「不绑定」这一项",
+      /（余 \d+ g）/.test(freshBind.sample.join(" ")), JSON.stringify(freshBind.sample));
+  }
+
+  /* ── 双保险：万一启动那次没拉到料盘（接口失败/深链更早），弹窗自己要补上 ──
+     把列表清空再开一次，模拟「S.spools 空着」的状态。 */
+  const heal = await cdp.evaluate(sessionId, `(async () => {
+    const printers = (window.panelDebug.state.printers_full || []);
+    const p = printers[0];
+    const ams = ((p || {}).state || {}).ams || [];
+    if (!p || !ams.length) return { reason: "mock 没有打印机 / AMS" };
+    window.panelDebug.state.spools = [];
+    openSlotDialog(p.id, ams[0].ams_id, 0);
+    const sel = document.getElementById("bindSpool");
+    const first = sel ? sel.options.length : -1;
+    await new Promise((r) => setTimeout(r, 1400));
+    const hint = document.getElementById("bindSpoolHint");
+    return {
+      first, after: sel ? sel.options.length : -1,
+      restored: (window.panelDebug.state.spools || []).length,
+      hint: hint ? hint.textContent.trim() : "(没有提示位)",
+    };
+  })()`);
+  console.log("空列表自愈：", JSON.stringify(heal));
+  if (heal.reason) {
+    console.log(`  （跳过空列表自愈断言：${heal.reason}）`);
+  } else {
+    check("列表空着时弹窗先显示「只有不绑定」这一项", heal.first === 1, JSON.stringify(heal));
+    check("弹窗自己把料盘列表补回来了（不用用户手动去库存页）",
+      heal.after >= 2, JSON.stringify(heal));
+    check("补回来的料盘同时写进了 S.spools（后续下拉都受益）",
+      heal.restored >= 1, JSON.stringify(heal));
+    check("补齐后不再显示「正在读取…」这类占位文案",
+      !/正在读取|还没有登记/.test(heal.hint), heal.hint);
+  }
+  await cdp.evaluate(sessionId, `closeModal()`);
+  await sleep(300);
+
   /* ── 概览 → 库存 → 汇总 → 打印记录 → 设置 ── */
   const views = [
     ["spools", "02-spools.png"],
