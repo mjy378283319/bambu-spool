@@ -307,8 +307,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     const remain = Math.round(spool.remaining_weight);
     const initial = Math.round(spool.initial_weight);
     const rows = [
-      { text: spool.brand, size: 0.072 },
-      { text: typeText, size: 0.070 },
+      { text: spool.brand, size: 0.088 },
+      { text: typeText, size: 0.085 },
       { text: ownName, size: 0.100, bold: true },
       { text: "余 " + remain + " g / " + initial + " g", size: 0.098, bold: true },
       { text: spool.location ? "位置 " + spool.location : "", size: 0.065 },
