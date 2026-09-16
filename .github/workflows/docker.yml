@@ -55,6 +55,9 @@ jobs:
       - name: 运行外观字段 / 自定义品牌 / 区域显示 / 耗材汇总自测
         run: python tests/test_finish_summary.py
 
+      - name: 运行槽位展示名自测（AMS / AMS HT / 外挂料盘）
+        run: python tests/test_slot_label.py
+
       - name: 前端 JS 语法检查
         run: |
           node --check app/static/app.js

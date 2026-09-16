@@ -13,3 +13,11 @@ qr.png
 .env
 .DS_Store
 shots/
+
+# 推送脚本的临时产物。REDIRECT 到仓库目录里就会被 collect() 当成项目文件推上去
+# （2026-09-16 踩过一次：push_out.txt / _msg_api.txt 进了远端根目录）
+push_out.txt
+push-*.txt
+push-*.log
+_msg*.txt
+_msg_api.txt

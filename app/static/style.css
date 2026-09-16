@@ -869,6 +869,112 @@ body.scan-open { overflow: hidden; }
 .scan-actions .btn { flex: 1 1 auto; min-width: 120px; }
 .scan-hint { font-size: 12px; color: var(--text-3); line-height: 1.6; }
 
+/* ── 可排序表头 ───────────────────────────────────────── */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+th.sortable .sort-arrow { margin-left: 4px; font-size: 11px; color: var(--text-3); }
+th.sortable.on { color: var(--accent); }
+th.sortable.on .sort-arrow { color: var(--accent); }
+
+/* ── 从料盘侧绑定槽位（弹窗里的槽位清单） ─────────────── */
+.bind-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 46vh; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px; background: var(--surface-2);
+}
+.bind-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+}
+.bind-row.mine { border-color: var(--accent); background: var(--accent-soft); }
+.bind-slot { font-size: 12.5px; font-weight: 600; }
+.bind-fil { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+
+/* ── 打印机状态：两列等高，最后一格撑满，右下角不留空白 ──
+   .printer-layout 上面定义时是 align-items:start，这里改成 stretch：
+   右列（AMS）通常比左列（照片 + 打印状态 + 温度）矮，靠 .pcard.grow
+   把风扇卡撑到与左列等高，右下角就不会空出一大块。 */
+.printer-layout { align-items: stretch; }
+.pcard.grow { display: flex; flex-direction: column; }
+.fan-rows { display: flex; flex-direction: column; justify-content: space-evenly; flex: 1; }
+
+/* ── 耗材汇总：库存数据概览 ───────────────────────────── */
+.overview-grid {
+  display: grid; grid-template-columns: minmax(0, 236px) minmax(0, 1fr);
+  gap: 26px; align-items: center; padding: 4px 2px 2px;
+}
+.overview-chart { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.donut { display: block; }
+.donut-arc { transition: stroke-width .2s; }
+.donut-total {
+  fill: var(--text); stroke: none; text-anchor: middle;
+  font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.donut-unit { fill: var(--text-3); stroke: none; text-anchor: middle; font-size: 11.5px; }
+.donut-legend { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.legend-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; color: var(--text-2); font-family: inherit;
+}
+.legend-item:hover { border-color: var(--accent); color: var(--text); }
+.legend-item.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.legend-item .dot, .use-item .dot, .price-head .dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+}
+
+.overview-uses { min-width: 0; }
+.overview-title {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; color: var(--text-2); margin-bottom: 10px;
+}
+.use-bar {
+  display: flex; height: 10px; border-radius: 999px;
+  overflow: hidden; background: var(--surface-3);
+}
+.use-bar > span { display: block; height: 100%; transition: width .35s; }
+.use-legend { display: flex; flex-direction: column; margin-top: 8px; }
+.use-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; cursor: pointer; width: 100%;
+  font: inherit; font-size: 13px; color: var(--text-2); text-align: left;
+}
+.use-item:hover { background: var(--surface-2); color: var(--text); }
+.use-item + .use-item { border-top: 1px solid var(--border); }
+.use-item b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.use-item .use-pct { font-size: 11.5px; color: var(--text-3); min-width: 34px; text-align: right; }
+
+/* ── 耗材汇总：价格区间分布 ───────────────────────────── */
+.price-dist {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(214px, 1fr));
+}
+.price-card {
+  display: flex; flex-direction: column; gap: 8px;
+  text-align: left; font: inherit; cursor: pointer; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 15px 12px;
+  box-shadow: var(--shadow-sm);
+}
+.price-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+.price-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); }
+.price-range {
+  font-size: 19px; font-weight: 600; letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+}
+.price-nums { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-3); }
+.price-nums b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.price-card .bar { margin-top: 2px; }
+.price-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px;
+}
+.price-more { font-size: 12px; color: var(--accent); }
+
 /* ── 窄屏 ───────────────────────────────────────────── */
 @media (max-width: 860px) {
   .brand-name { display: none; }
@@ -878,6 +984,10 @@ body.scan-open { overflow: hidden; }
   .fld.wide { grid-column: span 1; }
   .printer-layout { grid-template-columns: minmax(0, 1fr); }
   .label-layout { grid-template-columns: minmax(0, 1fr); }
+  /* 单列之后「左右两列等高」没意义了，风扇卡恢复自然高度 */
+  .pcard.grow { flex: none; }
+  .fan-rows { justify-content: flex-start; }
+  .overview-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
 }
 @media (max-width: 720px) {
   .tray-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -954,6 +1064,11 @@ body.scan-open { overflow: hidden; }
   /* 弹窗里的表格形态太杂（有的是编辑表、有的是清单），一律卡片化反而更乱；
      给弹窗内容自己一片横向滚动区，别把整页推出去。顺便收一收内边距，
      360px 屏上 overlay 16px + modal 22px 的留白太奢侈。 */
+  /* 价格分布卡片在手机上单列：两列时每张只剩 150px，「¥100 - 150」会被折行 */
+  .price-dist { grid-template-columns: 1fr; gap: 10px; }
+  /* 槽位清单：手机上把动作按钮摊到下一行，手指好点 */
+  .bind-row { padding: 9px 10px; }
+  .bind-row .btn { flex: 1 1 auto; justify-content: center; }
   .overlay { padding: 20px 10px; }
   .modal { padding: 16px 14px; border-radius: 14px; }
   #modalBody { overflow-x: auto; }

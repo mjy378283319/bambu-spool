@@ -51,7 +51,7 @@ from ..colors import (
 )
 from ..config import settings
 from ..core.deduction import apply_deduction, build_usages, load_usages, resolve_spools, usage_cost
-from ..core.hub import hub
+from ..core.hub import ams_display_name, hub
 from ..db import get_session
 from ..models import PrintJob, Printer, SlotBinding, Spool, UsageRecord, utcnow
 
@@ -141,6 +141,17 @@ def job_dict(job: PrintJob, session: Session, with_filaments: bool = True) -> di
     return data
 
 
+def _slot_label(ams_id: int, tray_id: int) -> str:
+    """槽位的展示名（列表里显示「装在哪儿」用）。
+
+    直接写 `AMS {ams_id + 1}` 会把 AMS HT 的 128 拼成「AMS 129」—— 编号语义见
+    core.hub.ams_display_name。外挂料盘在上报里是 ams_id = -1，单独写。
+    """
+    if ams_id < 0:
+        return "外挂料盘"
+    return f"{ams_display_name(ams_id)} · 槽位 {tray_id + 1}"
+
+
 def binding_dict(binding: SlotBinding, session: Session) -> dict:
     spool = session.get(Spool, binding.spool_id) if binding.spool_id else None
     return {
@@ -188,7 +199,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.3.1",
+        "version": "0.3.2",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -533,7 +544,7 @@ def list_spools(
                 "printer_id": binding.printer_id,
                 "ams_id": binding.ams_id,
                 "tray_id": binding.tray_id,
-                "label": f"AMS {binding.ams_id + 1} · 槽位 {binding.tray_id + 1}",
+                "label": _slot_label(binding.ams_id, binding.tray_id),
             })
 
     # 首次 / 最后使用时间与流水条数：列表要展示，删除确认框也要用条数做判断。

@@ -17,8 +17,12 @@ const S = {
   spoolTab: "all",
   spoolPage: 1,
   spoolPageSize: 10,
+  // 表头排序：默认按 ID 升序。dir 只有 asc / desc 两个值。
+  spoolSort: { key: "id", dir: "asc" },
   jobPage: 1,
   jobPageSize: 10,
+  // 耗材汇总页：概览环形图上选中的材料（null = 看全部）
+  summaryFilter: null,
 };
 
 /* ── 图标（内联 SVG，随文字颜色走） ───────────────────── */
@@ -38,6 +42,9 @@ const ICO = {
   layer: '<svg viewBox="0 0 24 24"><path d="M12 3.6 20 7.9l-8 4.3-8-4.3z"/><path d="m4 12.4 8 4.3 8-4.3"/><path d="m4 16.4 8 4.3 8-4.3"/></svg>',
   drop: '<svg viewBox="0 0 24 24"><path d="M12 3.6c3 4 5.4 6.6 5.4 9.6a5.4 5.4 0 0 1-10.8 0c0-3 2.4-5.6 5.4-9.6z"/></svg>',
   scan: '<svg viewBox="0 0 24 24"><path d="M4 8.5V5.8c0-1 .8-1.8 1.8-1.8H8.5"/><path d="M15.5 4h2.7c1 0 1.8.8 1.8 1.8v2.7"/><path d="M20 15.5v2.7c0 1-.8 1.8-1.8 1.8h-2.7"/><path d="M8.5 20H5.8c-1 0-1.8-.8-1.8-1.8v-2.7"/><path d="M4 12h16"/></svg>',
+  eye: '<svg viewBox="0 0 24 24"><path d="M2.6 12S6.2 6.6 12 6.6 21.4 12 21.4 12 17.8 17.4 12 17.4 2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l2.5-2.5a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-2.5 2.5a3.6 3.6 0 0 0 5.1 5.1l1-1"/></svg>',
+  copy: '<svg viewBox="0 0 24 24"><rect x="8.6" y="8.6" width="10.8" height="10.8" rx="2"/><path d="M15.4 5.6v-.1A1.5 1.5 0 0 0 13.9 4H5.6A1.5 1.5 0 0 0 4 5.5V14a1.5 1.5 0 0 0 1.5 1.5h.1"/></svg>',
 };
 
 
@@ -859,14 +866,17 @@ function renderTempCard(state) {
 /** 风扇状态：每条通道一根细进度条。值是后端换算好的百分比（原始 0-15 档位在解析层已经换算）。
  *
  *  值为 null 表示机器没装这一件（左侧辅助风扇 / 外排风扇都是选配件），
- *  这时不画进度条，直接写「未安装」—— 画成 0% 会让人以为是风扇停了。 */
+ *  这时不画进度条，直接写「未安装」—— 画成 0% 会让人以为是风扇停了。
+ *
+ *  这张卡排在右列最后，并且会撑满剩余高度（.pcard.grow）：右列（AMS）通常比
+ *  左列（照片 + 打印状态 + 温度）矮，不撑满的话右下角会空出一大块。 */
 function renderFanCard(state, printer) {
   const fans = state.fans || {};
   const rows = fanChannels(printer).filter(([key, , required]) => required || fans[key] != null);
   if (!rows.length) return "";
-  return `<div class="pcard">
+  return `<div class="pcard grow fan-card">
     <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
-    ${rows.map(([key, label]) => {
+    <div class="fan-rows">${rows.map(([key, label]) => {
       if (fans[key] == null) {
         return `<div class="fan-row missing">
           <span class="fan-name">${esc(label)}</span>
@@ -880,17 +890,17 @@ function renderFanCard(state, printer) {
         <span class="fan-bar"><span style="width:${value}%"></span></span>
         <span class="fan-val">${value}%</span>
       </div>`;
-    }).join("")}
+    }).join("")}</div>
   </div>`;
 }
 
-/** 右列：所有 AMS / AMS HT 单元 + 外挂料盘。 */
+/** 右列内容：所有 AMS / AMS HT 单元 + 外挂料盘。外层 .printer-col 由调用方给。 */
 function renderUnits(state, printer) {
   const cards = (state.ams || []).map((unit) => renderUnitCard(unit, printer)).join("");
   const ext = renderExternalCard(state.external_spool, printer);
   const body = cards + ext;
-  return `<div class="printer-col">${body || `<div class="pcard">
-      <div class="empty-state">这台机器没有上报 AMS 单元。</div></div>`}</div>`;
+  return body || `<div class="pcard">
+      <div class="empty-state">这台机器没有上报 AMS 单元。</div></div>`;
 }
 
 function renderUnitCard(unit, printer) {
@@ -1018,9 +1028,11 @@ function renderPrinterCard(entry) {
         </div>
         ${renderRunCard(state)}
         ${renderTempCard(state)}
+      </div>
+      <div class="printer-col">
+        ${renderUnits(state, p)}
         ${renderFanCard(state, p)}
       </div>
-      ${renderUnits(state, p)}
     </div>
   </div>`;
 }
@@ -1033,6 +1045,124 @@ async function requestPushall(printerId) {
 }
 
 /* ── 料盘 ──────────────────────────────────────────────── */
+
+/* ── 料盘状态分类（库存页标签页 与 汇总页概览图 共用同一套口径）─────
+ * 两个地方各写一套判定，就会再次出现「概览说 5 盘用完、点进去只剩 2 盘」
+ * 这种对不上的现象，所以判定与统计都只留这一个实现。 */
+
+/** 一盘料处于哪种状态。
+ *
+ *  empty  —— 已经用光（余量 ≤ 0）
+ *  unused —— 全新未拆封：没有任何用量、也没装到机器上
+ *  in_use —— 其余（用掉一部分，或正装在机器上）
+ *
+ *  余量必须显式判空：`Number(null) === 0`，字段缺失会被当成「0 克」而误判成
+ *  消耗完 —— 老数据或接口漏字段时就会凭空多出一堆「用完的盘」。
+ */
+function spoolUseState(spool) {
+  const remaining = spool.remaining_weight;
+  const hasRemaining = remaining !== null && remaining !== undefined && remaining !== "";
+  if (hasRemaining && Number(remaining) <= 0) return "empty";
+  const used = Number(spool.used_weight) || 0;
+  const count = Number(spool.usage_count) || 0;
+  const mounted = (spool.slots || []).length > 0;
+  if (used <= 0 && count <= 0 && !mounted) return "unused";
+  return "in_use";
+}
+
+const USE_STATE_META = {
+  unused: { label: "未使用", color: "#16a34a", tab: "idle" },
+  in_use: { label: "使用中", color: "#2563eb", tab: "inuse" },
+  empty: { label: "消耗完", color: "#dc2626", tab: "empty" },
+};
+
+/** 按状态点数（只数在库料盘；归档的不参与）。 */
+function useStateTally(spools) {
+  const out = { unused: 0, in_use: 0, empty: 0, total: 0 };
+  (spools || []).forEach((s) => {
+    out[spoolUseState(s)] += 1;
+    out.total += 1;
+  });
+  return out;
+}
+
+/* ── 价格区间分布 ──────────────────────────────────────── */
+/** 分档步长候选。挑「刚好装得下」的那一档，别让全部料盘挤进最后一格。 */
+const PRICE_STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000];
+
+/** 把料盘按整盘价分档（0 起、最多 6 档）。
+ *
+ *  不写死「0-10 / 10-20 / …」这类固定档：真实耗材整盘价多在 ¥30~200，
+ *  固定档会把所有盘塞进最后一格，等于没有分布。这里按最高价挑步长，
+ *  低到 10 元一档、高到几百元一档都能出图。
+ *
+ *  @returns {{buckets: Array, unpriced: number, priced: number}}
+ */
+function priceBuckets(spools) {
+  const priced = (spools || []).filter((s) => (Number(s.price) || 0) > 0);
+  const unpriced = (spools || []).length - priced.length;
+  if (!priced.length) return { buckets: [], unpriced, priced: 0 };
+
+  const hi = Math.max(...priced.map((s) => Number(s.price) || 0));
+  const step = PRICE_STEPS.find((s) => Math.ceil(hi / s) <= 6) || PRICE_STEPS[PRICE_STEPS.length - 1];
+  const count = Math.max(1, Math.ceil(hi / step));
+  const buckets = [];
+  for (let i = 0; i < count; i++) {
+    // 左开右闭：(from, to]。价格正好等于档位边界时落在低的一档，
+    // 这样 "¥50 - 100" 里装的是 50.01~100，不会跟上一档重复计数。
+    const from = i * step;
+    const to = (i + 1) * step;
+    const hit = priced.filter((s) => {
+      const p = Number(s.price) || 0;
+      return p > from && p <= to;
+    });
+    buckets.push({
+      from, to,
+      label: `¥${from} - ${to}`,
+      count: hit.length,
+      percent: priced.length ? (hit.length / priced.length) * 100 : 0,
+      value: hit.reduce((sum, s) => sum + (Number(s.price) || 0), 0),
+    });
+  }
+  return { buckets, unpriced, priced: priced.length };
+}
+
+/* ── 表头排序 ──────────────────────────────────────────── */
+function sortSpools(list) {
+  const sort = S.spoolSort || { key: "id", dir: "asc" };
+  const factor = sort.dir === "desc" ? -1 : 1;
+  return list.slice().sort((a, b) => {
+    let va = a[sort.key];
+    let vb = b[sort.key];
+    if (sort.key === "last_used_at") { va = va || ""; vb = vb || ""; }
+    else { va = Number(va) || 0; vb = Number(vb) || 0; }
+    if (va < vb) return -1 * factor;
+    if (va > vb) return 1 * factor;
+    return (a.id || 0) - (b.id || 0);   // 同值时按 ID 兜底，顺序稳定
+  });
+}
+
+/** 点表头切换排序：同一列反方向，换列时「越大越关心」的列默认降序。 */
+function toggleSpoolSort(key) {
+  const cur = S.spoolSort || { key: "id", dir: "asc" };
+  const bigFirst = key === "remaining_weight" || key === "price" || key === "last_used_at";
+  S.spoolSort = cur.key === key
+    ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+    : { key, dir: bigFirst ? "desc" : "asc" };
+  S.spoolPage = 1;
+  renderSpools();
+}
+
+/** 可排序表头。箭头是文字而不是图标 —— 表格里用 SVG 会跟表头基线对不齐。 */
+function sortHead(key, label, width, align) {
+  const cur = S.spoolSort || {};
+  const on = cur.key === key;
+  const arrow = on ? (cur.dir === "desc" ? "↓" : "↑") : "⇅";
+  const style = `width:${width}${align ? `;text-align:${align}` : ""}`;
+  return `<th class="sortable${on ? " on" : ""}" style="${style}"
+     onclick="toggleSpoolSort('${key}')" title="按${esc(label)}排序">${esc(label)}<span class="sort-arrow">${arrow}</span></th>`;
+}
+
 function switchSpoolTab(tab) {
   S.spoolTab = tab;
   S.spoolPage = 1;
@@ -1059,12 +1189,16 @@ function filteredSpools() {
   const maxPrice = parseFloat(read("spoolPriceMax"));
   const tab = S.spoolTab || "all";
 
-  return S.spools.filter((s) => {
+  const list = S.spools.filter((s) => {
     if (tab === "archived") { if (!s.archived) return false; }
     else if (s.archived) return false;
 
-    if (tab === "inuse" && !(s.slots || []).length) return false;
-    if (tab === "idle" && ((s.usage_count || 0) > 0 || (s.used_weight || 0) > 0)) return false;
+    // 状态标签页一律走 spoolUseState —— 与耗材汇总页的「库存使用状态」同一个口径，
+    // 否则会出现「概览说消耗完 53 盘、点进来只剩 3 盘」这种两边对不上的现象。
+    const use = spoolUseState(s);
+    if (tab === "inuse" && use !== "in_use") return false;
+    if (tab === "idle" && use !== "unused") return false;
+    if (tab === "empty" && use !== "empty") return false;
     if (tab === "low" && !s.is_low) return false;
 
     if (brand && s.brand !== brand) return false;
@@ -1079,6 +1213,7 @@ function filteredSpools() {
     }
     return true;
   });
+  return sortSpools(list);
 }
 
 function spoolRowHtml(spool) {
@@ -1124,6 +1259,9 @@ function spoolRowHtml(spool) {
     <td class="tiny muted" data-label="使用时间">${usage}</td>
     <td class="cell-actions" onclick="event.stopPropagation()">
       <div class="row-actions">
+        <button title="查看这盘料的详情与使用记录" onclick="openSpoolDetail(${spool.id})">${ICO.eye}详情</button>
+        <button title="绑到 AMS 槽位 / 从槽位上解绑" onclick="openBindSpoolDialog(${spool.id})">${ICO.link}绑定</button>
+        <button title="复制这盘料的规格，新增一盘同款" onclick="openCloneSpoolDialog(${spool.id})">${ICO.copy}克隆</button>
         <button title="打印或导出这盘料的标签" onclick="openLabelDialog(${spool.id})">${ICO.tag}标签</button>
         <button title="手动补录消耗" onclick="openUseDialog(${spool.id})">${ICO.pencil}补录</button>
         <button title="按称重校准余量" onclick="openMeasureDialog(${spool.id})">${ICO.scale}校准</button>
@@ -1155,15 +1293,15 @@ function renderSpools() {
   const slice = list.slice((page - 1) * size, page * size);
   host.innerHTML = `<table>
     <thead><tr>
-      <th style="width:62px">ID</th>
+      ${sortHead("id", "ID", "66px")}
       <th>料盘</th>
       <th style="width:92px">类型</th>
-      <th style="width:146px">颜色</th>
+      <th style="width:140px">颜色</th>
       <th style="width:70px">外观</th>
-      <th style="width:104px;text-align:right">价格</th>
-      <th style="width:148px">剩余</th>
-      <th style="width:172px">使用时间</th>
-      <th style="width:196px"></th>
+      ${sortHead("price", "价格", "104px", "right")}
+      ${sortHead("remaining_weight", "剩余", "148px")}
+      ${sortHead("last_used_at", "使用时间", "168px")}
+      <th style="width:214px"></th>
     </tr></thead>
     <tbody>${slice.map(spoolRowHtml).join("")}</tbody></table>`;
   renderTableFoot("spoolFooter", "", list.length, page, size, "spool");
@@ -1362,10 +1500,11 @@ function markActivePreset() {
   });
 }
 
-function openSpoolDialog(spool, forceNew) {
+function openSpoolDialog(spool, forceNew, clonedFrom) {
   S.dialogSpool = spool || null;
-  // forceNew：表单预填了某盘料的参数，但目的是新增（例如图片识色匹配到的色卡）
+  // forceNew：表单预填了某盘料的参数，但目的是新增（克隆、或图片识色匹配到的色卡）
   const isEdit = !!spool && !forceNew;
+  const title = isEdit ? "编辑料盘" : (clonedFrom ? "克隆料盘" : "新增料盘");
   const value = spool || {
     brand: "", material: "", finish: "普通", color_name: "黑色", color_hex: "#1A1A1A",
     spool_weight: 250, initial_weight: 1000, location: "", note: "", name: "",
@@ -1380,7 +1519,11 @@ function openSpoolDialog(spool, forceNew) {
   const customSelected = value.brand && !brands.includes(value.brand) ? " selected" : "";
   const finish = value.finish || "普通";
 
-  openModal(isEdit ? "编辑料盘" : "新增料盘", `
+  openModal(title, `
+    ${clonedFrom ? `<div class="info-box">
+      <div class="small">克隆自「${esc(clonedFrom)}」—— 规格已带过来，余量按满盘算。
+        同一款买了好几盘时，改下位置/余量直接保存就行。</div>
+    </div>` : ""}
     <label class="field"><span>品牌</span>
       <select id="f_brand" onchange="onBrandChoice()">${brandOptions}
         <option value="__custom__"${customSelected}>＋ 自定义品牌…</option></select></label>
@@ -1526,6 +1669,145 @@ async function openSpoolDetail(id) {
         <th>时间</th><th>来源任务</th><th>槽位</th><th style="text-align:right">增减</th><th>类型</th><th></th>
       </tr></thead><tbody>${usageRows}</tbody></table>
     `, `<button class="primary" onclick="closeModal()">关闭</button>`, true);
+  } catch (err) { toast(err.message, "err"); }
+}
+
+/** 克隆一盘料：把「这款耗材」的规格复制出来新增一盘。
+ *
+ *  带走的：品牌 / 材料 / 外观 / 颜色 / 皮重 / 满盘重 / 单价 / 位置。
+ *  不带的：余量（新拆的那盘是满的）、使用记录、RFID、槽位绑定 ——
+ *  后三样都是「这一盘」的属性，复制过来就是错的。
+ */
+function openCloneSpoolDialog(spoolId) {
+  const src = spoolById(spoolId);
+  if (!src) { toast("找不到这盘料，刷新一下列表", "err"); return; }
+  openSpoolDialog({
+    brand: src.brand,
+    material: src.material,
+    finish: src.finish || "普通",
+    color_name: src.color_name,
+    color_hex: src.color_hex,
+    spool_weight: src.spool_weight,
+    initial_weight: src.initial_weight,
+    price: src.price,
+    location: src.location,
+    note: src.note,
+  }, true, src.name);
+}
+
+/* ── 从料盘这一侧管槽位绑定 ──────────────────────────────
+ *  原来只有「在仪表盘点槽位 → 从下拉里选料盘」这条单向路径。手里拿着刚拆的
+ *  一盘料、想放到某个槽位时，得先在机器面板的一堆小格子里找到那个槽位，
+ *  很别扭。这里给反向路径：在这盘料上直接选槽位，能绑、能换、能解绑。 */
+
+function slotKey(entry) {
+  return `${entry.printerId}:${entry.amsId}:${entry.trayId}`;
+}
+
+/** 把所有打印机上报的槽位摊平成一维（含外挂料盘），供「选槽位」用。
+ *
+ *  标签用 amsSlotLabel 而不是卡片里的短码（A1）：这里是扁平列表，普通 AMS 的 A1
+ *  和 AMS HT 的 A1 会撞在一起，只写「A1」根本分不出是哪一个。
+ */
+function allSlotEntries() {
+  const out = [];
+  (S.printers_full || []).forEach((printer) => {
+    const state = printer.state || {};
+    const printerName = printer.name || printer.serial || `#${printer.id}`;
+    (state.ams || []).forEach((unit) => {
+      (unit.trays || []).forEach((tray) => {
+        const amsId = tray.ams_id != null ? tray.ams_id : unit.ams_id;
+        out.push({
+          printerId: printer.id,
+          printerName,
+          amsId,
+          trayId: tray.tray_id,
+          occupied: !!tray.occupied,
+          label: `${printerName} · ${amsSlotLabel(amsId, tray.tray_id)}`,
+          material: tray.tray_type || tray.label || "",
+          color: tray.color || "",
+        });
+      });
+    });
+    const ext = state.external_spool;
+    if (ext) {
+      out.push({
+        printerId: printer.id,
+        printerName,
+        amsId: -1,
+        trayId: 0,
+        occupied: !!ext.occupied,
+        label: `${printerName} · 外挂料盘`,
+        material: ext.tray_type || ext.label || "",
+        color: ext.color || "",
+      });
+    }
+  });
+  return out;
+}
+
+function bindSlotRowHtml(slot, spoolId) {
+  const binding = (S.bindingMap || {})[slotKey(slot)];
+  const boundId = binding ? binding.spool_id : null;
+  const isMine = boundId === spoolId;
+  const other = boundId && !isMine ? binding.spool : null;
+  const dot = `<span class="mat-dot" style="width:12px;height:12px;background:${esc(slot.color || "#cbd5e1")}"></span>`;
+  const tag = isMine ? '<span class="tag teal">本盘</span>'
+    : other ? `<span class="tag amber">已装 ${esc(other.name)}</span>`
+    : slot.occupied ? '<span class="tag">未绑定</span>'
+    : '<span class="tag">空槽位</span>';
+  const action = isMine
+    ? `<button class="sm danger" onclick="toggleSpoolBinding(${spoolId},${slot.printerId},${slot.amsId},${slot.trayId},true)">解绑</button>`
+    : `<button class="sm primary" onclick="toggleSpoolBinding(${spoolId},${slot.printerId},${slot.amsId},${slot.trayId},false)">${other ? "改为这盘" : "绑到这盘"}</button>`;
+  return `<div class="bind-row${isMine ? " mine" : ""}">
+    <span class="bind-slot">${esc(slot.label)}</span>
+    <span class="bind-fil">${dot}${esc(slot.material || "—")}</span>
+    <span class="spacer"></span>
+    ${tag}${action}
+  </div>`;
+}
+
+function openBindSpoolDialog(spoolId) {
+  const spool = spoolById(spoolId);
+  if (!spool) { toast("找不到这盘料，刷新一下列表", "err"); return; }
+  const slots = allSlotEntries();
+  if (!slots.length) {
+    openModal(`绑定槽位 · ${spool.name}`, `<div class="empty-state">
+      还没有同步到打印机槽位。<br />
+      <span class="small">到「设置」页登录拓竹账号并同步设备后，这里就能看到 AMS 槽位。</span>
+    </div>`, `<button class="primary" onclick="closeModal()">知道了</button>`);
+    return;
+  }
+  const mineCount = slots.filter((s) => {
+    const b = (S.bindingMap || {})[slotKey(s)];
+    return b && b.spool_id === spoolId;
+  }).length;
+
+  openModal(`绑定槽位 · ${spool.name}`, `
+    <p class="hint">这盘料现在装在 <b>${mineCount}</b> 个槽位上。
+      点「绑到这盘」把一个槽位改成这盘料；原来装着的料盘会自动解绑（不会丢数据）。</p>
+    <div class="bind-list">${slots.map((s) => bindSlotRowHtml(s, spoolId)).join("")}</div>
+    <p class="hint">槽位里显示的材料名是<b>机器上报的</b>，不是你登记的 —— 官方 RFID 料盘
+      换料后机器会自己更新，第三方料盘换料后要等它重新识别。</p>
+  `, `<button class="primary" onclick="closeModal()">完成</button>`, true);
+}
+
+/** 绑定 / 解绑一个槽位。解绑传 spool_id = null。 */
+async function toggleSpoolBinding(spoolId, printerId, amsId, trayId, unbind) {
+  try {
+    await api("/api/bindings", {
+      method: "PUT",
+      body: JSON.stringify({
+        printer_id: printerId,
+        ams_id: amsId,
+        tray_id: trayId,
+        spool_id: unbind ? null : spoolId,
+      }),
+    });
+    await loadBindings();
+    if (S.status) await loadStatus();   // 仪表盘上的槽位标记也要跟着变
+    toast(unbind ? "已解绑" : "已绑定这盘料", "ok");
+    openBindSpoolDialog(spoolId);       // 重开一次，让弹窗里的状态跟着刷新
   } catch (err) { toast(err.message, "err"); }
 }
 
@@ -2010,9 +2292,203 @@ async function submitManual(jobId, printerId) {
 async function loadSummary() {
   try {
     S.stats = await api(`/api/stats?tz_minutes=${tzMinutes()}`);
+    // 概览环形图与价格分布都在本地算（料盘也就几百条），这样点材料筛选是即时的，
+    // 不用每点一次就打一趟服务器；口径也跟库存页的标签页共用同一套函数。
+    try {
+      S.summarySpools = (await api("/api/spools?archived=false")).spools || [];
+    } catch (err) { S.summarySpools = S.summarySpools || []; }
     renderSummary();
     renderDashboard();
   } catch (err) { toast(err.message, "err"); }
+}
+
+/** 材料配色。固定顺序取色，同一材料每屏颜色一致，不会点一次换一个色。 */
+const MATERIAL_COLORS = [
+  "#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed",
+  "#0891b2", "#db2777", "#65a30d", "#ea580c", "#475569",
+];
+
+/** 按材料聚合（盘数 + 余量），用于概览环形图。 */
+function summaryMaterials(spools) {
+  const map = new Map();
+  (spools || []).forEach((s) => {
+    const key = s.material || "未填写";
+    const item = map.get(key) || { label: key, count: 0, remaining: 0 };
+    item.count += 1;
+    item.remaining += Number(s.remaining_weight) || 0;
+    map.set(key, item);
+  });
+  return [...map.values()].sort((a, b) => b.count - a.count || b.remaining - a.remaining);
+}
+
+/** 手绘环形图。不引图表库 —— 这个应用常跑在没外网的内网里，多一个离线依赖不值当。
+ *  segments: [{label, value, color}]，按 value 占比分配弧长（总和为 0 时只画底环）。 */
+function donutChart(segments, size, thickness) {
+  const box = size || 176;
+  const w = thickness || 28;
+  const r = (box - w) / 2;
+  const c = 2 * Math.PI * r;
+  const total = segments.reduce((sum, x) => sum + x.value, 0);
+  let acc = 0;
+  const arcs = segments.map((seg) => {
+    const frac = total > 0 ? seg.value / total : 0;
+    const on = frac * c;
+    const arc = `<circle class="donut-arc" cx="${box / 2}" cy="${box / 2}" r="${r}"
+      fill="none" stroke="${esc(seg.color)}" stroke-width="${w}"
+      stroke-dasharray="${on.toFixed(2)} ${(c - on).toFixed(2)}"
+      stroke-dashoffset="${(-acc * c).toFixed(2)}"
+      transform="rotate(-90 ${box / 2} ${box / 2})"></circle>`;
+    acc += frac;
+    return arc;
+  }).join("");
+  return `<svg class="donut" viewBox="0 0 ${box} ${box}" width="${box}" height="${box}" role="img">
+    <circle cx="${box / 2}" cy="${box / 2}" r="${r}" fill="none"
+      stroke="var(--surface-3)" stroke-width="${w}"></circle>
+    ${arcs}
+    <text class="donut-total" x="${box / 2}" y="${box / 2 + 2}">${total}</text>
+    <text class="donut-unit" x="${box / 2}" y="${box / 2 + 20}">盘</text>
+  </svg>`;
+}
+
+/** 点环形图上的材料 -> 只统计这块。再点一次取消。 */
+function pickSummaryMaterial(name) {
+  S.summaryFilter = S.summaryFilter === name ? null : name;
+  renderSummary();
+}
+
+function clearSummaryFilter() {
+  S.summaryFilter = null;
+  renderSummary();
+}
+
+/** 点「未使用 / 使用中 / 消耗完」-> 跳到料盘库存并切到对应的标签页。 */
+function jumpToSpoolsByState(stateKey) {
+  const meta = USE_STATE_META[stateKey];
+  switchView("spools");
+  const tab = (meta && meta.tab) || "all";
+  // 标签页高亮是 switchSpoolTab 管的（它同时会重置页码并重绘）
+  switchSpoolTab(tab);
+}
+
+/** 点价格档「查看明细」-> 跳到料盘库存并按这个价格区间筛。 */
+function jumpToSpoolsByPrice(from, to) {
+  switchView("spools");
+  const min = document.getElementById("spoolPriceMin");
+  const max = document.getElementById("spoolPriceMax");
+  if (min) min.value = String(from);
+  if (max) max.value = String(to);
+  S.spoolPage = 1;
+  renderSpools();
+}
+
+/* ── 库存数据概览（环形图 + 使用状态） ─────────────────── */
+function renderSummaryOverview() {
+  const host = document.getElementById("summaryOverview");
+  if (!host) return;
+  const all = S.summarySpools || [];
+  const filter = S.summaryFilter;
+  const spools = filter ? all.filter((s) => (s.material || "未填写") === filter) : all;
+
+  const filterLabel = document.getElementById("overviewFilter");
+  const clearBtn = document.getElementById("overviewClear");
+  if (filterLabel) filterLabel.textContent = filter ? `已筛选：${filter}` : "";
+  if (clearBtn) clearBtn.classList.toggle("hidden", !filter);
+
+  if (!spools.length) {
+    host.innerHTML = `<div class="empty-state">还没有在库料盘。先到「料盘库存」里录一盘。</div>`;
+    return;
+  }
+
+  const materials = summaryMaterials(spools);
+  const segments = materials.map((m, i) => ({
+    label: m.label, value: m.count,
+    color: MATERIAL_COLORS[i % MATERIAL_COLORS.length],
+  }));
+  const tally = useStateTally(spools);
+  const order = ["unused", "in_use", "empty"];
+
+  host.innerHTML = `
+    <div class="overview-grid">
+      <div class="overview-chart">
+        ${donutChart(segments)}
+        <div class="donut-legend">
+          ${segments.map((seg) => `<button class="legend-item${filter === seg.label ? " on" : ""}"
+              onclick="pickSummaryMaterial('${esc(seg.label)}')"
+              title="${filter === seg.label ? "取消筛选" : "只看 " + esc(seg.label)}">
+            <span class="dot" style="background:${esc(seg.color)}"></span>${esc(seg.label)}
+          </button>`).join("")}
+        </div>
+      </div>
+      <div class="overview-uses">
+        <div class="overview-title">库存使用状态
+          <span class="muted small">共 ${tally.total} 盘</span></div>
+        <div class="use-bar">
+          ${order.map((k) => `<span style="width:${tally.total ? (tally[k] / tally.total) * 100 : 0}%;
+            background:${USE_STATE_META[k].color}"></span>`).join("")}
+        </div>
+        <div class="use-legend">
+          ${order.map((k) => {
+            const pct = tally.total ? (tally[k] / tally.total) * 100 : 0;
+            return `<button class="use-item" onclick="jumpToSpoolsByState('${k}')"
+                title="到料盘库存里看这 ${tally[k]} 盘">
+              <span class="dot" style="background:${USE_STATE_META[k].color}"></span>
+              <span class="use-name">${USE_STATE_META[k].label}</span>
+              <span class="spacer"></span>
+              <b>${tally[k]}</b>
+              <span class="use-pct">${pct.toFixed(0)}%</span>
+            </button>`;
+          }).join("")}
+        </div>
+        <p class="hint" style="margin:10px 0 0">
+          点材料只统计那种材料，点状态行可直接跳到料盘库存的对应标签页。
+        </p>
+      </div>
+    </div>`;
+}
+
+/* ── 价格区间分布 ──────────────────────────────────────── */
+function renderPriceDist() {
+  const host = document.getElementById("priceDist");
+  if (!host) return;
+  const all = S.summarySpools || [];
+  const filter = S.summaryFilter;
+  const spools = filter ? all.filter((s) => (s.material || "未填写") === filter) : all;
+  const { buckets, unpriced } = priceBuckets(spools);
+
+  const counter = document.getElementById("priceDistCount");
+  if (counter) {
+    counter.textContent = unpriced
+      ? `另有 ${unpriced} 盘未登记价格（不计入）`
+      : (buckets.length ? `共 ${buckets.length} 档` : "");
+  }
+
+  if (!buckets.length) {
+    host.innerHTML = `<div class="card"><div class="empty-state">
+      还没有登记价格的料盘。<br />
+      <span class="small">在「料盘库存」里编辑料盘时填上「整盘价格」，这里就能看出价格分布。</span>
+    </div></div>`;
+    return;
+  }
+
+  host.innerHTML = buckets.map((b, i) => `
+    <button class="price-card" onclick="jumpToSpoolsByPrice(${b.from}, ${b.to})"
+            title="到料盘库存里看这 ${b.count} 盘">
+      <div class="price-head">
+        <span class="dot" style="background:${MATERIAL_COLORS[i % MATERIAL_COLORS.length]}"></span>
+        <span>${esc(b.label)}</span>
+      </div>
+      <div class="price-range">¥${b.from} - ${b.to}</div>
+      <div class="price-nums">
+        <span>数量 <b>${b.count}</b> 盘</span>
+        <span>占比 <b>${b.percent.toFixed(0)}%</b></span>
+      </div>
+      <div class="bar"><div style="width:${Math.max(0, Math.min(100, b.percent))}%;
+        background:${MATERIAL_COLORS[i % MATERIAL_COLORS.length]}"></div></div>
+      <div class="price-foot">
+        <span class="muted tiny">合计 ¥${b.value.toFixed(2)}</span>
+        <span class="price-more">查看明细 →</span>
+      </div>
+    </button>`).join("");
 }
 
 /** 分组汇总表：名称 | 盘数 | 已用 | 剩余 | 余量条 | 采购金额 | 余值。
@@ -2094,6 +2570,10 @@ function renderSummary() {
   setCount("brandSummaryCount", brands.length ? `共 ${brands.length} 个品牌` : "");
   setCount("materialSummaryCount", materials.length ? `共 ${materials.length} 种材料` : "");
   setCount("finishSummaryCount", finishes.length ? `共 ${finishes.length} 种外观` : "");
+
+  // 概览图与价格分布：数据来自在库料盘清单（本地算），点筛选是即时的
+  renderSummaryOverview();
+  renderPriceDist();
 }
 
 /* ── 自定义品牌 ────────────────────────────────────────── */
@@ -3087,6 +3567,9 @@ window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
   // 外观预填、区域文案、机型照片、扫码认码 —— 错了都是「界面看着正常但不对」
   inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText,
+  // 料盘状态口径 / 排序 / 价格分档 / 概览图：库存页与汇总页共用，必须一致
+  spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
+  summaryMaterials, donutChart, allSlotEntries, slotKey,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

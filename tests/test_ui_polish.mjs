@@ -121,7 +121,11 @@ if (!dbg) {
   console.error("app.js 没有导出 window.panelDebug，无法自测（是不是被改掉了？）");
   process.exit(1);
 }
-const { inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText, state } = dbg;
+const {
+  inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText, state,
+  spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
+  summaryMaterials, donutChart, allSlotEntries,
+} = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
   console.error("scan.js 没有导出 window.spoolScanner，无法自测。");
@@ -345,6 +349,216 @@ console.log("== 扫码深链（系统相机扫出来的 #spool= / #bind= 要能�
 check("注册了 window hashchange 监听",
   windowListeners.has("hashchange") && windowListeners.get("hashchange").length > 0,
   JSON.stringify([...windowListeners.keys()]));
+
+// ── 8. 料盘状态口径（库存页标签页 与 汇总页概览图 共用一套） ─────
+// 两处各写一套判定，就会出现「概览说 53 盘消耗完、点进标签页只剩 3 盘」。
+// 判定与统计都只留 spoolUseState / useStateTally 一个实现，这里钉住语义。
+console.log("== 料盘状态（消耗完 / 未拆封 / 用了一部分） ==");
+
+const stateOf = (spool) => spoolUseState(spool);
+check("余量为 0 -> 消耗完",
+  stateOf({ remaining_weight: 0, used_weight: 1000 }) === "empty");
+check("余量为 0 且还装在机器上 -> 仍是消耗完（不是使用中）",
+  stateOf({ remaining_weight: 0, used_weight: 1000, slots: [{ label: "AMS A · 槽位 A1" }] }) === "empty");
+check("没有任何用量、也没装机器 -> 未拆封",
+  stateOf({ remaining_weight: 1000, used_weight: 0, usage_count: 0 }) === "unused");
+check("用掉一部分 -> 使用中",
+  stateOf({ remaining_weight: 700, used_weight: 300, usage_count: 1 }) === "in_use");
+check("刚装到机器上、还没打印 -> 使用中",
+  stateOf({ remaining_weight: 1000, used_weight: 0, usage_count: 0, slots: [{ label: "x" }] }) === "in_use");
+// Number(null) === 0：余量字段缺失时被当成「0 克」就会凭空多出一堆「用完的盘」
+check("余量字段缺失 + 没用过 -> 未拆封（别把「没数据」当 0 克）",
+  stateOf({ used_weight: 0, usage_count: 0 }) === "unused",
+  stateOf({ used_weight: 0, usage_count: 0 }));
+check("余量为空串 + 有用量 -> 使用中",
+  stateOf({ remaining_weight: "", used_weight: 120, usage_count: 1 }) === "in_use");
+
+const tally = useStateTally([
+  { remaining_weight: 0, used_weight: 1000 },
+  { remaining_weight: 0, used_weight: 900 },
+  { remaining_weight: 800, used_weight: 200, usage_count: 1 },
+  { remaining_weight: 1000, used_weight: 0, usage_count: 0 },
+]);
+check("按状态点数正确", tally.empty === 2 && tally.in_use === 1 && tally.unused === 1,
+  JSON.stringify(tally));
+check("总数等于实际盘数", tally.total === 4, String(tally.total));
+check("空列表不炸", useStateTally([]).total === 0 && useStateTally(undefined).total === 0);
+check("三种状态都有标签与对应标签页",
+  ["unused", "in_use", "empty"].every((k) => USE_STATE_META[k]
+    && USE_STATE_META[k].label && USE_STATE_META[k].color && USE_STATE_META[k].tab));
+
+// ── 9. 价格区间分档 ─────────────────────────────────────────────
+console.log("== 价格区间分布（不重不漏、档数可控） ==");
+
+const emptyBuckets = priceBuckets([]);
+check("没有料盘 -> 没有档", emptyBuckets.buckets.length === 0, JSON.stringify(emptyBuckets));
+const noPrice = priceBuckets([{ price: 0 }, { price: 0 }]);
+check("全都没登记价格 -> 没有档，但记下未登记数量",
+  noPrice.buckets.length === 0 && noPrice.unpriced === 2, JSON.stringify(noPrice));
+
+const p10 = priceBuckets([
+  { price: 45 }, { price: 50 }, { price: 12 }, { price: 0 },
+]);
+check("最高价 50 -> 步长取 10", p10.buckets.length === 5 && p10.buckets[0].to === 10,
+  JSON.stringify(p10.buckets.map((b) => b.label)));
+check("未登记价格的盘不计入档内", p10.buckets.reduce((s, b) => s + b.count, 0) === 3,
+  String(p10.buckets.reduce((s, b) => s + b.count, 0)));
+check("未登记数量单独给出（界面要提一句）", p10.unpriced === 1, String(p10.unpriced));
+// 左开右闭：正好 50 元归「40-50」，别跟上一档重复计数
+check("价格正好落在档位边界时算低的一档（45 与 50 同档，12 在下一档）",
+  p10.buckets.find((b) => b.label === "¥40 - 50").count === 2
+  && p10.buckets.find((b) => b.label === "¥10 - 20").count === 1, JSON.stringify(p10.buckets));
+check("每一档的占比之和约为 100%",
+  Math.abs(p10.buckets.reduce((s, b) => s + b.percent, 0) - 100) < 0.01);
+
+const hi = priceBuckets([{ price: 1200 }]);
+check("单盘 1200 元 -> 档数不超过 6", hi.buckets.length <= 6, String(hi.buckets.length));
+check("最后一档能兜住最高价",
+  hi.buckets[hi.buckets.length - 1].count === 1, JSON.stringify(hi.buckets.map((b) => b.label)));
+
+// 覆盖面：任意价格都必须落进恰好一档
+let covered = true;
+for (const p of [1, 7.5, 10, 33, 49.99, 50, 99, 100, 333, 999]) {
+  const bs = priceBuckets([{ price: p }]).buckets;
+  const n = bs.reduce((s, b) => s + b.count, 0);
+  if (n !== 1) { covered = false; console.log(`    价格 ${p} 落进了 ${n} 档`); }
+}
+check("任意价格都恰好落进一档（不重不漏）", covered);
+
+// ── 10. 表头排序 ────────────────────────────────────────────────
+console.log("== 料盘表排序 ==");
+
+const sortPool = [
+  { id: 3, remaining_weight: 100, price: 60, last_used_at: "2026-09-10T10:00:00" },
+  { id: 1, remaining_weight: 900, price: 0, last_used_at: null },
+  { id: 2, remaining_weight: 500, price: 120, last_used_at: "2026-09-12T10:00:00" },
+];
+
+state.spoolSort = { key: "id", dir: "asc" };
+check("默认按 ID 升序", sortSpools(sortPool).map((s) => s.id).join(",") === "1,2,3");
+
+state.spoolSort = { key: "remaining_weight", dir: "desc" };
+check("按剩余量降序",
+  sortSpools(sortPool).map((s) => s.id).join(",") === "1,2,3",
+  sortSpools(sortPool).map((s) => s.id).join(","));
+state.spoolSort = { key: "remaining_weight", dir: "asc" };
+check("按剩余量升序",
+  sortSpools(sortPool).map((s) => s.id).join(",") === "3,2,1");
+
+state.spoolSort = { key: "last_used_at", dir: "desc" };
+check("按使用时间降序，从没用过的排在最后",
+  sortSpools(sortPool).map((s) => s.id).join(",") === "2,3,1",
+  sortSpools(sortPool).map((s) => s.id).join(","));
+
+// 同值时按 ID 兜底：否则翻页时同一批料会来回跳
+state.spoolSort = { key: "price", dir: "desc" };
+const tie = sortSpools([{ id: 9, price: 50 }, { id: 4, price: 50 }, { id: 7, price: 80 }]);
+check("排序值相同时按 ID 兜底（顺序稳定）",
+  tie.map((s) => s.id).join(",") === "7,4,9", tie.map((s) => s.id).join(","));
+check("排序不会改动原数组（只返回新数组）",
+  sortPool.map((s) => s.id).join(",") === "3,1,2", sortPool.map((s) => s.id).join(","));
+state.spoolSort = { key: "id", dir: "asc" };
+
+// ── 11. 料盘行里的快捷入口 + 打印机布局 ─────────────────────────
+console.log("== 料盘行操作 / 打印机布局（源码级） ==");
+
+const cssSrc = fs.readFileSync(path.join(ROOT, "app", "static", "style.css"), "utf8");
+check("每行有「详情」入口", /onclick="openSpoolDetail\(\$\{spool\.id\}\)"/.test(appSrc));
+check("每行有「绑定」入口", /onclick="openBindSpoolDialog\(\$\{spool\.id\}\)"/.test(appSrc));
+check("每行有「克隆」入口", /onclick="openCloneSpoolDialog\(\$\{spool\.id\}\)"/.test(appSrc));
+check("克隆走的是「新增」而不是编辑（forceNew）",
+  /openSpoolDialog\(\{[\s\S]{0,600}?\},\s*true,\s*src\.name\)/.test(appSrc),
+  "openCloneSpoolDialog 没有传 forceNew");
+check("绑定弹窗能解绑（spool_id 允许传 null）",
+  /spool_id:\s*unbind\s*\?\s*null\s*:\s*spoolId/.test(appSrc));
+check("表头渲染用 sortHead（可点击排序）",
+  (appSrc.match(/sortHead\("/g) || []).length >= 4, "可排序的列少于 4 个");
+check("点表头切换排序方向", /function toggleSpoolSort\(/.test(appSrc));
+
+// 风扇卡从左侧列挪到右侧列底部：右下角那块空白就是它要填的地方
+const layoutFn = appSrc.slice(appSrc.indexOf("function renderPrinterCard("), appSrc.indexOf("async function requestPushall("));
+const idxUnits = layoutFn.indexOf("renderUnits(");
+const idxFan = layoutFn.indexOf("renderFanCard(");
+check("风扇状态已排到 AMS 单元之后（右下角）",
+  idxFan > idxUnits && idxUnits > 0, `units@${idxUnits} fan@${idxFan}`);
+check("风扇卡带 grow 类（撑满剩余高度，右下角不留空白）",
+  /renderFanCard[\s\S]{0,400}?pcard grow fan-card/.test(appSrc));
+check("风扇四条通道包了一层 .fan-rows（用于均匀分布）",
+  /<div class="fan-rows">/.test(appSrc));
+check("两列改成等高（align-items: stretch）",
+  /\.printer-layout\s*\{[^}]*align-items:\s*stretch/.test(cssSrc));
+check("单列窄屏下不再硬撑高度", /\.pcard\.grow\s*\{\s*flex:\s*none/.test(cssSrc));
+
+// ── 12. 汇总页概览图 ────────────────────────────────────────────
+console.log("== 耗材汇总：环形图与价格分布 ==");
+
+const mats = summaryMaterials([
+  { material: "PLA", remaining_weight: 500 }, { material: "PLA", remaining_weight: 300 },
+  { material: "PETG", remaining_weight: 100 },
+]);
+check("按材料聚合、按盘数排序",
+  mats.length === 2 && mats[0].label === "PLA" && mats[0].count === 2 && mats[0].remaining === 800,
+  JSON.stringify(mats));
+check("没填材料的归到「未填写」",
+  summaryMaterials([{ material: "", remaining_weight: 1 }])[0].label === "未填写");
+
+const donut = donutChart([
+  { label: "PLA", value: 3, color: "#2563eb" },
+  { label: "PETG", value: 1, color: "#16a34a" },
+]);
+check("环形图是合法 SVG", donut.startsWith("<svg") && donut.includes("</svg>"));
+check("环形图中心写总盘数", /class="donut-total"[^>]*>4</.test(donut), donut.slice(0, 200));
+// 弧长之和必须等于周长，否则末段会跟首段重叠或留缝
+const box = 176, thick = 28, circ = 2 * Math.PI * ((box - thick) / 2);
+const arcs = [...donut.matchAll(/stroke-dasharray="([\d.]+) ([\d.]+)"/g)]
+  .map((m) => parseFloat(m[1]));
+check("各段弧长之和 = 周长（不留缝不重叠）",
+  Math.abs(arcs.reduce((a, b) => a + b, 0) - circ) < 0.5,
+  `${arcs.join("+")} vs ${circ.toFixed(2)}`);
+check("空数据也能出图（不抛异常）", donutChart([]).includes("<svg"));
+check("环形图文字显式上色（全局 svg{fill:none} 会把字吃掉）",
+  /\.donut-total\s*\{[^}]*fill:\s*var\(--text\)/.test(cssSrc));
+
+const slots = allSlotEntries();
+check("没有打印机时不返回槽位（界面提示去同步设备）", slots.length === 0, JSON.stringify(slots));
+
+// 摊平成清单时，普通 AMS 的 A1 和 AMS HT 的 A1 必须能区分开：
+// 卡片里两者都写「A1」（各自卡片头有 AMS A / HT A），但扁平列表里会撞在一起。
+state.printers_full = [{
+  id: 1, name: "测试机", serial: "S1",
+  state: {
+    ams: [
+      { ams_id: 0, name: "AMS A", trays: [{ ams_id: 0, tray_id: 0, occupied: true, color: "#111", tray_type: "PLA" }] },
+      { ams_id: 128, name: "HT A", trays: [{ ams_id: 128, tray_id: 0, occupied: true, color: "#222", tray_type: "PLA" }] },
+    ],
+    external_spool: { occupied: true, color: "#333", tray_type: "PETG" },
+  },
+}];
+const entries = allSlotEntries();
+const slotLabels = entries.map((e) => e.label).join(" | ");
+check("槽位摊平后含 AMS / AMS HT / 外挂三路", entries.length === 3, String(entries.length));
+check("AMS 的 A1 与 AMS HT 的 A1 在清单里能区分",
+  slotLabels.includes("AMS A 槽位 1") && slotLabels.includes("HT A 槽位 1"), slotLabels);
+check("外挂料盘单独一路（amsId = -1，与绑定接口同口径）",
+  entries.some((e) => e.amsId === -1 && e.label.includes("外挂料盘")), slotLabels);
+check("清单里的标签带上机器名（多台机器时能分辨）",
+  entries.every((e) => e.label.startsWith("测试机 · ")), slotLabels);
+state.printers_full = [];
+
+// ── 13. 页面结构（顺序与容器，改 HTML 时最容易漏） ───────────────
+console.log("== 页面结构 ==");
+
+const htmlSrc = fs.readFileSync(path.join(ROOT, "app", "static", "index.html"), "utf8");
+const idxPrinter = htmlSrc.indexOf('id="printerCards"');
+const idxWeek = htmlSrc.indexOf('id="weekStats"');
+const idxStock = htmlSrc.indexOf('id="dashStats"');
+check("仪表盘顺序：打印机状态 -> 本周概览 -> 库存与费用",
+  idxPrinter > 0 && idxPrinter < idxWeek && idxWeek < idxStock,
+  `printer@${idxPrinter} week@${idxWeek} stock@${idxStock}`);
+check("料盘库存多了「已用尽」标签页", /data-tab="empty"/.test(htmlSrc));
+check("汇总页有库存概览容器", /id="summaryOverview"/.test(htmlSrc));
+check("汇总页有价格区间分布容器", /id="priceDist"/.test(htmlSrc));
+check("概览的筛选态有清除按钮", /id="overviewClear"/.test(htmlSrc));
 
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");

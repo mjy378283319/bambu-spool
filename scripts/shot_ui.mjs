@@ -63,10 +63,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── 1. 起应用 ───────────────────────────────────────────────────
 // 每次都从空库开始：脚本后面要跑「首次初始化 → 建管理员 → 塞演示数据」这条链路，
 // 库里残留任何东西都会让它走到另一条分支上（表现为演示数据一条都没种进去）。
-// PROFILE 也在这个目录下，一并被清掉没关系 —— Edge 到用的时候自己会建。
+//
+// 数据库文件和 Edge profile 分开清：本机安全策略对「一轮里删几百个文件」有上限，
+// Edge 的 profile 有三百多个文件，一删就被拦。所以：
+//   数据库（几个文件，必须清干净）—— 逐个删，被拦就直接报错，绝不带着旧库往下跑；
+//   profile（几百个文件，可留可删）—— 删不掉就复用旧目录，Edge 起得来就行。
 const DATA_DIR = path.join(APP, "data", "_shotui");
-fs.rmSync(DATA_DIR, { recursive: true, force: true });
-fs.rmSync(OUT, { recursive: true, force: true });
+if (fs.existsSync(DATA_DIR)) {
+  for (const name of fs.readdirSync(DATA_DIR)) {
+    if (name === "edgeprof") continue;
+    fs.rmSync(path.join(DATA_DIR, name), { recursive: true, force: true });
+  }
+}
+try {
+  fs.rmSync(PROFILE, { recursive: true, force: true });
+} catch (err) {
+  console.warn("  [提示] 上次的 Edge profile 没清掉（本机删除配额），直接复用");
+}
+fs.mkdirSync(DATA_DIR, { recursive: true });
+try {
+  fs.rmSync(OUT, { recursive: true, force: true });   // 旧截图留着也不影响，删不掉就算了
+} catch (err) {
+  console.warn("  [提示] 旧截图目录没清掉，直接覆盖同名文件");
+}
 fs.mkdirSync(OUT, { recursive: true });
 
 const server = spawn(
@@ -100,7 +119,6 @@ async function waitForServer() {
 }
 
 // ── 2. 起 Edge ──────────────────────────────────────────────────
-fs.rmSync(PROFILE, { recursive: true, force: true });
 const edge = spawn(EDGE, [
   "--headless=new",
   `--remote-debugging-port=${CDP_PORT}`,
@@ -167,6 +185,15 @@ class CDP {
     const res = await this.send("Page.captureScreenshot", { format: "png" }, sessionId);
     fs.writeFileSync(file, Buffer.from(res.data, "base64"));
   }
+
+  /** 按页面坐标截一块（可以超出视口，靠 captureBeyondViewport 补画）。
+   *  整页很高的区域（比如打印机状态那一大块）用这个，普通截图只有首屏。 */
+  async shotClip(sessionId, file, clip) {
+    const res = await this.send("Page.captureScreenshot", {
+      format: "png", clip, captureBeyondViewport: true,
+    }, sessionId);
+    fs.writeFileSync(file, Buffer.from(res.data, "base64"));
+  }
 }
 
 // ── 4. 主流程 ───────────────────────────────────────────────────
@@ -209,6 +236,10 @@ async function main() {
       ["Kexcelled", "PLA", "珠光", "珠光粉", "#F0A6C0", 750, 300, 96],
       ["兰博", "PLA", "哑光", "哑光红", "#B91C1C", 1000, 150, 88],
       ["魔创", "ABS", "普通", "本色", "#E5E1D8", 1000, 940, 76],
+      // 这两种是「库存使用状态」里另外两档的样子：全新未拆封 / 已用尽。
+      // 没有它们，概览图上的「未使用 / 消耗完」永远显示 0，看图看不出问题。
+      ["兰博", "PLA", "普通", "素白", "#F1F5F9", 1000, 1000, 88],
+      ["魔创", "ABS", "普通", "用尽黑", "#1F2937", 1000, 0, 76],
     ];
     const ids = [];
     for (const [brand, material, finish, color_name, color_hex, initial_weight, remaining_weight, price] of spools) {
@@ -282,6 +313,50 @@ async function main() {
 
   await cdp.shot(sessionId, path.join(OUT, "01-dashboard.png"));
 
+  /* ── 断言：打印机状态必须「填满」，右下角不留空白 ──
+     风扇卡原先排在左列最后一张，而右列（AMS 单元）通常比左列矮，于是右下角
+     空出一大块（用户原话：「这个打印机状态右下角不要空出这么多空白区域」）。
+     现在风扇卡排到右列最后并用 flex 撑满，所以这里量两列的底边差 —— 截图看得出
+     「有点空」，量不出「差 80px」，还是得断言。 */
+  const layout = await cdp.evaluate(sessionId, `(() => {
+    const cols = [...document.querySelectorAll(".printer-layout > .printer-col")];
+    if (cols.length < 2) return { cols: cols.length };
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+    };
+    const rightCards = cols[1].querySelectorAll(".pcard");
+    const lastRight = rightCards[rightCards.length - 1];
+    return {
+      cols: cols.length,
+      left: box(cols[0]), right: box(cols[1]),
+      rightLast: lastRight ? lastRight.className : "",
+      fanInRight: !!cols[1].querySelector(".fan-card"),
+      fanInLeft: !!cols[0].querySelector(".fan-card"),
+      fanRows: cols[1].querySelectorAll(".fan-row").length,
+    };
+  })()`);
+  console.log("打印机布局：", JSON.stringify(layout));
+  check("打印机状态是左右两列", layout.cols === 2, JSON.stringify(layout));
+  check("风扇卡挪到了右列（AMS 那一边）", layout.fanInRight === true, JSON.stringify(layout));
+  check("风扇卡不再占左列", layout.fanInLeft === false, JSON.stringify(layout));
+  check("风扇四条通道都渲染出来了", layout.fanRows >= 4, String(layout.fanRows));
+  check("风扇卡是右列最后一张（贴着右下角）",
+    /fan-card/.test(layout.rightLast || ""), layout.rightLast);
+  check("左右两列等高、右下角不留空白（底边差 ≤ 2px）",
+    Math.abs(layout.left.bottom - layout.right.bottom) <= 2,
+    JSON.stringify([layout.left, layout.right]));
+
+  // 整块特写：这块比视口高，得用 captureBeyondViewport 才拍得全
+  const blockClip = await cdp.evaluate(sessionId, `(() => {
+    const b = document.querySelector(".printer-block").getBoundingClientRect();
+    return { x: Math.max(0, Math.round(b.x + window.scrollX) - 6),
+             y: Math.max(0, Math.round(b.y + window.scrollY) - 6),
+             width: Math.round(b.width) + 12, height: Math.round(b.height) + 12 };
+  })()`);
+  await cdp.shotClip(sessionId, path.join(OUT, "01c-printer-block.png"),
+    { ...blockClip, scale: 1 });
+
   // 机器卡片的特写，用来肉眼复核照片和浮标。
   // 坑：captureScreenshot 的 clip 用的是**页面坐标**（含滚动量），不是视口坐标，
   // 直接拿 getBoundingClientRect 会拍到文档顶部去。
@@ -350,6 +425,131 @@ async function main() {
   // 它该出现的地方是设置页的品牌标签和新建料盘的下拉，下面单独查。
   check("没录过料盘的自定义品牌不混进库存汇总",
         !summary.brandText.includes("自家作坊"), summary.brandText.slice(0, 200));
+
+  /* ── 汇总页的库存概览图与价格分布（真 DOM 里量一遍） ──
+     沙箱自测只能证明「函数返回的 HTML 对」，这里证明「浏览器真的画出来了、
+     点得动、跳得过去」，两边互补。 */
+  const overview = await cdp.evaluate(sessionId, `(() => {
+    const donut = document.querySelector("#summaryOverview .donut");
+    const arcs = document.querySelectorAll("#summaryOverview .donut-arc");
+    const items = [...document.querySelectorAll("#summaryOverview .use-item")]
+      .map((el) => el.innerText.replace(/\\s+/g, " ").trim());
+    const bar = [...document.querySelectorAll("#summaryOverview .use-bar > span")]
+      .map((el) => Math.round(el.getBoundingClientRect().width));
+    const cards = [...document.querySelectorAll("#priceDist .price-card")];
+    const priced = (window.panelDebug.state.summarySpools || [])
+      .filter((s) => Number(s.price) > 0).length;
+    return {
+      hasDonut: !!donut, arcs: arcs.length, items, bar,
+      hidden: !!(document.getElementById("overviewClear") || {}).classList.contains("hidden"),
+      cards: cards.length,
+      cardsSum: cards.reduce((n, c) => {
+        const m = c.innerText.match(/数量\\s*(\\d+)/); return n + (m ? Number(m[1]) : 0);
+      }, 0),
+      priced,
+      firstCard: cards[0] ? cards[0].innerText.replace(/\\s+/g, " ").trim() : "",
+    };
+  })()`);
+  console.log("库存概览：", JSON.stringify(overview));
+  check("环形图画出来了", overview.hasDonut === true);
+  check("环形图每份材料一段弧", overview.arcs >= 2, String(overview.arcs));
+  check("使用状态三行都在（未使用 / 使用中 / 消耗完）",
+    overview.items.length === 3 && overview.items.join(" ").includes("消耗完"),
+    JSON.stringify(overview.items));
+  check("使用状态分段条铺满（三段宽度之和 > 0）",
+    overview.bar.reduce((a, b) => a + b, 0) > 0, JSON.stringify(overview.bar));
+  check("没筛选时不显示「看全部」按钮", overview.hidden === true);
+  check("价格分布卡片数量 = 有价格的档数", overview.cards >= 1, String(overview.cards));
+  check("各档盘数之和 = 已登记价格的料盘数",
+    overview.cardsSum === overview.priced, `${overview.cardsSum} vs ${overview.priced}`);
+  check("价格卡片有「数量 / 占比 / 查看明细」",
+    overview.firstCard.includes("数量") && overview.firstCard.includes("查看明细"),
+    overview.firstCard);
+
+  // 点一个材料图例 -> 只统计那种材料；再点回全部
+  const filtered = await cdp.evaluate(sessionId, `(() => {
+    const first = document.querySelector("#summaryOverview .legend-item");
+    const name = first.innerText.trim();
+    first.click();
+    const label = (document.getElementById("overviewFilter") || {}).innerText || "";
+    const clear = document.getElementById("overviewClear");
+    const cards = document.querySelectorAll("#priceDist .price-card").length;
+    return { name, label, clearHidden: clear.classList.contains("hidden"), cards };
+  })()`);
+  await sleep(300);
+  await cdp.shot(sessionId, path.join(OUT, "03b-summary-filtered.png"));
+  const restored = await cdp.evaluate(sessionId, `(() => {
+    document.getElementById("overviewClear").click();
+    return { label: (document.getElementById("overviewFilter") || {}).innerText || "" };
+  })()`);
+  console.log("材料筛选：", JSON.stringify(filtered), "→", JSON.stringify(restored));
+  check("点材料图例后显示「已筛选：X」",
+    filtered.label.includes("已筛选") && filtered.label.includes(filtered.name), JSON.stringify(filtered));
+  check("筛选后出现「看全部」按钮", filtered.clearHidden === false);
+  check("点「看全部」能还原", restored.label === "", JSON.stringify(restored));
+
+  /* ── 料盘库存：表头排序、行内快捷操作、已用尽标签页 ── */
+  await cdp.evaluate(sessionId, `switchView("spools")`);
+  await sleep(700);
+  const spoolUI = await cdp.evaluate(sessionId, `(() => {
+    const P = window.panelDebug;
+    const bodies = () => [...document.querySelectorAll("#spoolTable tbody tr")];
+    const ids = () => bodies().map((tr) => tr.cells[0].innerText.trim());
+    const remOf = (list) => list.map((id) => {
+      const s = (P.state.spools || []).find((x) => String(x.id) === id) || {};
+      return Number(s.remaining_weight) || 0;
+    });
+    const heads = [...document.querySelectorAll("#spoolTable th.sortable")]
+      .map((th) => th.innerText.replace(/\\s+/g, " ").trim());
+    const remHead = [...document.querySelectorAll("#spoolTable th.sortable")]
+      .find((th) => th.innerText.includes("剩余"));
+
+    const before = ids();
+    remHead.click();
+    const descIds = ids(); const desc = remOf(descIds);
+    const descArrow = [...document.querySelectorAll("#spoolTable th.sortable")]
+      .find((th) => th.innerText.includes("剩余")).innerText.replace(/\\s+/g, " ").trim();
+    remHead.click();
+    const ascIds = ids(); const asc = remOf(ascIds);
+
+    const actions = [...document.querySelectorAll("#spoolTable tbody tr:first-child .row-actions button")]
+      .map((b) => b.innerText.trim());
+    const tabs = [...document.querySelectorAll("#spoolTabs .tab")].map((b) => b.innerText.trim());
+
+    // 已用尽标签页：条数必须跟同一套口径算出来的一致
+    const emptyTab = [...document.querySelectorAll("#spoolTabs .tab")]
+      .find((b) => b.innerText.includes("已用尽"));
+    const expectedEmpty = (P.state.spools || [])
+      .filter((x) => !x.archived && P.spoolUseState(x) === "empty").length;
+    emptyTab.click();
+    const emptyRows = bodies().length;
+    const tabActive = [...document.querySelectorAll("#spoolTabs .tab.active")]
+      .map((b) => b.innerText.trim()).join(",");
+    // 收敛到「所有」以免影响后面的截图
+    [...document.querySelectorAll("#spoolTabs .tab")]
+      .find((b) => b.innerText.includes("所有")).click();
+    return {
+      heads, before, descIds, ascIds, descArrow, actions, tabs,
+      descOk: desc.every((v, i) => i === 0 || desc[i - 1] >= v),
+      ascOk: asc.every((v, i) => i === 0 || asc[i - 1] <= v),
+      expectedEmpty, emptyRows, tabActive,
+    };
+  })()`);
+  console.log("料盘表：", JSON.stringify(spoolUI).slice(0, 500));
+  check("表头有 4 个可排序的列（ID / 价格 / 剩余 / 使用时间）",
+    spoolUI.heads.length === 4 && spoolUI.heads.join(" ").includes("剩余")
+    && spoolUI.heads.join(" ").includes("价格"), JSON.stringify(spoolUI.heads));
+  check("点「剩余」表头后按余量降序", spoolUI.descOk === true, spoolUI.descIds.join(","));
+  check("再点一次切成升序", spoolUI.ascOk === true, spoolUI.ascIds.join(","));
+  check("排序箭头跟着方向变（↓ / ↑）", /↓|↑/.test(spoolUI.descArrow), spoolUI.descArrow);
+  check("每行有「详情 / 绑定 / 克隆」三个快捷入口",
+    ["详情", "绑定", "克隆"].every((k) => spoolUI.actions.includes(k)),
+    JSON.stringify(spoolUI.actions));
+  check("状态标签页里有「已用尽」", spoolUI.tabs.includes("已用尽"), JSON.stringify(spoolUI.tabs));
+  check("「已用尽」标签页筛出来的条数与同一套口径算出来的一致",
+    spoolUI.emptyRows === spoolUI.expectedEmpty,
+    `${spoolUI.emptyRows} vs ${spoolUI.expectedEmpty}`);
+  check("点标签页会高亮它自己", spoolUI.tabActive === "已用尽", spoolUI.tabActive);
 
   /* ── 自定义品牌出现在该出现的地方 ── */
   await cdp.evaluate(sessionId, `switchView("settings")`);
@@ -439,6 +639,90 @@ async function main() {
     console.log(`  （跳过槽位弹窗断言：${slot.reason}）`);
   }
   await cdp.shot(sessionId, path.join(OUT, "07-slot-dialog.png"));
+  await cdp.evaluate(sessionId, `closeModal()`);
+
+  /* ── 从料盘这一侧管槽位绑定（料盘行里的「绑定」按钮） ──
+     反向路径：手里拿着这盘料，直接选槽位绑上去 / 从槽位上解绑。 */
+  const bindDlg = await cdp.evaluate(sessionId, `(() => {
+    const spools = (window.panelDebug.state.spools || []).filter((s) => !s.archived);
+    if (!spools.length) return { opened: false, reason: "没有料盘" };
+    const target = spools[0];
+    openBindSpoolDialog(target.id);
+    const rows = [...document.querySelectorAll("#modalHost .bind-row")];
+    return {
+      opened: true, name: target.name, rows: rows.length,
+      labels: rows.map((r) => (r.querySelector(".bind-slot") || {}).innerText || ""),
+      buttons: rows.map((r) => (r.querySelector("button") || {}).innerText || ""),
+      title: (document.querySelector("#modalHost h3") || {}).innerText || "",
+    };
+  })()`);
+  console.log("料盘侧绑定弹窗：", JSON.stringify(bindDlg).slice(0, 400));
+  check("料盘行能打开绑定弹窗", bindDlg.opened === true, JSON.stringify(bindDlg));
+  check("弹窗标题带上料盘名",
+    bindDlg.title && bindDlg.title.includes(bindDlg.name || ""), bindDlg.title);
+  check("列出了 mock 的全部槽位（AMS 4 + HT 1 + 外挂 1）",
+    bindDlg.rows === 6, JSON.stringify(bindDlg.labels));
+  check("槽位名带单元前缀（AMS A 槽位 1 / HT A 槽位 1），不是两个 A1 撞在一起",
+    bindDlg.labels.some((x) => x.includes("AMS A 槽位 1"))
+    && bindDlg.labels.some((x) => x.includes("HT A 槽位 1"))
+    && !bindDlg.labels.some((x) => /129/.test(x)),
+    JSON.stringify(bindDlg.labels));
+  check("未绑定的槽位给出「绑到这盘」按钮",
+    bindDlg.buttons.filter((b) => b === "绑到这盘").length === bindDlg.rows,
+    JSON.stringify(bindDlg.buttons));
+  await cdp.shot(sessionId, path.join(OUT, "08-bind-spool.png"));
+
+  // 真的绑一个，看那一行会不会翻成「解绑」
+  await cdp.evaluate(sessionId, `document.querySelector("#modalHost .bind-row button").click()`);
+  await sleep(1500);
+  const bound = await cdp.evaluate(sessionId, `(() => {
+    const rows = [...document.querySelectorAll("#modalHost .bind-row")];
+    return {
+      mine: rows.filter((r) => r.className.includes("mine")).length,
+      firstBtn: rows[0] ? (rows[0].querySelector("button") || {}).innerText || "" : "",
+    };
+  })()`);
+  console.log("绑定后：", JSON.stringify(bound));
+  check("绑定成功后那一行翻成已绑定（按钮变成解绑）",
+    bound.mine === 1 && bound.firstBtn === "解绑", JSON.stringify(bound));
+
+  // 解绑回去，别给后面的截图留状态
+  await cdp.evaluate(sessionId, `document.querySelector("#modalHost .bind-row button").click()`);
+  await sleep(1500);
+  const unbound = await cdp.evaluate(sessionId, `(() => {
+    const rows = [...document.querySelectorAll("#modalHost .bind-row")];
+    return { mine: rows.filter((r) => r.className.includes("mine")).length };
+  })()`);
+  check("解绑后没有已绑定的行了", unbound.mine === 0, JSON.stringify(unbound));
+  await cdp.evaluate(sessionId, `closeModal()`);
+
+  /* ── 克隆料盘（料盘行里的「克隆」按钮） ── */
+  const clone = await cdp.evaluate(sessionId, `(() => {
+    const s = (window.panelDebug.state.spools || []).filter((x) => !x.archived)[0];
+    const val = (id) => (document.getElementById(id) || {}).value || "";
+    openCloneSpoolDialog(s.id);
+    return {
+      title: (document.querySelector("#modalHost h3") || {}).innerText || "",
+      brand: val("f_brand"), material: val("f_material"),
+      color: val("f_color_name"), hex: val("f_color_hex"),
+      remaining: val("f_remaining_weight"), price: val("f_price"),
+      src: { brand: s.brand, material: s.material, color: s.color_name,
+             hex: s.color_hex, initial: s.initial_weight, price: s.price,
+             remaining: s.remaining_weight },
+    };
+  })()`);
+  console.log("克隆：", JSON.stringify(clone).slice(0, 300));
+  check("克隆弹窗标题是「克隆料盘」", clone.title === "克隆料盘", clone.title);
+  check("品牌 / 材料 / 颜色都带过来了",
+    clone.brand === clone.src.brand && clone.material === clone.src.material
+    && clone.color === clone.src.color, JSON.stringify(clone));
+  check("颜色值与价格也带过来了",
+    String(clone.hex).toUpperCase() === String(clone.src.hex).toUpperCase()
+    && Number(clone.price) === Number(clone.src.price), JSON.stringify(clone));
+  check("余量按满盘算（不是照抄原料盘的余量）",
+    Number(clone.remaining) === Number(clone.src.initial),
+    `克隆 ${clone.remaining} vs 满盘 ${clone.src.initial}`);
+  await cdp.evaluate(sessionId, `closeModal()`);
 
   /* ── 扫码深链：应用开着时改 hash 也要跳转 ──
    * 手机上的真实用法是「应用开着 → 系统相机扫二维码 → 浏览器只换 hash」。
@@ -450,14 +734,21 @@ async function main() {
     if (!spools.length) return { skipped: "mock 里没有料盘" };
     const id = spools[0].id;
     const before = !!document.querySelector(".modal");
+    // 「这个 id 到底是哪盘料」以接口为准 —— 列表可能正按别的键排序，
+    // 拿 spools[0] 当答案会把「跳错料盘」放过去。
+    const want = await (await fetch("/api/spools/" + id)).json();
     location.hash = "#spool=" + id;
     await new Promise((r) => setTimeout(r, 900));
-    const body = (document.getElementById("modalBody") || {}).innerText || "";
+    // 弹窗标题就是料盘名（openModal 的第一个参数），body 里只有数字，
+    // 之前用 body.includes(id) 是碰运气（重量里正好有个 "11" 就过）。
+    const title = ((document.querySelector(".modal h3") || {}).textContent || "").trim();
     return {
       id,
       before,
       opened: !!document.querySelector(".modal"),
-      showsSpool: body.includes(String(id)) || body.includes(spools[0].name || "\\u0000"),
+      want: want.name,
+      title,
+      showsSpool: title === want.name,
       view: (window.panelDebug.state || {}).view || "",
     };
   })()`);
@@ -467,7 +758,7 @@ async function main() {
   } else {
     check("改 hash 之前没有弹窗（确认是 hash 触发的）", deepLink.before === false, JSON.stringify(deepLink));
     check("应用接住了 hashchange 并打开料盘详情", deepLink.opened === true, JSON.stringify(deepLink));
-    check("打开的是 hash 里那个料盘", deepLink.showsSpool === true, JSON.stringify(deepLink));
+    check("打开的是 hash 里那个料盘（弹窗标题 = 该 id 的料盘名）", deepLink.showsSpool === true, JSON.stringify(deepLink));
     check("切到了料盘库存页", deepLink.view === "spools", JSON.stringify(deepLink));
   }
   await cdp.evaluate(sessionId, `closeModal(); location.hash = ""`);

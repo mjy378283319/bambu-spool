@@ -477,7 +477,7 @@ BAMBU_MOCK=1 python -m uvicorn app.main:app --reload --port 8971
 # 跑端到端自测（32 项断言，不需要真实打印机）
 python tests/test_flow.py
 
-# 访问控制与登录流程（63 项断言，会真起一个 uvicorn 子进程）
+# 访问控制与登录流程（66 项断言，会真起一个 uvicorn 子进程）
 python tests/test_auth.py
 
 # 图片识色的配色匹配（77 项断言，CIEDE2000 用 Sharma 标准向量校验）
@@ -504,16 +504,20 @@ python tests/test_cloud_endpoints.py
 # 标签二维码取整、?box / ?dots 参数与响应头（70 项断言）
 python tests/test_labels.py
 
+# 槽位展示名：AMS A-D / HT A-D / 外挂料盘（26 项断言）
+python tests/test_slot_label.py
+
 # 1 位光栅打包、ESC/POS 报文、对话框装配与标签实际渲染尺寸（78 项断言，node 直跑，不需要浏览器）
 node tests/test_label_raster.mjs
 
 # 风扇命名与料条高度口径（30 项断言，node 直跑）
 node tests/test_panel_fill.mjs
 
-# 外观预填、区域文案、真机照片、扫码认码、扫码深链与相机被拦的归因（77 项断言，node 直跑，不需要相机）
+# 外观预填、区域文案、真机照片、扫码认码、扫码深链、相机被拦的归因，
+# 以及料盘状态口径 / 表头排序 / 价格分档 / 汇总页环形图（133 项断言，node 直跑，不需要相机）
 node tests/test_ui_polish.mjs
 
-# 浏览器实拍验收（36 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）
+# 浏览器实拍验收（72 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）
 # 会自己起一个 MOCK 模式的服务、种演示数据、再逐页截图与断言
 PYTHON=python node scripts/shot_ui.mjs
 ```
@@ -570,6 +574,10 @@ scripts/shot_ui.mjs              无头浏览器实拍验收（截图 + 断言�
 - [x] 外观（表面工艺）字段：15 种预设 + 颜色名自动预填 + 老库回填
 - [x] 自定义品牌（存设置表，升级不丢，可增可删）
 - [x] 耗材汇总页（按品牌 / 材料 / 外观三张表）与概览页本周三张卡（按浏览器时区切日）
+- [x] 料盘行内快捷操作：详情 / 绑定（反向从料盘选槽位，可解绑）/ 克隆（复制规格新增同款）
+- [x] 料盘表头排序（ID / 价格 / 剩余 / 使用时间，点表头切升降序）
+- [x] 耗材汇总可视化：库存数据概览（按材料环形图 + 使用状态分段条，点材料可筛选）+ 价格区间分布
+- [x] 概览页信息优先级：打印机状态 → 本周概览 → 库存与费用
 - [ ] 标签打印真机验证与协议微调（T260LR 实测）
 - [ ] Bambu Studio 预设导出
 - [ ] 多用户
