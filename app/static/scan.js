@@ -45,11 +45,36 @@
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   }
 
+  /** 服务端有没有用 Permissions-Policy 把相机禁掉。
+   *
+   *  这是本应用真实踩过的坑：响应头写成 `camera=()`（空括号 = 所有来源都不许，
+   *  含本站自己），浏览器读到就直接把 getUserMedia 拒成 NotAllowedError，
+   *  **权限弹窗一次都不会弹**。现象和「手机没给浏览器相机权限」一模一样，
+   *  用户照着提示改手机设置、换浏览器、换手机，全都改不好 —— 根因在服务端。
+   *  Chromium 系（安卓 Edge、鸿蒙浏览器）提供 featurePolicy，能直接问出来；
+   *  没有这个 API 的浏览器只能当「没被拦」，交给下面按权限状态分流的逻辑。 */
+  function policyBlocksCamera() {
+    try {
+      const fp = document.featurePolicy || document.permissionsPolicy;
+      if (fp && typeof fp.allowsFeature === "function") {
+        return fp.allowsFeature("camera") === false;
+      }
+    } catch (e) {
+      // 老浏览器没有这个 API，或调用方式不兼容 —— 查不到就不误报
+    }
+    return false;
+  }
+
   /** 当前环境为什么开不了相机 —— 直接写给人看，别只说「不支持」。 */
   function cameraBlockReason() {
     if (!window.isSecureContext) {
       return "手机浏览器只在 HTTPS（或 localhost）下才允许网页开相机。"
         + "当前是 http 地址，请用「拍照识别」，或者给服务配上 HTTPS 反向代理。";
+    }
+    if (policyBlocksCamera()) {
+      return "服务端的安全策略把相机功能禁掉了（响应头 Permissions-Policy 里 camera 没有"
+        + "允许本站），浏览器会直接拒绝、连权限弹窗都不会出现 —— 这不是手机的问题。"
+        + "先用「拍照识别」；要恢复实时扫码，需要把服务端那个响应头改成 camera=(self)。";
     }
     if (!canUseCamera()) {
       return "这个浏览器不提供网页相机接口，请用「拍照识别」，或改用 Chrome / Safari。";
@@ -68,6 +93,14 @@
   async function cameraDeniedHint(err) {
     const name = (err && err.name) || "";
     const code = name ? `（错误码 ${name}）` : "";
+    // 服务端策略拦下的情况必须排在权限查询前面：这时权限状态还可能报
+    // granted / prompt，顺着它去指路会让人白改一遍手机设置。
+    if (policyBlocksCamera()) {
+      return `相机的使用被服务端策略拦住了${code}：响应头 Permissions-Policy 没有允许本站用相机。`
+        + "这跟手机权限无关，改手机设置不会有任何效果。"
+        + "现在请用「拍照识别」（它调系统相机 App，不受这条策略限制）。"
+        + "想恢复实时扫码，需要把服务端响应头改成 camera=(self) —— 升级一下镜像即可。";
+    }
     let site = "";
     try {
       if (navigator.permissions && navigator.permissions.query) {
@@ -264,17 +297,24 @@
       });
     } catch (err) {
       const name = (err && err.name) || "";
+      // 先把界面切到「开不了相机」的样子：下面的提示要等权限查询（异步），
+      // 不先切界面，用户会对着一个还亮着的取景框读提示。
+      if (state.video) state.video.hidden = true;
+      show(".scan-retry", true);
+      show(".scan-switch", false);
+      const photoBtn = node(".scan-photo");
+      if (photoBtn) photoBtn.classList.add("primary");
+
       if (name === "NotAllowedError" || name === "SecurityError") {
-        note("没有拿到相机权限。请在浏览器地址栏的站点设置里允许相机，再点「重试相机」。", "warn");
+        // 被拒有三层原因（服务端策略 / 站点层 / 系统给浏览器 App 的权限），
+        // 不能硬写死一句 —— 用户照着改完还是不行就会来回问。
+        const hint = await cameraDeniedHint(err);
+        if (!state.done) note(hint, "warn");
       } else if (name === "NotFoundError" || name === "OverconstrainedError") {
         note("没找到可用的摄像头，请用「拍照识别」。", "warn");
       } else {
         note(`打不开相机（${(err && err.message) || name}），请用「拍照识别」。`, "warn");
       }
-      if (state.video) state.video.hidden = true;
-      show(".scan-retry", true);
-      show(".scan-switch", false);
-      node(".scan-photo").classList.add("primary");
       return false;
     }
     state.live = true;
@@ -422,7 +462,7 @@
     // 自测用：tests/test_ui_polish.mjs 的「扫码认码」「相机可用性」两组会调这几个
     _internals: {
       state, LIVE_MAX_WIDTH, PHOTO_MAX_WIDTH, FRAME_INTERVAL,
-      cameraDeniedHint,
+      cameraDeniedHint, policyBlocksCamera,
     },
   };
 })();

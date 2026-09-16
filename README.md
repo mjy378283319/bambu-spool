@@ -175,6 +175,15 @@ python scripts/build_printer_photo.py 我的照片.jpg app/static/printer/p2s.jp
    下才允许网页开相机，所以**内网 http 部署时这条路是唯一能用的**，界面会直接把原因
    和「改用拍照识别」写在取景框上，而不是只丢一句「不支持」。
 
+> ⚠️ **实时相机开不了，先查响应头，别急着改手机权限。**
+> `getUserMedia` 除了 HTTPS 和浏览器权限，还受 `Permissions-Policy` 响应头管辖。
+> 这个头如果写成 `camera=()`，括号里是空集 —— 意思是「**任何来源都不许，包括本站自己**」，
+> 浏览器会**直接拒绝且完全不弹权限窗**。现象和「手机没把相机权限给浏览器」一模一样，
+> 于是改系统设置、换浏览器、换手机全都无解。正确写法是 `camera=(self)`
+> （见 `app/main.py` 的 `_harden()`，`tests/test_auth.py` 有断言钉住）。
+> 前端 `scan.js` 的 `policyBlocksCamera()` 也会把这种情形认出来，提示直接指向服务端，
+> 不会再让人白改一遍手机设置。
+> 
 认码规则：`#spool=<id>` 认料盘码、`#bind=<printer>:<ams>:<tray>` 认槽位码
 （扫到槽位码会直接跳到那个槽位的绑定弹窗）、纯数字当料盘号。
 
@@ -182,7 +191,8 @@ python scripts/build_printer_photo.py 我的照片.jpg app/static/printer/p2s.jp
 位置；**App 已经开着**则监听 `hashchange` 就地跳转（浏览器换 hash 不会重新加载页面，
 没有这个监听就会表现为「扫了但什么都没发生」）。
 
-> 想在手机上用实时相机，给服务挂个 HTTPS 反向代理即可（见「挂到公网」一节）。
+> 想在手机上用实时相机，需要同时满足两条：给服务挂 HTTPS 反向代理（见「挂到公网」一节），
+> 且响应头的 `Permissions-Policy` 允许本站用相机（本应用默认已是 `camera=(self)`）。
 
 ### 标签打印（蓝牙直打 · 汉印 T260LR）
 
@@ -500,7 +510,7 @@ node tests/test_label_raster.mjs
 # 风扇命名与料条高度口径（30 项断言，node 直跑）
 node tests/test_panel_fill.mjs
 
-# 外观预填、区域文案、真机照片、扫码认码与扫码深链（61 项断言，node 直跑，不需要相机）
+# 外观预填、区域文案、真机照片、扫码认码、扫码深链与相机被拦的归因（77 项断言，node 直跑，不需要相机）
 node tests/test_ui_polish.mjs
 
 # 浏览器实拍验收（36 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）

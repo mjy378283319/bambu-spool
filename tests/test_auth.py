@@ -196,6 +196,15 @@ def main() -> int:
         check("Referrer-Policy 存在", bool(headers.get("referrer-policy")))
         check("Content-Security-Policy 存在", "default-src 'self'" in (headers.get("content-security-policy") or ""))
 
+        # Permissions-Policy：相机必须允许本站（手机扫码走 getUserMedia）。
+        # ⚠️ 2026-09-16 真实事故：这里曾写成 camera=()。空括号不是「只允许自己」，
+        #    而是「所有来源都不许」—— 浏览器直接以 NotAllowedError 拒掉且不弹权限窗，
+        #    现象和「手机没给相机权限」一样，用户怎么改手机设置都改不好。
+        pp = headers.get("permissions-policy") or ""
+        check("Permissions-Policy 存在", bool(pp), pp)
+        check("允许本站使用相机（camera=(self)）", "camera=(self)" in pp, pp)
+        check("没有把相机对所有来源关死（camera=()）", "camera=()" not in pp, pp)
+
         # ── 5. 会话强度 ───────────────────────────────────
         section("5. 会话强度")
         forged = httpx.Client(base_url=srv.base, timeout=15.0)

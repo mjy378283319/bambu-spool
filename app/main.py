@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="拓竹耗材管家",
-    version="0.3.0",
+    version="0.3.1",
     lifespan=lifespan,
     # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
     docs_url=None,
@@ -115,7 +115,15 @@ def _harden(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    # 相机必须允许「本站自己」：手机扫码走的是 getUserMedia，受这个头管辖。
+    # ⚠️ 别改成 camera=()：空括号 = 对**所有来源**（含本站）禁用相机，
+    #    浏览器会直接以 NotAllowedError 拒掉、**连权限弹窗都不弹**，
+    #    表现和「手机没给相机权限」一模一样 —— 用户改手机设置永远改不好。
+    #    2026-09-16 踩过：两台手机 + 两个浏览器（安卓 Edge / 鸿蒙浏览器）全开不了相机。
+    # 麦克风、定位本应用用不到，继续关掉。
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=(self)"
+    )
     # 前端是单页原生实现，用到内联事件处理器，因此 style/script 需要 unsafe-inline
     response.headers.setdefault(
         "Content-Security-Policy",

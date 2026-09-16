@@ -277,6 +277,50 @@ check("查不到权限状态 -> 两处都列出来",
 check("提示带上错误码（手机没法开控制台，只能靠截图）",
   hintUnknown.includes("NotAllowedError"), hintUnknown);
 
+// ── 6.6 服务端 Permissions-Policy 把相机关掉时必须认出来 ─────────
+// 真实事故（2026-09-16）：app/main.py 的 _harden() 写的是 camera=()，空括号 =
+// 对「所有来源」（含本站自己）禁用相机。浏览器读到就直接把 getUserMedia 拒成
+// NotAllowedError，**权限弹窗一次都不会弹** —— 现象和「手机没给浏览器相机权限」
+// 一模一样。用户换了两台手机、两个浏览器（安卓 Edge / 鸿蒙自带）全开不了相机，
+// 照着提示改手机设置永远改不好。这条断言钉住「能认出来、且指向服务端」。
+console.log("== 服务端把相机禁掉：要指向服务端，别让人去改手机 ==");
+
+sandbox.document.featurePolicy = { allowsFeature: (f) => f !== "camera" };
+check("policyBlocksCamera 能认出被策略拦掉",
+  scanner._internals.policyBlocksCamera() === true);
+const policyReason = scanner.cameraBlockReason();
+check("被策略拦掉 -> 原因指向 Permissions-Policy，并推「拍照识别」",
+  policyReason.includes("Permissions-Policy") && policyReason.includes("拍照识别"),
+  policyReason);
+check("被策略拦掉 -> 不再指路到手机权限设置",
+  !policyReason.includes("地址栏") && !policyReason.includes("系统设置"), policyReason);
+
+// 权限状态还报 granted（鸿蒙那边就是「相机已允许」），也必须先说服务端
+sandbox.navigator.permissions = { query: async () => ({ state: "granted" }) };
+const policyHint = await scanner._internals.cameraDeniedHint({ name: "NotAllowedError" });
+check("策略拦掉时优先说服务端，不顺着权限状态指错路",
+  policyHint.includes("服务端") && !policyHint.includes("系统设置")
+  && !policyHint.includes("地址栏"), policyHint);
+check("策略拦掉时给出服务端该怎么改（camera=(self)）",
+  policyHint.includes("camera=(self)"), policyHint);
+
+sandbox.document.featurePolicy = { allowsFeature: () => true };
+check("策略允许时不算被拦", scanner._internals.policyBlocksCamera() === false);
+delete sandbox.document.featurePolicy;
+check("浏览器没有该 API 时不误报", scanner._internals.policyBlocksCamera() === false);
+
+// ── 6.7 诊断函数必须真的接在失败分支上（上一轮的教训）───────────
+// cameraDeniedHint 写好了、也导出了，但 getUserMedia 的 catch 里还是旧那句
+// 硬编码 —— 函数成了死代码，用户看到的报错文案一个字都没变。单测调得到它，
+// 所以只测函数本身抓不住，必须钉源码。
+console.log("== 诊断提示真的接在 getUserMedia 失败分支上 ==");
+
+const scanSrc = fs.readFileSync(SCAN_JS, "utf8");
+check("catch 分支调用了 cameraDeniedHint",
+  /await\s+cameraDeniedHint\(/.test(scanSrc), "cameraDeniedHint 没人调（死代码）");
+check("旧的硬编码权限提示已清掉",
+  !scanSrc.includes("请在浏览器地址栏的站点设置里允许相机"), "旧文案还在");
+
 sandbox.navigator.permissions = undefined;
 
 // ── 6.8 扫码入口只剩相机（扫码枪输入框已按用户要求移除）──────────
