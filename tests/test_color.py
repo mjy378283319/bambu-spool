@@ -212,6 +212,56 @@ check("品牌推荐含最优品牌", brand_best and brand_best[0]["brand"] == "P
 check("非法色值不炸", match_catalog("不是颜色") == [] and match_catalog("") == [])
 
 
+# ══ 5b. 新增品牌色卡（拓竹 / 大简 / Kexcelled K5 PETG Rapid）══════
+section("5b. 新增品牌色卡")
+
+brands_in_index = {e["brand"] for e in index["*"]}
+check("索引含拓竹品牌", "拓竹" in brands_in_index, "/".join(sorted(brands_in_index)))
+check("索引含大简品牌", "大简" in brands_in_index)
+check("品牌总数随新色卡增至 ≥6", len(brands_in_index) >= 6, f"{len(brands_in_index)} 个")
+check("色卡总量随新品牌增长 > 700", total > 700, f"{total} 色")
+
+def _find(brand, series, name):
+    for e in index["*"]:
+        if e["brand"] == brand and e["series"] == series and e["name"] == name:
+            return e
+    return None
+
+# Kexcelled 实购的 K5 PETG Rapid 系列（此前色卡只有普通 K5 PETG 故对不上）
+rapid = [e for e in index["*"] if e["brand"] == "Kexcelled" and e["series"] == "K5 PETG Rapid"]
+check("Kexcelled K5 PETG Rapid 系列已收录", len(rapid) >= 18, f"{len(rapid)} 色")
+hit_sunset = _find("Kexcelled", "K5 PETG Rapid", "日落橙")
+check("Kexcelled 日落橙 已补录且色值正确",
+      hit_sunset is not None and hit_sunset["hex"].upper() == "#F5510B",
+      hit_sunset["hex"] if hit_sunset else "缺失")
+hit_mist = _find("Kexcelled", "K5 PETG Rapid", "星雾紫")
+check("Kexcelled 星雾紫 已补录且色值正确",
+      hit_mist is not None and hit_mist["hex"].upper() == "#5C30B4",
+      hit_mist["hex"] if hit_mist else "缺失")
+
+# 拓竹官方 Hex Code Table（official=True）
+bambu_jade = _find("拓竹", "PLA Basic", "玉石白")
+check("拓竹 玉石白 官方色值正确",
+      bambu_jade is not None and bambu_jade["hex"].upper() == "#FFFFFF"
+      and bambu_jade.get("official") is True,
+      f"{bambu_jade['hex']}/{bambu_jade.get('official')}" if bambu_jade else "缺失")
+bambu_green = _find("拓竹", "PLA Basic", "拓竹绿")
+check("拓竹 拓竹绿 官方色值正确",
+      bambu_green is not None and bambu_green["hex"].upper() == "#00AE42",
+      bambu_green["hex"] if bambu_green else "缺失")
+bambu_count = sum(1 for e in index["*"] if e["brand"] == "拓竹")
+check("拓竹四系列共 82 色", bambu_count == 82, f"{bambu_count} 色")
+check("拓竹色块均为官方色值", all(e.get("official") is True for e in index["*"] if e["brand"] == "拓竹"))
+
+# 大简 PETG HF（近似值，HEX 取自官方店/微博展示）
+dasu_taro = _find("大简", "PETG HF", "香芋紫")
+check("大简 香芋紫 已收录", dasu_taro is not None and dasu_taro["hex"].upper() == "#A88BC4",
+      dasu_taro["hex"] if dasu_taro else "缺失")
+dasu_pink = _find("大简", "PETG HF", "樱花粉")
+check("大简 樱花粉 已收录", dasu_pink is not None and dasu_pink["hex"].upper() == "#F0B9C4",
+      dasu_pink["hex"] if dasu_pink else "缺失")
+
+
 # ══ 6. 料盘匹配 ════════════════════════════════════════════════
 section("6. 库中料盘匹配")
 

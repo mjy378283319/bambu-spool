@@ -1,14 +1,22 @@
 """品牌配色预设（自动生成 + 人工核对，勿手改排序）。
 
 数据来源：
-- Kexcelled：kexcelled3d.com 官方商品页色名（中/英），HEX 从官方产品图取主色，为近似值
+- Kexcelled：kexcelled3d.com 官方商品页色名（中/英），HEX 从官方产品图取主色，为近似值；
+  K5 PETG Rapid 的 HEX 直接从官方 Shopify 商品图逐色取主色（2026-09-16）
 - 兰博：tyzh.com 官网产品图取主色 + 常规色人工校正，均为近似值
 - 魔创：淘宝官方店（shop462851793）商品 SKU 色名 + SKU 图取主色，均为近似值
+- 拓竹：store.bambulab.com 官方公布的 Hex Code Table（PLA Basic / PLA Matte / PETG Basic
+  / PETG HF），这些是官方色值（official=True）
+- 大简：京东/淘宝官方店在售 SKU 色名 + 官方微博展示色，HEX 为近似值
 """
 
 def _c(name: str, en: str, hex_value: str) -> dict:
     # 该文件里的 HEX 均非官方公布色值，一律视为近似值
     return {"name": name, "en": en, "hex": hex_value, "official": False}
+
+def _co(name: str, en: str, hex_value: str) -> dict:
+    # 厂商官方公布的色值（拓竹 Hex Code Table）
+    return {"name": name, "en": en, "hex": hex_value, "official": True}
 
 KEXCELLED_K5_PLA: list[dict] = [
     _c('凯蒂粉', 'Kitty Pink', '#FBB3BA'),
@@ -200,6 +208,142 @@ KEXCELLED_K5_PETG_MATTE: list[dict] = [
     _c('枫炽红', '', '#AF2B25'),
     _c('莫兰迪绿', '', '#244F59'),
     _c('松石绿', '', '#50C3CA'),
+]
+
+KEXCELLED_K5_PETG_RAPID: list[dict] = [
+    # 独立产品线（THE K5™ PETG Rapid），20 色与普通 K5 PETG 完全不同；
+    # 用户实购的「日落橙 / 星雾紫」就在这一系列（此前只录了普通版，对不上）。
+    _c('奶油绿', 'Cream Green', '#E2E7B0'),
+    _c('白色', 'White', '#F9F9FA'),
+    _c('薄荷蓝', 'Mint Blue', '#61C9CF'),
+    _c('黑色', 'Black', '#202020'),
+    _c('红色', 'Red', '#F32A23'),
+    _c('黄色', 'Yellow', '#FEEE26'),
+    _c('灰色', 'Gray', '#A1A1A1'),
+    _c('金色', 'Gold', '#D79B3D'),
+    _c('金属紫', 'Metallic Purple', '#8F6AA9'),
+    _c('蓝色', 'Blue', '#2829BF'),
+    _c('日落橙', 'Sunset Orange', '#F5510B'),
+    _c('绿色', 'Green', '#3BAA57'),
+    _c('摩卡棕', 'Mocha Brown', '#6C4C36'),
+    _c('柔粉', 'Soft Pink', '#CEB4AF'),
+    _c('裸粉', 'Nude Pink', '#ECE2D6'),
+    _c('苔藓绿', 'Moss Green', '#305B17'),
+    _c('太空灰', 'Space Gray', '#A3A1A5'),
+    _c('透明白', 'Clear White', '#EFEDED'),
+    _c('星雾紫', 'Mist Purple', '#5C30B4'),
+    _c('银色', 'Silver', '#B9B9BA'),
+]
+
+# ── 拓竹（官方 Hex Code Table，official=True）─────────────────────
+BAMBU_PLA_BASIC: list[dict] = [
+    _co('玉石白', 'Jade White', '#FFFFFF'),
+    _co('米色', 'Beige', '#F7E6DE'),
+    _co('金色', 'Gold', '#E4BD68'),
+    _co('银色', 'Silver', '#A6A9AA'),
+    _co('灰色', 'Gray', '#8E9089'),
+    _co('青铜色', 'Bronze', '#847D48'),
+    _co('棕色', 'Brown', '#9D432C'),
+    _co('可可棕', 'Cocoa Brown', '#6F5034'),
+    _co('酒红色', 'Maroon Red', '#9D2235'),
+    _co('红色', 'Red', '#C12E1F'),
+    _co('品红', 'Magenta', '#EC008C'),
+    _co('粉色', 'Pink', '#F55A74'),
+    _co('热粉色', 'Hot Pink', '#F5547C'),
+    _co('橙色', 'Orange', '#FF6A13'),
+    _co('南瓜橙', 'Pumpkin Orange', '#FF9016'),
+    _co('向日葵黄', 'Sunflower Yellow', '#FEC600'),
+    _co('黄色', 'Yellow', '#F4EE2A'),
+    _co('亮绿色', 'Bright Green', '#BECF00'),
+    _co('拓竹绿', 'Bambu Green', '#00AE42'),
+    _co('槲寄生绿', 'Mistletoe Green', '#3F8E43'),
+    _co('绿松石', 'Turquoise', '#00B1B7'),
+    _co('青色', 'Cyan', '#0086D6'),
+    _co('蓝色', 'Blue', '#0A2989'),
+    _co('钴蓝', 'Cobalt Blue', '#0056B8'),
+    _co('紫色', 'Purple', '#5E43B7'),
+    _co('靛紫', 'Indigo Purple', '#482960'),
+    _co('蓝灰', 'Blue Gray', '#5B6579'),
+    _co('浅灰', 'Light Gray', '#D1D3D5'),
+    _co('深灰', 'Dark Gray', '#545454'),
+    _co('黑色', 'Black', '#000000'),
+]
+
+BAMBU_PLA_MATTE: list[dict] = [
+    _co('象牙白', 'Ivory White', '#FFFFFF'),
+    _co('骨白', 'Bone White', '#CBC6B8'),
+    _co('拿铁棕', 'Latte Brown', '#D3B7A7'),
+    _co('焦糖', 'Caramel', '#AE835B'),
+    _co('赤陶', 'Terracotta', '#B15533'),
+    _co('沙漠黄', 'Desert Tan', '#E8DBB7'),
+    _co('烟灰', 'Ash Gray', '#9B9EA0'),
+    _co('水泥灰', 'Nardo Gray', '#757575'),
+    _co('丁香紫', 'Lilac Purple', '#AE96D4'),
+    _co('樱花粉', 'Sakura Pink', '#E8AFCF'),
+    _co('李子紫', 'Plum', '#950051'),
+    _co('柑橘橙', 'Mandarin Orange', '#F99963'),
+    _co('柠檬黄', 'Lemon Yellow', '#F7D959'),
+    _co('猩红', 'Scarlet Red', '#DE4343'),
+    _co('深红', 'Dark Red', '#BB3D43'),
+    _co('深棕', 'Dark Brown', '#7D6556'),
+    _co('黑巧克力', 'Dark Chocolate', '#4D3324'),
+    _co('深绿', 'Dark Green', '#68724D'),
+    _co('苹果绿', 'Apple Green', '#C2E189'),
+    _co('草绿', 'Grass Green', '#61C680'),
+    _co('冰蓝', 'Ice Blue', '#A3D8E1'),
+    _co('天蓝', 'Sky Blue', '#56B7E6'),
+    _co('海军蓝', 'Marine Blue', '#0078BF'),
+    _co('深蓝', 'Dark Blue', '#042F56'),
+    _co('炭黑', 'Charcoal', '#000000'),
+]
+
+BAMBU_PETG_BASIC: list[dict] = [
+    _co('白色', 'White', '#FFFFFF'),
+    _co('红色', 'Red', '#D6001C'),
+    _co('橙色', 'Orange', '#FF671F'),
+    _co('黄色', 'Yellow', '#FCE300'),
+    _co('群青蓝', 'Reflex Blue', '#001489'),
+    _co('宝蓝', 'Navy Blue', '#0086D6'),
+    _co('雾蓝', 'Misty Blue', '#688197'),
+    _co('绿色', 'Green', '#009639'),
+    _co('松绿', 'Pine Green', '#034638'),
+    _co('深棕', 'Dark Brown', '#4F2C1D'),
+    _co('深米色', 'Dark Beige', '#DBC8B6'),
+    _co('灰色', 'Gray', '#7F7E83'),
+    _co('黑色', 'Black', '#000000'),
+]
+
+BAMBU_PETG_HF: list[dict] = [
+    _co('白色', 'White', '#FFFFFF'),
+    _co('本色', 'Nature', '#F9F7F2'),
+    _co('灰色', 'Gray', '#9EA2A2'),
+    _co('蓝灰', 'Blue Gray', '#688197'),
+    _co('金色', 'Gold', '#B28B33'),
+    _co('红色', 'Red', '#D6001C'),
+    _co('橙色', 'Orange', '#FF671F'),
+    _co('黄色', 'Yellow', '#FCE300'),
+    _co('青柠绿', 'Lime Green', '#7CD82B'),
+    _co('绿色', 'Green', '#009639'),
+    _co('湖蓝', 'Lake Blue', '#0069B1'),
+    _co('蓝色', 'Blue', '#001489'),
+    _co('紫色', 'Purple', '#9E007E'),
+    _co('黑色', 'Black', '#000000'),
+]
+
+# ── 大简（GreatSimple，中山大简科技）───────────────────────────────
+# 官网 greatsimple.net 为 JS 渲染抓不到色块；色名取自京东/淘宝官方店在售
+# SKU 与官方微博展示，HEX 为近似值。已确认：PETG HF 塑料盘 5 色 + 纸盘
+# 香芋紫/樱花粉/透明蓝/透明色，其余色号待补。
+DASU_PETG_HF: list[dict] = [
+    _c('黑色', 'Black', '#222325'),
+    _c('白色', 'White', '#E9E9E7'),
+    _c('灰色', 'Gray', '#8E9091'),
+    _c('深蓝色', 'Dark Blue', '#1F3B70'),
+    _c('绀紫色', 'Indigo Purple', '#45395C'),
+    _c('透明色', 'Transparent', '#E3E7E2'),
+    _c('透明蓝', 'Transparent Blue', '#B7D9EA'),
+    _c('香芋紫', 'Taro Purple', '#A88BC4'),
+    _c('樱花粉', 'Sakura Pink', '#F0B9C4'),
 ]
 
 LANBO_SERIES: dict[str, list[dict]] = {
@@ -618,6 +762,16 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "K5 PLA 哑光": KEXCELLED_K5_PLA_MATTE,
         "K5 PETG": KEXCELLED_K5_PETG,
         "K5 PETG 哑光": KEXCELLED_K5_PETG_MATTE,
+        "K5 PETG Rapid": KEXCELLED_K5_PETG_RAPID,
+    },
+    "拓竹": {
+        "PLA Basic": BAMBU_PLA_BASIC,
+        "PLA Matte": BAMBU_PLA_MATTE,
+        "PETG Basic": BAMBU_PETG_BASIC,
+        "PETG HF": BAMBU_PETG_HF,
+    },
+    "大简": {
+        "PETG HF": DASU_PETG_HF,
     },
     "兰博": LANBO_SERIES,
     "魔创": {
@@ -635,11 +789,13 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     "PLA": [
         "K5 PLA", "K5 PLA 哑光",
+        "PLA Basic", "PLA Matte",
         "PLA", "PLA+", "PLA 哑光", "PLA 丝绸", "金属色", "星空闪点", "夜光",
         "丝绸双色", "丝绸三色", "丝绸彩虹", "哑光双色", "哑光三色", "哑光彩虹",
         "HT-PLA",
     ],
-    "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光"],
+    "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光", "K5 PETG Rapid",
+             "PETG Basic", "PETG HF"],
     "ASA": ["ASA"],
     "ABS": ["ABS"],
 }

@@ -33,10 +33,13 @@
 
 录入料盘时还内置了**品牌配色卡**：选 Polymaker 会按材料带出
 Panchroma™ PLA（28 色）、Panchroma™ 哑光 PLA（52 色）、Polymaker™ PETG（24 色）
-的官方色号；Kexcelled（K5 PLA 51 色 / PLA 哑光 55 色 / PETG 52 色 / PETG 哑光 22 色）、
+的官方色号；Kexcelled（K5 PLA 51 色 / PLA 哑光 55 色 / PETG 52 色 / PETG 哑光 22 色，
+**另有独立系列 K5 PETG Rapid 20 色——你实购的「日落橙 / 星雾紫」就在这一产品线里，之前只录了普通 K5 PETG 故对不上**）、
 兰博（13 个 PLA 系列 + 2 个 PETG 系列）、魔创（8 个系列 152 色：PLA / PLA 哑光 / PLA+ /
-HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）也已内置。点色块直接填名称和色值；
-无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部取自官方产品图）会标注为近似值。
+HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）、
+**拓竹（PLA Basic 30 / PLA Matte 25 / PETG Basic 13 / PETG HF 14，均取自官方 Hex Code Table，为官方公布色值）**、
+**大简（PETG HF 9 色，取自官方店与官方微博展示）**也已内置。点色块直接填名称和色值；
+无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部、大简取自官方展示图）会标注为近似值。
 
 ### 图片识色 · 找同色耗材
 
@@ -44,7 +47,7 @@ HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）也�
 手机端直接拍照），自动提取画面里的主要颜色，然后帮你回答两个问题——
 
 - **库里现有的料，哪一盘最接近？** 直接按余量、存放位置列出来，告诉你该用哪盘。
-- **想买新的，该买哪个品牌哪个色？** 对 4 个品牌 637 个官方色号做匹配，
+- **想买新的，该买哪个品牌哪个色？** 对 6 个品牌 748 个色号做匹配，
   每个品牌给出它最接近的一个色，方便横向比价。
 
 颜色支持手动微调：点击图片任意位置可以精确吸色，也能手动加色、删掉不需要的色。
@@ -492,7 +495,7 @@ python tests/test_flow.py
 # 访问控制与登录流程（66 项断言，会真起一个 uvicorn 子进程）
 python tests/test_auth.py
 
-# 图片识色的配色匹配（77 项断言，CIEDE2000 用 Sharma 标准向量校验）
+# 图片识色的配色匹配（90 项断言，CIEDE2000 用 Sharma 标准向量校验）
 python tests/test_color.py
 
 # 每盘价格 / 耗材总价值 / 每次打印耗材费（21 项断言）
@@ -512,6 +515,12 @@ python tests/test_finish_summary.py
 
 # 拓竹云接口地址与验证码登录状态流转（23 项断言，全程离线）
 python tests/test_cloud_endpoints.py
+
+# 登录 / 验证码连续失败锁定状态流转（66 项断言）
+python tests/test_auth.py
+
+# 端到端全流程：登录 → 建盘 → 匹配 → 归档（32 项断言）
+python tests/test_flow.py
 
 # 标签二维码取整、?box / ?dots 参数与响应头（70 项断言）
 python tests/test_labels.py
