@@ -482,6 +482,22 @@ async function main() {
   await cdp.evaluate(sessionId, `closeModal()`);
   await sleep(300);
 
+  /* 给人看的一张：原生选择器的弹层截不到，就把 select 撑成列表截一张 ——
+     里面应当是一串「名字（余 xx g）」，只剩「— 不绑定 —」就是那个 bug 复现了。 */
+  await cdp.evaluate(sessionId, `(() => {
+    const printers = (window.panelDebug.state.printers_full || []);
+    const p = printers[0];
+    const ams = ((p || {}).state || {}).ams || [];
+    if (!p || !ams.length) return;
+    openSlotDialog(p.id, ams[0].ams_id, 0);
+    const sel = document.getElementById("bindSpool");
+    if (sel) sel.size = Math.min(6, sel.options.length);
+  })()`);
+  await sleep(400);
+  await cdp.shot(sessionId, path.join(OUT, "07b-slot-dialog-options.png"));
+  await cdp.evaluate(sessionId, `closeModal()`);
+  await sleep(200);
+
   /* ── 概览 → 库存 → 汇总 → 打印记录 → 设置 ── */
   const views = [
     ["spools", "02-spools.png"],
