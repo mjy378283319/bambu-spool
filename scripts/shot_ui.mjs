@@ -313,27 +313,40 @@ async function main() {
 
   await cdp.shot(sessionId, path.join(OUT, "01-dashboard.png"));
 
-  /* ── 断言：打印机状态必须「填满」，右下角不留空白 ──
+  /* ── 断言：打印机状态必须「填满」，两列都不留空白 ──
      风扇卡原先排在左列最后一张，而右列（AMS 单元）通常比左列矮，于是右下角
      空出一大块（用户原话：「这个打印机状态右下角不要空出这么多空白区域」）。
-     现在风扇卡排到右列最后并用 flex 撑满，所以这里量两列的底边差 —— 截图看得出
-     「有点空」，量不出「差 80px」，还是得断言。 */
+     现在风扇卡排到右列最后并用 flex 撑满 —— 但只做这一步，右列反而变成较高的
+     那一列，空白只是从右下角搬到左下角。
+     ⚠️ 量法很关键：**不能量 `.printer-col` 的底边** —— 列容器被 `align-items: stretch`
+     拉得一样高，无论内容填没填满都是等高的（第一版就是这么量错的，一块空白都没拦住）。
+     要量**每列最后一张卡**的底边差，那才是「内容是不是真顶到底」。 */
   const layout = await cdp.evaluate(sessionId, `(() => {
     const cols = [...document.querySelectorAll(".printer-layout > .printer-col")];
     if (cols.length < 2) return { cols: cols.length };
     const box = (el) => {
       const r = el.getBoundingClientRect();
-      return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+      return {
+        top: Math.round(r.top), bottom: Math.round(r.bottom),
+        w: Math.round(r.width), h: Math.round(r.height),
+      };
     };
-    const rightCards = cols[1].querySelectorAll(".pcard");
+    const cards = (col) => [...col.querySelectorAll(".pcard")];
+    const lastOf = (col) => { const c = cards(col); return c.length ? box(c[c.length - 1]) : null; };
+    const rightCards = cards(cols[1]);
     const lastRight = rightCards[rightCards.length - 1];
+    const photo = cols[0].querySelector(".photo-card");
     return {
       cols: cols.length,
-      left: box(cols[0]), right: box(cols[1]),
-      rightLast: lastRight ? lastRight.className : "",
+      leftCol: box(cols[0]), rightCol: box(cols[1]),
+      leftLast: lastOf(cols[0]), rightLast: lastOf(cols[1]),
+      rightLastClass: lastRight ? lastRight.className : "",
       fanInRight: !!cols[1].querySelector(".fan-card"),
       fanInLeft: !!cols[0].querySelector(".fan-card"),
       fanRows: cols[1].querySelectorAll(".fan-row").length,
+      photoBox: photo ? box(photo) : null,
+      photoArt: photo && photo.querySelector(".printer-art-wrap")
+        ? box(photo.querySelector(".printer-art-wrap")) : null,
     };
   })()`);
   console.log("打印机布局：", JSON.stringify(layout));
@@ -342,10 +355,21 @@ async function main() {
   check("风扇卡不再占左列", layout.fanInLeft === false, JSON.stringify(layout));
   check("风扇四条通道都渲染出来了", layout.fanRows >= 4, String(layout.fanRows));
   check("风扇卡是右列最后一张（贴着右下角）",
-    /fan-card/.test(layout.rightLast || ""), layout.rightLast);
-  check("左右两列等高、右下角不留空白（底边差 ≤ 2px）",
-    Math.abs(layout.left.bottom - layout.right.bottom) <= 2,
-    JSON.stringify([layout.left, layout.right]));
+    /fan-card/.test(layout.rightLastClass || ""), layout.rightLastClass);
+  check("右列内容顶到底边（风扇卡底边 = 列底边）",
+    !!layout.rightLast && Math.abs(layout.rightLast.bottom - layout.rightCol.bottom) <= 2,
+    JSON.stringify([layout.rightLast, layout.rightCol]));
+  check("左列内容也顶到底边（照片卡吃掉了多余高度）",
+    !!layout.leftLast && Math.abs(layout.leftLast.bottom - layout.leftCol.bottom) <= 2,
+    JSON.stringify([layout.leftLast, layout.leftCol]));
+  check("两列最后一张卡底边齐平（整块无空白，差 ≤ 2px）",
+    !!layout.leftLast && !!layout.rightLast
+    && Math.abs(layout.leftLast.bottom - layout.rightLast.bottom) <= 2,
+    JSON.stringify([layout.leftLast, layout.rightLast]));
+  check("照片卡被拉高但照片本身没被拉伸（contain + 居中）",
+    !!layout.photoBox && !!layout.photoArt
+    && Math.abs(layout.photoArt.w - 240) <= 2 && Math.abs(layout.photoArt.h - 292) <= 2,
+    JSON.stringify([layout.photoBox, layout.photoArt]));
 
   // 整块特写：这块比视口高，得用 captureBeyondViewport 才拍得全
   const blockClip = await cdp.evaluate(sessionId, `(() => {
@@ -404,6 +428,57 @@ async function main() {
     await cdp.shot(sessionId, path.join(OUT, file));
   }
 
+  /* ── 桌面端每个视图都不许横向溢出 ──
+     料盘表一行 9 列 + 7 个操作按钮，列多到这个程度时表格很容易撑破卡片
+     （`table { width:100% }` 只是「至少 100%」，自动布局下内容更宽就溢出去），
+     表现是整页横向滚动条、右边缘的「删除」被裁掉。截图里看得见，但没人会去数像素 —— 断言量。
+     （手机宽度那套 `scrollWidth <= clientWidth` 断言只跑了 ≤430px，管不到这里。） */
+  const overflow = [];
+  for (const name of ["dashboard", "spools", "summary", "jobs", "settings"]) {
+    await cdp.evaluate(sessionId, `switchView(${JSON.stringify(name)})`);
+    await sleep(500);
+    const m = await cdp.evaluate(sessionId, `(() => {
+      const de = document.documentElement;
+      const wide = [];
+      document.querySelectorAll("table, .card, .table-card, .printer-block").forEach((el) => {
+        if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 2) {
+          wide.push(((el.tagName + "." + String(el.className)).slice(0, 50))
+            + " " + el.scrollWidth + ">" + el.clientWidth);
+        }
+      });
+      const off = [...document.querySelectorAll("button, th, td")]
+        .filter((el) => el.getBoundingClientRect().right > de.clientWidth + 2)
+        .map((el) => (el.innerText || el.tagName).trim().slice(0, 12));
+      return { page: de.scrollWidth, client: de.clientWidth, wide: wide.slice(0, 4), off: off.slice(0, 4) };
+    })()`);
+    if (m.page > m.client + 2 || m.wide.length || m.off.length) overflow.push({ view: name, ...m });
+  }
+  console.log("横向溢出：", JSON.stringify(overflow));
+  check("桌面端各视图都没有横向溢出（表格没撑破卡片、按钮没被裁掉）",
+    overflow.length === 0, JSON.stringify(overflow));
+
+  /* 窄一点的桌面窗口（1280）：表格允许在卡片内部横滑，但**整页**不许出现横向滚动条。 */
+  await cdp.send("Emulation.setDeviceMetricsOverride",
+    { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await cdp.evaluate(sessionId, `switchView("spools")`);
+  await sleep(700);
+  const narrow = await cdp.evaluate(sessionId, `(() => {
+    const de = document.documentElement;
+    const card = document.querySelector(".table-card");
+    return {
+      page: de.scrollWidth, client: de.clientWidth,
+      cardScrollable: card ? getComputedStyle(card).overflowX : "",
+      cardOver: card ? card.scrollWidth - card.clientWidth : 0,
+    };
+  })()`);
+  console.log("1280 窄桌面：", JSON.stringify(narrow));
+  check("1280 桌面窗口不出现整页横向滚动条", narrow.page <= narrow.client + 2, JSON.stringify(narrow));
+  check("1280 下表格溢出时是在卡片内部横滑（overflow-x: auto）",
+    narrow.cardOver <= 2 || narrow.cardScrollable === "auto", JSON.stringify(narrow));
+  await cdp.send("Emulation.setDeviceMetricsOverride",
+    { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await sleep(400);
+
   // 汇总页三张表都要有内容
   await cdp.evaluate(sessionId, `switchView("summary")`);
   await sleep(600);
@@ -439,8 +514,13 @@ async function main() {
     const cards = [...document.querySelectorAll("#priceDist .price-card")];
     const priced = (window.panelDebug.state.summarySpools || [])
       .filter((s) => Number(s.price) > 0).length;
+    const dr = donut ? donut.getBoundingClientRect() : null;
     return {
       hasDonut: !!donut, arcs: arcs.length, items, bar,
+      // 渲染尺寸必须真的量一遍：环形图的 width/height 写在 SVG 属性上，
+      // 会被全局那条 svg { width:16px } 盖掉（属性优先级低于 CSS）→ 缩成 16px 的点。
+      // 光断言弧长算得对是拦不住的，第一版就漏了。（注意这里不能写反引号：外面是模板串）
+      donutSize: dr ? { w: Math.round(dr.width), h: Math.round(dr.height) } : null,
       hidden: !!(document.getElementById("overviewClear") || {}).classList.contains("hidden"),
       cards: cards.length,
       cardsSum: cards.reduce((n, c) => {
@@ -452,6 +532,12 @@ async function main() {
   })()`);
   console.log("库存概览：", JSON.stringify(overview));
   check("环形图画出来了", overview.hasDonut === true);
+  check("环形图真的画得够大（≥140px，没被全局 svg 16px 规则压扁）",
+    !!overview.donutSize && overview.donutSize.w >= 140 && overview.donutSize.h >= 140,
+    JSON.stringify(overview.donutSize));
+  check("环形图是正方形（宽高差 ≤ 2px）",
+    !!overview.donutSize && Math.abs(overview.donutSize.w - overview.donutSize.h) <= 2,
+    JSON.stringify(overview.donutSize));
   check("环形图每份材料一段弧", overview.arcs >= 2, String(overview.arcs));
   check("使用状态三行都在（未使用 / 使用中 / 消耗完）",
     overview.items.length === 3 && overview.items.join(" ").includes("消耗完"),
@@ -514,6 +600,19 @@ async function main() {
 
     const actions = [...document.querySelectorAll("#spoolTable tbody tr:first-child .row-actions button")]
       .map((b) => b.innerText.trim());
+    // 7 个按钮怎么排：显式分两行（主操作一行、次操作一行），别竖着堆成 4 行。
+    // ⚠️ 用 getBoundingClientRect().top 而不是 offsetTop：td 里的 offsetTop 测量基准
+    //    会踩到定位祖先的坑，实测两行按钮报出同一个值（actLines 假成 1）。
+    const actBox = document.querySelector("#spoolTable tbody tr:first-child .cell-actions");
+    const actBtns = actBox ? [...actBox.querySelectorAll(".row-actions button")] : [];
+    const actTops = actBtns.map((b) => Math.round(b.getBoundingClientRect().top));
+    const actLines = new Set(actTops).size;
+    const actGroups = actBox
+      ? [...actBox.querySelectorAll(".row-actions")].map((g) => g.querySelectorAll("button").length)
+      : [];
+    const actWidth = actBox ? Math.round(actBox.getBoundingClientRect().width) : 0;
+    const tableBox = document.querySelector("#spoolTable");
+    const tableOver = tableBox ? tableBox.scrollWidth - tableBox.clientWidth : 0;
     const tabs = [...document.querySelectorAll("#spoolTabs .tab")].map((b) => b.innerText.trim());
 
     // 已用尽标签页：条数必须跟同一套口径算出来的一致
@@ -530,6 +629,7 @@ async function main() {
       .find((b) => b.innerText.includes("所有")).click();
     return {
       heads, before, descIds, ascIds, descArrow, actions, tabs,
+      actLines, actWidth, actGroups, tableOver,
       descOk: desc.every((v, i) => i === 0 || desc[i - 1] >= v),
       ascOk: asc.every((v, i) => i === 0 || asc[i - 1] <= v),
       expectedEmpty, emptyRows, tabActive,
@@ -545,6 +645,11 @@ async function main() {
   check("每行有「详情 / 绑定 / 克隆」三个快捷入口",
     ["详情", "绑定", "克隆"].every((k) => spoolUI.actions.includes(k)),
     JSON.stringify(spoolUI.actions));
+  check("7 个操作按钮排成两行：3 个主操作 + 4 个次操作",
+    spoolUI.actLines === 2 && spoolUI.actGroups.join("+") === "3+4",
+    `lines=${spoolUI.actLines} groups=${JSON.stringify(spoolUI.actGroups)} width=${spoolUI.actWidth}`);
+  check("料盘表本身没有横向溢出（table.scrollWidth <= clientWidth）",
+    spoolUI.tableOver <= 2, String(spoolUI.tableOver));
   check("状态标签页里有「已用尽」", spoolUI.tabs.includes("已用尽"), JSON.stringify(spoolUI.tabs));
   check("「已用尽」标签页筛出来的条数与同一套口径算出来的一致",
     spoolUI.emptyRows === spoolUI.expectedEmpty,
@@ -816,6 +921,42 @@ async function main() {
   await cdp.evaluate(sessionId, `closeModal(); switchView("settings")`);
   await sleep(900);
   await cdp.shot(sessionId, path.join(OUT, "12-mobile-settings.png"));
+
+  /* ── 手机宽度扫描：320 / 360 / 390 / 430 × 各视图，一律不许横向溢出 ──
+     料盘表一行 9 列 + 7 个操作按钮，是这张表最容易「推着整页往右跑」的地方；
+     360px 上一旦溢出，用户看到的是整页能左右晃、右边内容看不到。 */
+  const mSweep = [];
+  for (const w of [320, 360, 390, 430]) {
+    await cdp.send("Emulation.setDeviceMetricsOverride",
+      { width: w, height: 844, deviceScaleFactor: 2, mobile: true }, sessionId);
+    for (const view of ["dashboard", "spools", "summary", "jobs", "settings"]) {
+      await cdp.evaluate(sessionId, `closeModal(); switchView(${JSON.stringify(view)})`);
+      await sleep(320);
+      const m = await cdp.evaluate(sessionId, `(() => {
+        const de = document.documentElement;
+        const over = [...document.querySelectorAll("body *")]
+          .filter((el) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.right > de.clientWidth + 2;
+          })
+          .map((el) => ((el.tagName + "." + String(el.className)).slice(0, 40)
+            + "「" + (el.innerText || "").replace(/\s+/g, " ").trim().slice(0, 18) + "」"
+            + " r=" + Math.round(el.getBoundingClientRect().right)))
+          .slice(0, 3);
+        return { page: de.scrollWidth, client: de.clientWidth, over };
+      })()`);
+      if (m.page > m.client + 2 || m.over.length) mSweep.push({ w, view, ...m });
+    }
+  }
+  console.log("手机宽度扫描：", JSON.stringify(mSweep));
+  check("320/360/390/430 各视图都没有横向溢出（页面不左右晃）",
+    mSweep.length === 0, JSON.stringify(mSweep.slice(0, 3)));
+
+  /* 恢复 390 宽，保持后面截图与断言的环境一致 */
+  await cdp.send("Emulation.setDeviceMetricsOverride",
+    { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, sessionId);
+  await cdp.evaluate(sessionId, `closeModal()`);
+  await sleep(400);
 
   /* ── 前端运行/控制台错误 ── */
   const errors = await cdp.evaluate(sessionId, `window.__errs || []`);

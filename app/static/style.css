@@ -284,7 +284,9 @@ label.field > span { display: block; font-size: 12.5px; color: var(--text-2); ma
 }
 
 /* ── 表格 ───────────────────────────────────────────── */
-.table-card { padding: 6px 20px 16px; }
+/* 窄一点的桌面窗口兜底：表格在卡片内部滚动，别把整页顶出横向滚动条。
+   手机上（≤700px）走的是竖排卡片，用不到这条。 */
+.table-card { overflow-x: auto; padding: 6px 20px 16px; }
 .table-card .card-head { padding-top: 12px; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 th {
@@ -303,8 +305,19 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cell-name { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .cell-name .nm { min-width: 0; }
 .cell-name .nm > div:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 一行 7 个操作（详情/绑定/克隆/标签/补录/校准/删除）在 1440px 下就比表格宽 ~72px 了，
+   而 `table { width:100% }` 只是「至少 100%」——自动布局下内容更宽就顶出卡片右边，
+   按钮画到卡片外面（更窄的窗口会直接顶出整页横向滚动条）。
+   解决办法：**分组**成两行 —— 上面一行是这轮新增的主操作（详情/绑定/克隆），
+   下面一行是原来的次操作（标签/补录/校准/删除），字号略小、颜色更淡。
+   分组是显式的，所以宽度可预测（列宽 ≈ 190px），表格自然宽度 1201 < 容器 1238。
+   ⚠️ 别指望「不分组 + flex-wrap」自己排：实测那样这一列会被自动布局压到 181px，
+   7 个按钮竖着堆成 4 行；给容器 max-width 也没用（还给列宽提示也只到 227px / 3 行）。
+   只有显式分组 + 不换行（nowrap）才能让 max-content 正确传上去。 */
 .row-actions { display: flex; gap: 4px; justify-content: flex-end; }
-.row-actions button { padding: 4px 8px; font-size: 12px; border-color: transparent; color: var(--text-2); }
+.row-actions.sub { margin-top: 3px; }
+.row-actions.sub button { padding: 2px 6px; font-size: 11.5px; }
+.row-actions button { padding: 4px 7px; font-size: 12px; border-color: transparent; color: var(--text-2); white-space: nowrap; }
 .row-actions button:hover { background: var(--surface-2); color: var(--text); }
 .row-actions button.del { color: var(--red); }
 .row-actions button.del:hover { background: var(--red-soft); }
@@ -892,12 +905,17 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 .bind-slot { font-size: 12.5px; font-weight: 600; }
 .bind-fil { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 
-/* ── 打印机状态：两列等高，最后一格撑满，右下角不留空白 ──
+/* ── 打印机状态：两列等高，最后一格撑满，整块不留空白 ──
    .printer-layout 上面定义时是 align-items:start，这里改成 stretch：
-   右列（AMS）通常比左列（照片 + 打印状态 + 温度）矮，靠 .pcard.grow
-   把风扇卡撑到与左列等高，右下角就不会空出一大块。 */
+   两列谁高谁定行高，另外一列得自己把多出来的高度吃掉，否则空白只是
+   从右下角搬到左下角（第一版就只加了风扇卡的 flex:1，结果右列变最高，
+   左下角空出一大块 —— 断言只量了列容器底边，容器被 stretch 拉平，量不出来）。
+   分工：右列风扇卡撐满（四行 space-evenly 铺开），左列照片卡吸收多余高度，
+   照片本身 object-fit: contain + 卡片 flex 居中 → 多出来的空间均分在照片上下，
+   看起来是卡片的留白而不是页面空块。 */
 .printer-layout { align-items: stretch; }
-.pcard.grow { display: flex; flex-direction: column; }
+.pcard.grow { display: flex; flex-direction: column; flex: 1; }
+.photo-card { flex: 1; }
 .fan-rows { display: flex; flex-direction: column; justify-content: space-evenly; flex: 1; }
 
 /* ── 耗材汇总：库存数据概览 ───────────────────────────── */
@@ -906,7 +924,11 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   gap: 26px; align-items: center; padding: 4px 2px 2px;
 }
 .overview-chart { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.donut { display: block; }
+/* ⚠️ 必须显式给尺寸：全局那条 `svg { width:16px; height:16px }`（图标尺寸）
+   会盖掉 SVG 标签上的 width/height **属性**（属性优先级低于任意 CSS 规则），
+   环形图会被压成 16px 的小点 —— 第一版就是这样，断言只算了弧长，没量渲染尺寸。
+   靠 `.donut` 这条把尺寸拿回来，并放一个源级断言钉住。 */
+.donut { display: block; width: 176px; max-width: 100%; height: auto; }
 .donut-arc { transition: stroke-width .2s; }
 .donut-total {
   fill: var(--text); stroke: none; text-anchor: middle;
@@ -984,8 +1006,9 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   .fld.wide { grid-column: span 1; }
   .printer-layout { grid-template-columns: minmax(0, 1fr); }
   .label-layout { grid-template-columns: minmax(0, 1fr); }
-  /* 单列之后「左右两列等高」没意义了，风扇卡恢复自然高度 */
+  /* 单列之后「左右两列等高」没意义了，风扇卡与照片卡都恢复自然高度 */
   .pcard.grow { flex: none; }
+  .photo-card { flex: none; }
   .fan-rows { justify-content: flex-start; }
   .overview-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
 }
@@ -1007,6 +1030,10 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   /* 兜底：任何一处还超宽的表格/长串都不该把整页推出屏幕。
      用 clip 而不是 hidden —— hidden 会建滚动容器，顶栏的 sticky 会失效。 */
   body { overflow-x: clip; }
+  /* auto-fit 网格写死的最小列宽（.grid-2 是 330px、.panel-grid 是 292px）比 320px 手机的
+     可视宽度还大，卡片会被顶到 342px。因为上面有 overflow-x: clip，
+     现象不是「整页能左右晃」而是「右边 22px 被裁掉」，更难发现 —— 320px 扫描断言抓到的。 */
+  .grid-2, .panel-grid { grid-template-columns: minmax(0, 1fr); }
   .table-card { padding-left: 12px; padding-right: 12px; }
   /* 窄屏下把「列多到放不下」的表格统一改成竖排卡片：一行一张卡，
      列名靠 td::before 取 data-label 显示。两个位置都要覆盖：

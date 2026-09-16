@@ -1258,10 +1258,12 @@ function spoolRowHtml(spool) {
     </td>
     <td class="tiny muted" data-label="使用时间">${usage}</td>
     <td class="cell-actions" onclick="event.stopPropagation()">
-      <div class="row-actions">
+      <div class="row-actions main">
         <button title="查看这盘料的详情与使用记录" onclick="openSpoolDetail(${spool.id})">${ICO.eye}详情</button>
         <button title="绑到 AMS 槽位 / 从槽位上解绑" onclick="openBindSpoolDialog(${spool.id})">${ICO.link}绑定</button>
         <button title="复制这盘料的规格，新增一盘同款" onclick="openCloneSpoolDialog(${spool.id})">${ICO.copy}克隆</button>
+      </div>
+      <div class="row-actions sub">
         <button title="打印或导出这盘料的标签" onclick="openLabelDialog(${spool.id})">${ICO.tag}标签</button>
         <button title="手动补录消耗" onclick="openUseDialog(${spool.id})">${ICO.pencil}补录</button>
         <button title="按称重校准余量" onclick="openMeasureDialog(${spool.id})">${ICO.scale}校准</button>

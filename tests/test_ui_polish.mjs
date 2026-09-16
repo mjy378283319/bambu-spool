@@ -471,6 +471,23 @@ check("克隆走的是「新增」而不是编辑（forceNew）",
   "openCloneSpoolDialog 没有传 forceNew");
 check("绑定弹窗能解绑（spool_id 允许传 null）",
   /spool_id:\s*unbind\s*\?\s*null\s*:\s*spoolId/.test(appSrc));
+// 7 个操作按钮分两组排版。原因不是审美：一行 7 个在 1440px 下比表格宽 ~72px，
+// 会把表格顶出卡片（更窄的窗口直接出整页横向滚动条）。
+// 显式分组是唯一可预测的排法 —— 「不分组 + flex-wrap」实测会被自动布局压到 181px、
+// 竖着堆成 4 行（给容器 max-width、给单元格 width 提示都救不回来）。
+check("库存行操作分两组（主操作一行 + 次操作一行）",
+  /class="row-actions main"/.test(appSrc) && /class="row-actions sub"/.test(appSrc));
+check("主操作组就是这轮新增的三个（详情 / 绑定 / 克隆）",
+  /class="row-actions main">[\s\S]{0,700}?详情[\s\S]{0,300}?绑定[\s\S]{0,300}?克隆/.test(appSrc));
+check("次操作组是排在后排的四个",
+  /class="row-actions sub">[\s\S]{0,700}?标签[\s\S]{0,400}?补录[\s\S]{0,400}?校准[\s\S]{0,400}?删除/.test(appSrc));
+check("次操作行字号更小、颜色更淡（视觉上分主次）",
+  /\.row-actions\.sub button\s*\{[^}]*font-size:\s*11\.5px/.test(cssSrc)
+  && /\.row-actions\.sub\s*\{[^}]*margin-top/.test(cssSrc));
+// 桌面端两行都不换行（换行会连带把列宽算窄 → 又回到竖着堆的老问题）
+const rowActionsRule = (cssSrc.match(/\.row-actions\s*\{([^}]*)\}/) || [, ""])[1];
+check("桌面端两组操作都不换行（flex-wrap 只在窄屏媒体查询里开）",
+  !/flex-wrap/.test(rowActionsRule), rowActionsRule.trim());
 check("表头渲染用 sortHead（可点击排序）",
   (appSrc.match(/sortHead\("/g) || []).length >= 4, "可排序的列少于 4 个");
 check("点表头切换排序方向", /function toggleSpoolSort\(/.test(appSrc));
@@ -488,6 +505,14 @@ check("风扇四条通道包了一层 .fan-rows（用于均匀分布）",
 check("两列改成等高（align-items: stretch）",
   /\.printer-layout\s*\{[^}]*align-items:\s*stretch/.test(cssSrc));
 check("单列窄屏下不再硬撑高度", /\.pcard\.grow\s*\{\s*flex:\s*none/.test(cssSrc));
+// 只给右列风扇卡 flex:1 不够：右列会变成较高的那一列，空白从右下角搬到左下角。
+// 左列的照片卡也要吃下多余高度，两列的**内容**才都顶到底边。
+check("风扇卡 flex:1（把右列撑到底）",
+  /\.pcard\.grow\s*\{[^}]*flex:\s*1/.test(cssSrc));
+check("照片卡也 flex:1（把左列撑到底，否则空白只是换个角）",
+  /\.photo-card\s*\{[^}]*flex:\s*1/.test(cssSrc));
+check("单列窄屏下照片卡也恢复自然高度",
+  /\.photo-card\s*\{\s*flex:\s*none/.test(cssSrc));
 
 // ── 12. 汇总页概览图 ────────────────────────────────────────────
 console.log("== 耗材汇总：环形图与价格分布 ==");
@@ -518,6 +543,15 @@ check("各段弧长之和 = 周长（不留缝不重叠）",
 check("空数据也能出图（不抛异常）", donutChart([]).includes("<svg"));
 check("环形图文字显式上色（全局 svg{fill:none} 会把字吃掉）",
   /\.donut-total\s*\{[^}]*fill:\s*var\(--text\)/.test(cssSrc));
+// 同一类陷阱的另一半：全局 `svg { width:16px; height:16px }`（图标尺寸）会盖掉
+// SVG 标签上的 width/height **属性**（属性优先级低于任意 CSS 规则），
+// 环形图会被压成 16px 的小点，而弧长计算全都还是对的 —— 断言必须管到「渲染尺寸」。
+const donutCss = (cssSrc.match(/\.donut\s*\{([^}]*)\}/) || [, ""])[1];
+const donutW = donutCss.match(/width:\s*(\d+)px/);
+check("环形图显式声明宽度（≥140px，否则被全局 svg 16px 规则压扁）",
+  !!donutW && Number(donutW[1]) >= 140, donutCss.trim());
+check("环形图高度自适应（height: auto，配 viewBox 保持正方形）",
+  /height:\s*auto/.test(donutCss), donutCss.trim());
 
 const slots = allSlotEntries();
 check("没有打印机时不返回槽位（界面提示去同步设备）", slots.length === 0, JSON.stringify(slots));
