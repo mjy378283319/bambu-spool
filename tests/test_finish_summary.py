@@ -197,6 +197,57 @@ def test_http_finish_and_brands() -> None:
               "重启测试牌" in load_custom_brands(session), str(load_custom_brands(session)))
 
 
+# ── 3b. 改外观时自动名要跟着走 ────────────────────────────────────
+def test_patch_name_follows_finish() -> None:
+    """前端补上 finish 之后，用户会回头把老料盘的外观一个个补录回来。
+
+    如果只改外观、名字还留着旧的「品牌 材料 颜色」，界面上就会「一列写哑光、
+    名字里没有哑光」，所以名字要跟着一起长。但只能动**还是自动生成**的那些 ——
+    被人手动起过名的，一个字都不许碰。
+    """
+    print("== 改外观：自动名跟着更新，自己起的名不动 ==")
+    reset()
+    client = TestClient(app)
+    client.post("/api/auth/setup", json={"username": "admin", "password": "password123"})
+
+    # 1) 建单就带外观（前端漏传 finish 时这里会变成「普通」）
+    r = client.post("/api/spools", json={
+        "brand": "魔创", "material": "PLA", "color_name": "天蓝", "color_hex": "#7EC8E3",
+        "finish": "哑光", "initial_weight": 1000,
+    })
+    body = r.json()
+    sid = body["id"]
+    check("建单时给的外观真的落库了（不是「普通」）",
+          body.get("finish") == "哑光", str(body.get("finish")))
+    check("默认名按外观拼", body.get("name") == "魔创 PLA 哑光 天蓝", str(body.get("name")))
+
+    # 2) 老料盘补录外观：名字还是自动名 -> 跟着一起更新
+    r = client.post("/api/spools", json={
+        "brand": "魔创", "material": "PLA", "color_name": "天蓝", "color_hex": "#7EC8E3",
+        "initial_weight": 1000,
+    })
+    old = r.json()
+    check("没填外观时名字里不带外观", old.get("name") == "魔创 PLA 天蓝", str(old.get("name")))
+    r = client.patch(f"/api/spools/{old['id']}", json={"finish": "哑光"})
+    check("补上外观后自动名跟着更新",
+          r.json().get("name") == "魔创 PLA 哑光 天蓝", str(r.json().get("name")))
+
+    # 3) 人工起过名的不能被自动名顶掉
+    r = client.post("/api/spools", json={
+        "brand": "魔创", "material": "PLA", "color_name": "天蓝", "color_hex": "#7EC8E3",
+        "initial_weight": 1000, "name": "我的宝贝料",
+    })
+    custom = r.json()
+    r = client.patch(f"/api/spools/{custom['id']}", json={"finish": "哑光"})
+    check("自己起的名不会被自动名覆盖",
+          r.json().get("name") == "我的宝贝料", str(r.json().get("name")))
+
+    # 4) 同一盘再来一次也要跟着（哑光 -> 丝绸）
+    r = client.patch(f"/api/spools/{sid}", json={"finish": "丝绸"})
+    check("再改一次外观，名字继续跟随",
+          r.json().get("name") == "魔创 PLA 丝绸 天蓝", str(r.json().get("name")))
+
+
 # ── 4. HTTP：区域显示 ────────────────────────────────────────────
 def test_region() -> None:
     print("== 区域显示（设置页「中国大陆 / 海外」的数据源） ==")
@@ -345,6 +396,7 @@ def main() -> int:
     test_finish_pure()
     test_migration()
     test_http_finish_and_brands()
+    test_patch_name_follows_finish()
     test_region()
     test_timezone_helpers()
     test_stats_summary()

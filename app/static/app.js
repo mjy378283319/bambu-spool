@@ -315,6 +315,15 @@ function inferFinish(text) {
   return "普通";
 }
 
+/** 色卡系列名里带的外观信息（「PLA 哑光」→ 哑光、「PLA 丝绸」→ 丝绸）。
+ *  系列名**没写**外观时返回空串，而不是「普通」——「猜不出」和「确定是普通」是两回事：
+ *  点「PLA 哑光」色卡里的颜色应该把外观设成哑光；点普通「PLA」色卡里的颜色
+ *  则**不该**把用户已经选好的丝绸/哑光改回普通（那会变成另一种「选了又被改掉」）。 */
+function finishFromSeries(series) {
+  const hit = inferFinish(series || "");
+  return hit === "普通" ? "" : hit;
+}
+
 /** 品牌候选：目录预设 + 库里实际用过的品牌（历史品牌与自定义品牌也要能筛）。 */
 function brandChoices(extra) {
   const preset = (S.catalog.brands || []).slice();
@@ -1461,10 +1470,13 @@ function renderColorPresets() {
       <div class="preset-grid">${g.colors.map((c) => {
         index[c.name] = c.hex;
         if (c.en) index[c.en] = c.hex;
-        const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}${c.official ? "" : "（色值为近似）"}`;
+        // 系列名里的外观（「PLA 哑光」）顺带写进提示：点这里的颜色会把外观设成哑光。
+        const seriesFinish = finishFromSeries(g.series);
+        const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}${c.official ? "" : "（色值为近似）"}`
+          + (seriesFinish ? ` · 外观：${seriesFinish}` : "");
         return `<button type="button" class="preset-chip${c.official ? "" : " approx"}"
-          data-hex="${esc(c.hex)}" style="background:${esc(c.hex)}" title="${esc(tip)}"
-          onclick="pickPresetColor('${esc(c.hex)}', '${esc(c.name)}')"></button>`;
+          data-hex="${esc(c.hex)}" data-series="${esc(g.series)}" style="background:${esc(c.hex)}" title="${esc(tip)}"
+          onclick="pickPresetColor('${esc(c.hex)}', '${esc(c.name)}', '${esc(g.series)}')"></button>`;
       }).join("")}</div>
     </div>`).join("");
 
@@ -1475,11 +1487,50 @@ function renderColorPresets() {
   markActivePreset();
 }
 
-function pickPresetColor(hex, name) {
+/** 把推断出来的外观写进表单，**只在当前是空或「普通」时**才写。
+ *  用户明确选过丝绸/磨砂就绝不覆盖 —— 出了问题的那一轮，毛病正是「选了又被改掉」。 */
+function applyInferredFinish(message, guess) {
+  const el = document.getElementById("f_finish");
+  if (!el || !guess) return;
+  const cur = (el.value || "").trim();
+  if (cur && cur !== "普通") return;   // 已有明确选择，保持不动
+  if (cur === guess) return;
+  el.value = guess;
+  setFinishHint(message);
+}
+
+/** 点色卡里的颜色。系列名写着外观时（「PLA 哑光」）把外观一起带过去 ——
+ *  用户的心智就是「我在哑光色卡里挑的颜色」。自己选过别的外观则保持不动，只提示一声。 */
+function applySeriesFinish(series) {
+  const guess = finishFromSeries(series);
+  if (!guess) return;
+  const el = document.getElementById("f_finish");
+  const cur = el ? (el.value || "").trim() : "";
+  if (cur && cur !== "普通" && cur !== guess) {
+    setFinishHint(`这张色卡是「${series}」，外观保持你选的「${cur}」`);
+    return;
+  }
+  applyInferredFinish(`已按色卡「${series}」把外观设为${guess}，可改`, guess);
+}
+
+function setFinishHint(text) {
+  const el = document.getElementById("finishHint");
+  if (!el) return;
+  if (text) {
+    el.textContent = text;
+    el.classList.remove("hidden");
+  } else {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+}
+
+function pickPresetColor(hex, name, series) {
   const nameEl = document.getElementById("f_color_name");
   const hexEl = document.getElementById("f_color_hex");
   if (nameEl) nameEl.value = name;
   if (hexEl) hexEl.value = hex;
+  applySeriesFinish(series);
   markActivePreset();
 }
 
@@ -1489,6 +1540,12 @@ function onColorNameInput() {
   if (!nameEl || !hexEl) return;
   const hit = (S._presetIndex || {})[nameEl.value.trim()];
   if (hit) hexEl.value = hit;
+  // 对话框底下的说明写着「颜色名里带哑光/丝绸会自动预填」——以前这句是空头支票
+  // （inferFinish 只在单测里被调用过），现在真的接上了。
+  const guess = inferFinish(nameEl.value);
+  if (guess !== "普通") {
+    applyInferredFinish(`颜色名里带了「${guess}」，已预填外观，可改`, guess);
+  }
   markActivePreset();
 }
 
@@ -1550,6 +1607,7 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
         <input type="color" id="f_color_hex" value="${esc(value.color_hex)}" style="height:34px;padding:2px" oninput="markActivePreset()" /></label>
     </div>
     <div id="colorPresets"></div>
+    <p class="hint hidden" id="finishHint"></p>
     <div class="field-row">
       <label class="field"><span>空盘皮重（g）</span>
         <input type="number" id="f_spool_weight" value="${value.spool_weight}" step="1" /></label>
@@ -1566,7 +1624,8 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
       <input id="f_location" value="${esc(value.location || "")}" placeholder="如：干燥箱 A / 货架第二层" /></label>
     <label class="field"><span>备注（可选）</span><input id="f_note" value="${esc(value.note || "")}" /></label>
     <p class="hint">外观是表面工艺：同一材料同一颜色也可能有普通 / 哑光 / 丝绸几种货，价格不一样，
-      所以单独记一列。颜色名里带「哑光」「丝绸」这类词时会自动预填，可以改。</p>
+      所以单独记一列。颜色名里带「哑光」「丝绸」这类词、或从写着外观的色卡（如「PLA 哑光」）
+      里点颜色时，会帮你把外观预填上；你自己填过的值不会被覆盖。保存时会原样存下来。</p>
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
     <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
   `, `<button onclick="closeModal()">取消</button>
@@ -1601,6 +1660,10 @@ async function saveSpool(id) {
   const payload = {
     brand: document.getElementById("f_brand").value.trim(),
     material: document.getElementById("f_material").value.trim(),
+    // 外观**必须**在 payload 里。它在 e32a12b 那次「加外观字段」时就漏了：
+    // 表单上有输入框、后端也一直在收，中间少了一根线 →
+    // 用户选了哑光、存下来还是普通（2026-09-16 反馈）。
+    finish: document.getElementById("f_finish").value.trim(),
     color_name: document.getElementById("f_color_name").value.trim() || "黑色",
     color_hex: document.getElementById("f_color_hex").value,
     spool_weight: parseFloat(document.getElementById("f_spool_weight").value) || 0,
@@ -3634,7 +3697,7 @@ setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {})
 window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
   // 外观预填、区域文案、机型照片、扫码认码 —— 错了都是「界面看着正常但不对」
-  inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText,
+  inferFinish, finishFromSeries, finishChoices, regionLabel, printerPhoto, parseScanText,
   // 料盘状态口径 / 排序 / 价格分档 / 概览图：库存页与汇总页共用，必须一致
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries, slotKey,

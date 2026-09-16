@@ -199,7 +199,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.3.3",
+        "version": "0.3.4",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -681,6 +681,13 @@ def patch_spool(
     if spool is None:
         raise HTTPException(status_code=404, detail="料盘不存在")
 
+    # 动手改字段之前，先按「老参数」算一遍默认名。改完再比一次：
+    #   名字 == 默认名 → 说明它一直是自动生成的，跟着新参数一起更新
+    #   （用户反馈的外观丢失，是前端漏传 finish；补上之后回头重存老料盘时，
+    #    名字若还留着旧的「品牌 材料 颜色」，外观就白改了）；
+    #   名字 != 默认名 → 已经被人改过，原样保留，不去覆盖。
+    auto_name = build_spool_name(spool.brand, spool.material, spool.color_name, spool.finish)
+
     for field in ("material", "color_name", "name", "location", "note", "tray_info_idx"):
         value = getattr(payload, field)
         if value is not None:
@@ -704,6 +711,9 @@ def patch_spool(
     if payload.remaining_weight is not None:
         spool.remaining_weight = round(max(0.0, payload.remaining_weight), 2)
         spool.used_weight = round(max(0.0, spool.initial_weight - spool.remaining_weight), 2)
+
+    if spool.name == auto_name:
+        spool.name = build_spool_name(spool.brand, spool.material, spool.color_name, spool.finish)
 
     spool.updated_at = utcnow()
     session.add(spool)

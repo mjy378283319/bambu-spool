@@ -122,7 +122,7 @@ if (!dbg) {
   process.exit(1);
 }
 const {
-  inferFinish, finishChoices, regionLabel, printerPhoto, parseScanText, state,
+  inferFinish, finishFromSeries, finishChoices, regionLabel, printerPhoto, parseScanText, state,
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries,
   spoolOptionHtml, bindCandidates,
@@ -167,6 +167,47 @@ check("「半透明黑」判成半透而不是透明（关键词顺序敏感）"
 check("「translucent」判成半透", inferFinish("translucent 灰") === "半透", inferFinish("translucent 灰"));
 // 同理：丝绸要压过哑光
 check("「丝绸哑光」判成丝绸", inferFinish("丝绸哑光白") === "丝绸", inferFinish("丝绸哑光白"));
+
+// ── 1b. 色卡系列名 -> 外观，以及「保存时外观到底发没发出去」 ────────────
+console.log("== 色卡系列名里的外观 + 保存链路 ==");
+
+// 用户反馈：「选择了哑光、选完色卡、保存后还是普通」。
+// 真凶是 saveSpool() 的 payload 里压根没有 finish —— 表单上那个输入框从
+// 加进来的第一天（e32a12b）起就没接过线，后端一直收得好好的也救不回来。
+// 先把这个钉死：这条断言要是早写，bug 活不到今天。
+check("saveSpool 的 payload 里带着 finish（读的就是表单上的外观输入框）",
+  /finish:\s*document\.getElementById\("f_finish"\)\.value/.test(appSrc),
+  "payload 里少了 finish —— 外观填了也存不进去");
+
+const seriesCases = [
+  ["PLA 哑光", "哑光"],
+  ["PLA 丝绸", "丝绸"],
+  ["PETG 哑光", "哑光"],
+  ["哑光双色", "哑光"],       // 「双色」不许盖过「哑光」
+  ["哑光三色", "哑光"],
+  ["丝绸彩虹", "丝绸"],
+  ["金属色", "金属"],
+  ["PLA", ""],                // 系列名没写外观 -> 空串
+  ["PLA+", ""],
+  ["HT-PLA", ""],
+  ["", ""],
+];
+for (const [series, want] of seriesCases) {
+  const got = finishFromSeries(series);
+  check(`finishFromSeries(${JSON.stringify(series)}) -> ${JSON.stringify(want)}`,
+    got === want, `实际 ${JSON.stringify(got)}`);
+}
+// 「猜不出」和「确定是普通」是两回事：点普通色卡里的颜色不该把用户已经选好的
+// 哑光改回普通 —— 那只是把「选了又被改掉」换个方向再犯一遍。
+check("系列名没写外观时给空串而不是「普通」（否则会拿它去覆盖用户的选择）",
+  finishFromSeries("PLA") === "" && finishFromSeries("PETG") === "",
+  JSON.stringify([finishFromSeries("PLA"), finishFromSeries("PETG")]));
+check("自动预填只在当前是空或「普通」时才动手（不覆盖用户已选的外观）",
+  /function applyInferredFinish[\s\S]{0,400}?if \(cur && cur !== "普通"\) return;/.test(appSrc),
+  "applyInferredFinish 少了「已有明确选择就不动」的早退");
+check("色卡色块把系列名一起传下去（不然不知道点的是哪张卡）",
+  /pickPresetColor\('\$\{esc\(c\.hex\)\}', '\$\{esc\(c\.name\)\}', '\$\{esc\(g\.series\)\}'\)/.test(appSrc),
+  "pickPresetColor 没收到系列名");
 
 // ── 2. 外观候选列表 ─────────────────────────────────────────────
 console.log("== 外观候选（预设 + 库里实际用过的写法，不重复） ==");

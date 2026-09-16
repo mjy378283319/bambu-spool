@@ -912,6 +912,99 @@ async function main() {
     `克隆 ${clone.remaining} vs 满盘 ${clone.src.initial}`);
   await cdp.evaluate(sessionId, `closeModal()`);
 
+  /* ── 新增料盘：外观到底存进去没有（2026-09-16 用户反馈） ──
+     用户说的是「选了哑光、选完色卡、保存后还是普通」。真凶是 saveSpool() 的 payload
+     从来没带 finish（表单上有输入框、后端也一直在收，中间少了一根线）。
+     这里**不看界面回显** —— 列表本来就是照接口画的，界面看着永远是对的；
+     走完整的「填表单 → 点色卡 → 保存」，最后**再拉一次接口**核对库里到底是什么。 */
+  const finishPart1 = await cdp.evaluate(sessionId, `(() => {
+    openSpoolDialog(null);
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const val = (id) => ((document.getElementById(id) || {}).value || "");
+    const hintInfo = () => {
+      const h = document.getElementById("finishHint");
+      return h ? { shown: !h.classList.contains("hidden"), text: (h.textContent || "").trim() } : null;
+    };
+    set("f_brand", "魔创");
+    set("f_material", "PLA");
+    set("f_color_name", "天蓝");
+    set("f_finish", "普通");
+    renderColorPresets();
+    const chip = [...document.querySelectorAll(".preset-chip")]
+      .find((c) => (c.getAttribute("data-series") || "").indexOf("哑光") >= 0);
+    // ① 外观还是「普通」时点哑光色卡里的颜色 —— 系列名写着外观，应该被带成哑光
+    if (chip) chip.click();
+    return {
+      chipSeries: chip ? chip.getAttribute("data-series") : null,
+      autoFilled: val("f_finish"),
+      autoHint: hintInfo(),
+    };
+  })()`);
+  // 这一张就是给用户看的证据：色卡下面那行「已按色卡…设为哑光」。
+  // 拍之前把鼠标挪开 —— 色块上的原生 title 提示框会糊在色卡正中间。
+  await cdp.send("Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: 8, y: 8, button: "none" }, sessionId);
+  await sleep(400);
+  await cdp.shot(sessionId, path.join(OUT, "07c-spool-dialog-finish.png"));
+
+  const finishPart2 = await cdp.evaluate(sessionId, `(async () => {
+    const before = await (await fetch("/api/spools?archived=false")).json();
+    const beforeIds = new Set((before.spools || []).map((s) => s.id));
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const val = (id) => ((document.getElementById(id) || {}).value || "");
+    const hintInfo = () => {
+      const h = document.getElementById("finishHint");
+      return h ? { shown: !h.classList.contains("hidden"), text: (h.textContent || "").trim() } : null;
+    };
+    const chip = [...document.querySelectorAll(".preset-chip")]
+      .find((c) => (c.getAttribute("data-series") || "").indexOf("哑光") >= 0);
+
+    // ② 用户自己选了丝绸，再点哑光色卡 —— 不许把人家选的值改掉
+    set("f_finish", "丝绸");
+    if (chip) chip.click();
+    const keptFinish = val("f_finish");
+    const keptHint = hintInfo();
+
+    // ③ 用户的操作顺序（截图里就是先选哑光、再点哑光色卡）—— 保持哑光
+    set("f_finish", "哑光");
+    if (chip) chip.click();
+    const sameFinish = val("f_finish");
+
+    await saveSpool(null);
+    const after = await (await fetch("/api/spools?archived=false")).json();
+    const fresh = (after.spools || []).find((s) => !beforeIds.has(s.id));
+    return {
+      keptFinish, keptHint, sameFinish,
+      saved: fresh ? { id: fresh.id, finish: fresh.finish, name: fresh.name } : null,
+    };
+  })()`);
+  const finishSave = { ...finishPart1, ...finishPart2 };
+  console.log("新增料盘（外观存没存）：", JSON.stringify(finishSave).slice(0, 460));
+  check("魔创 PLA 里能找到「哑光」色卡",
+    !!finishSave.chipSeries && finishSave.chipSeries.indexOf("哑光") >= 0,
+    String(finishSave.chipSeries));
+  check("外观还是「普通」时点哑光色卡里的颜色，会带成哑光",
+    finishSave.autoFilled === "哑光", JSON.stringify(finishSave.autoFilled));
+  check("预填时给了提示（不是偷偷改的）",
+    !!(finishSave.autoHint || {}).shown, JSON.stringify(finishSave.autoHint));
+  check("用户自己选过丝绸时，点哑光色卡不会被改掉",
+    finishSave.keptFinish === "丝绸", JSON.stringify(finishSave.keptFinish));
+  check("不覆盖时也说明了原因（这张卡是哑光，外观保持你选的）",
+    /保持/.test(((finishSave.keptHint || {}).text) || ""), JSON.stringify(finishSave.keptHint));
+  check("先选哑光再点哑光色卡，外观还是哑光",
+    finishSave.sameFinish === "哑光", JSON.stringify(finishSave.sameFinish));
+  check("保存后库里那盘料的外观确实是哑光（不是「普通」）",
+    !!finishSave.saved && finishSave.saved.finish === "哑光",
+    JSON.stringify(finishSave.saved));
+  check("默认名也跟着带上了外观",
+    !!finishSave.saved && finishSave.saved.name.indexOf("哑光") >= 0,
+    JSON.stringify((finishSave.saved || {}).name));
+  // 断言完就把这盘试验品删掉，别影响后面的手机端截图
+  if (finishSave.saved) {
+    await cdp.evaluate(sessionId,
+      `fetch("/api/spools/" + ${JSON.stringify(finishSave.saved.id)}, { method: "DELETE" })`);
+  }
+
   /* ── 扫码深链：应用开着时改 hash 也要跳转 ──
    * 手机上的真实用法是「应用开着 → 系统相机扫二维码 → 浏览器只换 hash」。
    * 这里就模拟那一步：直接改 location.hash，看应用有没有就地接住。 */
