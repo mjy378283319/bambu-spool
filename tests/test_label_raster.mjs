@@ -381,7 +381,7 @@ async function testRenderedLayout() {
   const boxes = log.images.concat().map((i) => /box=(\d+)/.exec(i.src)).map((m) => (m ? Number(m[1]) : 0));
   check("只按整数倍率取图", boxes.every((b) => Number.isInteger(b) && b >= 1), boxes.join(","));
 
-  check("画了文字", log.texts.length >= 5, String(log.texts.length));
+  check("画了文字", log.texts.length >= 4, String(log.texts.length));
   check("名字从最左边距开始（色块已移除）",
     log.texts.length > 0 && Math.abs(log.texts[0].x - mm2dot(padMm, 203)) < 0.5,
     log.texts.length ? String(log.texts[0].x) : "无文字");
@@ -390,13 +390,35 @@ async function testRenderedLayout() {
   const overflow = log.texts.filter((t) => t.x + t.width > qr.x - 1);
   check("文字都让开了二维码", overflow.length === 0,
     overflow.map((t) => `${t.text}@${Math.round(t.x + t.width)}>${qr.x}`).join(","));
-  check("页脚带编号、颜色名与色值",
-    log.texts.some((t) => t.text.includes("#3") && t.text.includes("天蓝色") && t.text.includes("#147DB5")),
+  // 名字「魔创 PLA 天蓝色」已含品牌/材质/颜色名 -> 副行整行省略、页脚不带颜色名
+  check("名字写全了就不再重复印副行（无「魔创 · PLA」）",
+    !log.texts.some((t) => t.text.includes("魔创 · PLA")),
     log.texts.map((t) => t.text).join(" | "));
-  check("低余量有偏低标记", log.texts.some((t) => t.text.includes("偏低")),
+  check("页脚带编号与色值，但不重复颜色名",
+    log.texts.some((t) => t.text.includes("#3") && t.text.includes("#147DB5") && !t.text.includes("天蓝色")),
     log.texts.map((t) => t.text).join(" | "));
+  const allText = log.texts.map((t) => t.text).join(" | ");
+  check("百分比与「偏低」标记已移除", !allText.includes("%") && !allText.includes("偏低"), allText);
+  check("余量主行还在（余 218 g）", log.texts.some((t) => t.text.includes("余 218 g")), allText);
   check("没有画色块（fillRect 只有铺白底）", log.fills.length <= 1 && log.strokes === 0,
     `fills=${log.fills.length} strokes=${log.strokes}`);
+
+  // 名字没写全时，副行要补上缺的信息（品牌/材质/外观），页脚也补颜色名
+  const log3 = { fills: [], texts: [], images: [], strokes: 0 };
+  sandbox.document.createElement = () => ({
+    width: 0,
+    height: 0,
+    style: {},
+    getContext: () => fakeContext(log3),
+  });
+  const bareSpool = Object.assign({}, spool, { name: "我的第 3 盘料", finish: "丝绸" });
+  await sandbox.labelDebug.renderLabel(bareSpool, cfg);
+  const bareTexts = log3.texts.map((t) => t.text).join(" | ");
+  check("名字没写品牌材质时副行补齐（魔创 · PLA · 丝绸）",
+    log3.texts.some((t) => t.text === "魔创 · PLA · 丝绸"), bareTexts);
+  check("名字没写颜色名时页脚补上（#3 · 天蓝色 · #147DB5）",
+    log3.texts.some((t) => t.text.includes("#3") && t.text.includes("天蓝色") && t.text.includes("#147DB5")),
+    bareTexts);
 
   // 二维码放大到近半张标签后，文字列只剩 ~21mm —— 长名字必须靠缩字号整串放下，
   // 一旦被截成「Polymaker PETG …」就白瞎了一行（第二行还是同样的品牌·材料）。

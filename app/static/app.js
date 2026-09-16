@@ -1096,14 +1096,18 @@ function useStateTally(spools) {
 }
 
 /* ── 价格区间分布 ──────────────────────────────────────── */
-/** 分档步长候选。挑「刚好装得下」的那一档，别让全部料盘挤进最后一格。 */
-const PRICE_STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000];
+/** 固定五档（按反馈定死）：0-10 / 10-20 / 20-30 / 30-40 / 40 以上。
+ *  之前按最高价自适应步长，档位名称每次都不一样，看着费劲；
+ *  现在固定档名，最后一档上不封顶，多少钱都兜得住。 */
+const PRICE_BANDS = [
+  { from: 0, to: 10, label: "¥0 - 10" },
+  { from: 10, to: 20, label: "¥10 - 20" },
+  { from: 20, to: 30, label: "¥20 - 30" },
+  { from: 30, to: 40, label: "¥30 - 40" },
+  { from: 40, to: null, label: "¥40 以上" },
+];
 
-/** 把料盘按整盘价分档（0 起、最多 6 档）。
- *
- *  不写死「0-10 / 10-20 / …」这类固定档：真实耗材整盘价多在 ¥30~200，
- *  固定档会把所有盘塞进最后一格，等于没有分布。这里按最高价挑步长，
- *  低到 10 元一档、高到几百元一档都能出图。
+/** 把料盘按整盘价分进固定五档。
  *
  *  @returns {{buckets: Array, unpriced: number, priced: number}}
  */
@@ -1112,27 +1116,23 @@ function priceBuckets(spools) {
   const unpriced = (spools || []).length - priced.length;
   if (!priced.length) return { buckets: [], unpriced, priced: 0 };
 
-  const hi = Math.max(...priced.map((s) => Number(s.price) || 0));
-  const step = PRICE_STEPS.find((s) => Math.ceil(hi / s) <= 6) || PRICE_STEPS[PRICE_STEPS.length - 1];
-  const count = Math.max(1, Math.ceil(hi / step));
-  const buckets = [];
-  for (let i = 0; i < count; i++) {
+  const buckets = PRICE_BANDS.map((band) => {
     // 左开右闭：(from, to]。价格正好等于档位边界时落在低的一档，
-    // 这样 "¥50 - 100" 里装的是 50.01~100，不会跟上一档重复计数。
-    const from = i * step;
-    const to = (i + 1) * step;
+    // 这样 20 元归「¥10 - 20」，不会跟「¥20 - 30」重复计数；
+    // 最后一档上不封顶：40 元（含）以上全归「¥40 以上」。
     const hit = priced.filter((s) => {
       const p = Number(s.price) || 0;
-      return p > from && p <= to;
+      return band.to == null ? p >= band.from : (p > band.from && p <= band.to);
     });
-    buckets.push({
-      from, to,
-      label: `¥${from} - ${to}`,
+    return {
+      from: band.from,
+      to: band.to,
+      label: band.label,
       count: hit.length,
       percent: priced.length ? (hit.length / priced.length) * 100 : 0,
       value: hit.reduce((sum, s) => sum + (Number(s.price) || 0), 0),
-    });
-  }
+    };
+  });
   return { buckets, unpriced, priced: priced.length };
 }
 
@@ -2495,13 +2495,14 @@ function jumpToSpoolsByState(stateKey) {
   switchSpoolTab(tab);
 }
 
-/** 点价格档「查看明细」-> 跳到料盘库存并按这个价格区间筛。 */
+/** 点价格档「查看明细」-> 跳到料盘库存并按这个价格区间筛。
+ *  「¥40 以上」档没有上限，to 传空串 = 不填最大价。 */
 function jumpToSpoolsByPrice(from, to) {
   switchView("spools");
   const min = document.getElementById("spoolPriceMin");
   const max = document.getElementById("spoolPriceMax");
   if (min) min.value = String(from);
-  if (max) max.value = String(to);
+  if (max) max.value = to == null || to === "" ? "" : String(to);
   S.spoolPage = 1;
   renderSpools();
 }
@@ -2596,13 +2597,13 @@ function renderPriceDist() {
   }
 
   host.innerHTML = buckets.map((b, i) => `
-    <button class="price-card" onclick="jumpToSpoolsByPrice(${b.from}, ${b.to})"
+    <button class="price-card" onclick="jumpToSpoolsByPrice(${b.from}, ${b.to == null ? '""' : b.to})"
             title="到料盘库存里看这 ${b.count} 盘">
       <div class="price-head">
         <span class="dot" style="background:${MATERIAL_COLORS[i % MATERIAL_COLORS.length]}"></span>
-        <span>${esc(b.label)}</span>
+        <span>整盘价格</span>
       </div>
-      <div class="price-range">¥${b.from} - ${b.to}</div>
+      <div class="price-range">${esc(b.label)}</div>
       <div class="price-nums">
         <span>数量 <b>${b.count}</b> 盘</span>
         <span>占比 <b>${b.percent.toFixed(0)}%</b></span>

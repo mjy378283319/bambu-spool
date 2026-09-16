@@ -429,8 +429,8 @@ check("三种状态都有标签与对应标签页",
   ["unused", "in_use", "empty"].every((k) => USE_STATE_META[k]
     && USE_STATE_META[k].label && USE_STATE_META[k].color && USE_STATE_META[k].tab));
 
-// ── 9. 价格区间分档 ─────────────────────────────────────────────
-console.log("== 价格区间分布（不重不漏、档数可控） ==");
+// ── 9. 价格区间分档（固定五档） ────────────────────────────────
+console.log("== 价格区间分布（固定五档、不重不漏） ==");
 
 const emptyBuckets = priceBuckets([]);
 check("没有料盘 -> 没有档", emptyBuckets.buckets.length === 0, JSON.stringify(emptyBuckets));
@@ -438,24 +438,26 @@ const noPrice = priceBuckets([{ price: 0 }, { price: 0 }]);
 check("全都没登记价格 -> 没有档，但记下未登记数量",
   noPrice.buckets.length === 0 && noPrice.unpriced === 2, JSON.stringify(noPrice));
 
+const EXPECTED_BANDS = ["¥0 - 10", "¥10 - 20", "¥20 - 30", "¥30 - 40", "¥40 以上"];
 const p10 = priceBuckets([
   { price: 45 }, { price: 50 }, { price: 12 }, { price: 0 },
 ]);
-check("最高价 50 -> 步长取 10", p10.buckets.length === 5 && p10.buckets[0].to === 10,
+check("固定五档：0-10 / 10-20 / 20-30 / 30-40 / 40以上",
+  p10.buckets.length === 5 && p10.buckets.every((b, i) => b.label === EXPECTED_BANDS[i]),
   JSON.stringify(p10.buckets.map((b) => b.label)));
 check("未登记价格的盘不计入档内", p10.buckets.reduce((s, b) => s + b.count, 0) === 3,
   String(p10.buckets.reduce((s, b) => s + b.count, 0)));
 check("未登记数量单独给出（界面要提一句）", p10.unpriced === 1, String(p10.unpriced));
-// 左开右闭：正好 50 元归「40-50」，别跟上一档重复计数
-check("价格正好落在档位边界时算低的一档（45 与 50 同档，12 在下一档）",
-  p10.buckets.find((b) => b.label === "¥40 - 50").count === 2
+// 左开右闭：正好 50 元归「¥40 以上」，12 元归「¥10 - 20」
+check("边界价落对档（45 与 50 同在「¥40 以上」，12 在「¥10 - 20」）",
+  p10.buckets.find((b) => b.label === "¥40 以上").count === 2
   && p10.buckets.find((b) => b.label === "¥10 - 20").count === 1, JSON.stringify(p10.buckets));
 check("每一档的占比之和约为 100%",
   Math.abs(p10.buckets.reduce((s, b) => s + b.percent, 0) - 100) < 0.01);
 
 const hi = priceBuckets([{ price: 1200 }]);
-check("单盘 1200 元 -> 档数不超过 6", hi.buckets.length <= 6, String(hi.buckets.length));
-check("最后一档能兜住最高价",
+check("单盘 1200 元也只出固定五档", hi.buckets.length === 5, String(hi.buckets.length));
+check("最后一档「¥40 以上」兜住最高价",
   hi.buckets[hi.buckets.length - 1].count === 1, JSON.stringify(hi.buckets.map((b) => b.label)));
 
 // 覆盖面：任意价格都必须落进恰好一档
