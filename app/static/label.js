@@ -162,17 +162,15 @@
   /* ── 渲染 ───────────────────────────────────────────────── */
 
   /** 版式全部用毫米算，再换算成点，这样换尺寸/换 dpi 都不用改代码。
-   *  二维码固定在右侧、占满整个高度；左侧留一列放文字。
-   *  （早期版本二维码在右下角、高只占 25%，203dpi 下只有 11mm 见方，太难扫。） */
+   *  二维码固定在右侧、占满整个高度；左侧文字列纵向**按实际行数均分**：
+   *  只固定「第一行基线」和「页脚基线」，中间的行摊开铺满，
+   *  行数少了间距自动变大也不会留出一大块空白（0.3.6 前是固定几档 y 值，
+   *  副行省略后就空一块，被用户截图点名）。 */
   function layoutOf(wMm, hMm) {
     return {
       pad: Math.max(1.1, wMm * 0.032),
-      name: hMm * 0.155,
-      sub: hMm * 0.285,
-      main: hMm * 0.475,
-      total: hMm * 0.575,
-      loc: hMm * 0.7,
-      foot: hMm * 0.91,
+      top: hMm * 0.155,  // 第一行文字基线
+      foot: hMm * 0.91,  // 页脚基线（固定在最下面，不参与均分）
     };
   }
 
@@ -218,9 +216,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     return out;
   }
 
-  /** 去重：名字里已经出现过的信息不再重复印（副行、页脚共用）。
-   *  例如名字叫「魔创 PLA 天蓝色」时，副行的「魔创 · PLA」和页脚的
-   *  「天蓝色」都是重复，全部剔除；剔完美了就整行不画。 */
+  /** 去重：名字里已经出现过的信息不再重复印（页脚用）。
+   *  例如名字叫「魔创 PLA 天蓝色」时，页脚不再带「天蓝色」。 */
   function dedupeAgainst(name, parts) {
     const out = [];
     for (const p of parts) {
@@ -229,6 +226,19 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       out.push(t);
     }
     return out;
+  }
+
+  /** 从料盘名里剥掉品牌/材料/外观，剩下的是「这盘料自己的名字」。
+   *  自动拼的名字（品牌 材料 颜色）剥完只剩颜色，正好当第三行，
+   *  不会跟第一、二行重复；手动起的名（如「厨房测试盘」）原样保留。 */
+  function residualName(name, parts) {
+    let out = String(name == null ? "" : name);
+    for (const p of parts) {
+      const t = String(p == null ? "" : p).trim();
+      if (!t) continue;
+      out = out.split(t).join(" ");
+    }
+    return out.replace(/[·•,，、/\\|\-—]+/g, " ").replace(/\s+/g, " ").trim();
   }
 
   function loadQrImage(spoolId, box) {
@@ -284,40 +294,39 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
     const textX = L.pad;
     const name = String(spool.name || "");
-    drawText(ctx, dpi, name, textX, L.name, cfg.hMm * 0.105, { bold: true, maxMm: textMax });
 
-    // 副行：品牌 / 材质 / 外观 —— 名字里已经写过的不再重复；
-    // 名字本身把这些都写全了（如「魔创 PLA 天蓝色」）就整行省略，
-    // 余量主行相应上移，别在中间留一块空白。
-    const subParts = dedupeAgainst(name, [
-      spool.brand,
-      spool.material,
-      spool.finish && spool.finish !== "普通" ? spool.finish : "",
-    ]);
-    const hasSub = subParts.length > 0;
-    if (hasSub) {
-      drawText(ctx, dpi, subParts.join(" · "), textX, L.sub, cfg.hMm * 0.072, { maxMm: textMax });
-    }
-
-    // 余量：主行「余 x g」+ 下一行「/ 总量」。
-    // 右侧的百分比与「偏低」标记已按反馈移除——打印出来既不直观也占版面。
+    // 左侧文字固定四行（0.3.6 按反馈定的结构）：
+    //   1 品牌  2 类型·外观  3 名字（剥掉品牌/材料后剩下的，通常是颜色名）
+    //   4 余量（含总量）
+    // 有「位置」就在第 4 行下面再补一行；页脚（编号·色值）固定在最下面不动。
+    // 行数不固定，所以中间各行按实际行数均分纵向空间，不留大片空白。
+    const typeText = [spool.material, spool.finish && spool.finish !== "普通" ? spool.finish : ""]
+      .filter(Boolean).join(" · ");
+    const ownName = residualName(name, [spool.brand, spool.material, spool.finish])
+      || spool.color_name || name;
     const remain = Math.round(spool.remaining_weight);
     const initial = Math.round(spool.initial_weight);
-    const mainSize = cfg.hMm * 0.115;
-    const mainBase = hasSub ? L.main : (L.name + L.main) / 2;
-    const totalBase = mainBase + (L.total - L.main);
-    drawText(ctx, dpi, "余 " + remain + " g", textX, mainBase, mainSize, { bold: true, maxMm: textMax });
-    drawText(ctx, dpi, "/ " + initial + " g", textX, totalBase, cfg.hMm * 0.072, { maxMm: textMax });
+    const rows = [
+      { text: spool.brand, size: 0.072 },
+      { text: typeText, size: 0.070 },
+      { text: ownName, size: 0.100, bold: true },
+      { text: "余 " + remain + " g / " + initial + " g", size: 0.098, bold: true },
+      { text: spool.location ? "位置 " + spool.location : "", size: 0.065 },
+    ].filter((r) => String(r.text == null ? "" : r.text).trim());
 
-    if (spool.location) {
-      drawText(ctx, dpi, "位置 " + spool.location, textX, L.loc, cfg.hMm * 0.075, { maxMm: textMax });
-    }
+    const topBase = L.top;
+    const bottomBase = L.foot - cfg.hMm * 0.115; // 最后一行与页脚之间留一行字高的空
+    const n = rows.length;
+    rows.forEach((row, i) => {
+      const y = n > 1 ? topBase + ((bottomBase - topBase) * i) / (n - 1) : topBase;
+      drawText(ctx, dpi, String(row.text), textX, y, cfg.hMm * row.size,
+        { bold: !!row.bold, maxMm: textMax });
+    });
 
     // 页脚：编号 + 色值；颜色名只在名字里没写时才补上（否则又是重复）
-    const foot = ["#" + spool.id];
-    if (spool.color_name && !name.includes(spool.color_name)) foot.push(spool.color_name);
+    const foot = ["#" + spool.id, ...dedupeAgainst(name, [spool.color_name])];
     if (spool.color_hex) foot.push(String(spool.color_hex).toUpperCase());
-    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, cfg.hMm * 0.067, { maxMm: textMax });
+    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, cfg.hMm * 0.062, { maxMm: textMax });
 
     return canvas;
   }
@@ -896,7 +905,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName };
 
   Object.assign(window, {
     openLabelDialog,

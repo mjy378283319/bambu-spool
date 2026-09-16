@@ -385,25 +385,38 @@ async function testRenderedLayout() {
   check("名字从最左边距开始（色块已移除）",
     log.texts.length > 0 && Math.abs(log.texts[0].x - mm2dot(padMm, 203)) < 0.5,
     log.texts.length ? String(log.texts[0].x) : "无文字");
-  check("名字没被截断", log.texts.length > 0 && log.texts[0].text === spool.name,
-    log.texts.length ? log.texts[0].text : "");
+  // 四行结构（0.3.6 定稿）：品牌 / 类型·外观 / 名字（剥掉品牌材料后的颜色名）/ 余量
+  const texts = log.texts.map((t) => t.text);
+  check("第一行 = 品牌", texts[0] === "魔创", texts.join(" | "));
+  check("第二行 = 类型（普通外观不写）", texts[1] === "PLA", texts.join(" | "));
+  check("第三行 = 名字剥掉品牌材料后剩下的颜色名", texts[2] === "天蓝色", texts.join(" | "));
+  check("第四行 = 余量 + 总量（一行写完）", texts[3] === "余 218 g / 1000 g", texts.join(" | "));
   const overflow = log.texts.filter((t) => t.x + t.width > qr.x - 1);
   check("文字都让开了二维码", overflow.length === 0,
     overflow.map((t) => `${t.text}@${Math.round(t.x + t.width)}>${qr.x}`).join(","));
-  // 名字「魔创 PLA 天蓝色」已含品牌/材质/颜色名 -> 副行整行省略、页脚不带颜色名
-  check("名字写全了就不再重复印副行（无「魔创 · PLA」）",
-    !log.texts.some((t) => t.text.includes("魔创 · PLA")),
-    log.texts.map((t) => t.text).join(" | "));
+  check("整串名字不再作为标题出现（不跟前三行重复）",
+    !texts.some((t) => t.includes("魔创 PLA")), texts.join(" | "));
   check("页脚带编号与色值，但不重复颜色名",
-    log.texts.some((t) => t.text.includes("#3") && t.text.includes("#147DB5") && !t.text.includes("天蓝色")),
-    log.texts.map((t) => t.text).join(" | "));
-  const allText = log.texts.map((t) => t.text).join(" | ");
+    texts.some((t) => t.includes("#3") && t.includes("#147DB5") && !t.includes("天蓝色")),
+    texts.join(" | "));
+  const allText = texts.join(" | ");
   check("百分比与「偏低」标记已移除", !allText.includes("%") && !allText.includes("偏低"), allText);
-  check("余量主行还在（余 218 g）", log.texts.some((t) => t.text.includes("余 218 g")), allText);
   check("没有画色块（fillRect 只有铺白底）", log.fills.length <= 1 && log.strokes === 0,
     `fills=${log.fills.length} strokes=${log.strokes}`);
 
-  // 名字没写全时，副行要补上缺的信息（品牌/材质/外观），页脚也补颜色名
+  // 纵向不留大片空白：各行基线均分，末行与页脚之间也不能空出一大块
+  // （页脚是最后画的一行，单独固定在底部，不参与均分）
+  const ys = log.texts.slice(0, log.texts.length - 1).map((t) => t.y);
+  const gaps = ys.slice(1).map((y, i) => y - ys[i]);
+  check("各行基线均匀分布（相邻间距差 ≤ 2px）",
+    Math.max(...gaps) - Math.min(...gaps) <= 2,
+    gaps.map((g) => Math.round(g)).join(","));
+  const gapToFoot = mm2dot(cfg.hMm * 0.91, 203) - ys[ys.length - 1];
+  const stepDots = ys[1] - ys[0];
+  check("末行到页脚的空隙不超过行距（不成一大块空白）", gapToFoot <= stepDots + 2,
+    `${Math.round(gapToFoot)} vs ${Math.round(stepDots)}`);
+
+  // 名字是手动起的（不含品牌/材料/颜色）时：前三行照写、名字原样保留、页脚补颜色名
   const log3 = { fills: [], texts: [], images: [], strokes: 0 };
   sandbox.document.createElement = () => ({
     width: 0,
@@ -414,14 +427,16 @@ async function testRenderedLayout() {
   const bareSpool = Object.assign({}, spool, { name: "我的第 3 盘料", finish: "丝绸" });
   await sandbox.labelDebug.renderLabel(bareSpool, cfg);
   const bareTexts = log3.texts.map((t) => t.text).join(" | ");
-  check("名字没写品牌材质时副行补齐（魔创 · PLA · 丝绸）",
-    log3.texts.some((t) => t.text === "魔创 · PLA · 丝绸"), bareTexts);
-  check("名字没写颜色名时页脚补上（#3 · 天蓝色 · #147DB5）",
+  check("手动名字原样当第三行（不被剥坏）",
+    log3.texts.some((t) => t.text === "我的第 3 盘料"), bareTexts);
+  check("第二行带外观（PLA · 丝绸）",
+    log3.texts.some((t) => t.text === "PLA · 丝绸"), bareTexts);
+  check("手动名字不含颜色名时页脚补上（#3 · 天蓝色 · #147DB5）",
     log3.texts.some((t) => t.text.includes("#3") && t.text.includes("天蓝色") && t.text.includes("#147DB5")),
     bareTexts);
 
   // 二维码放大到近半张标签后，文字列只剩 ~21mm —— 长名字必须靠缩字号整串放下，
-  // 一旦被截成「Polymaker PETG …」就白瞎了一行（第二行还是同样的品牌·材料）。
+  // 一旦被截成「Polymaker PETG …」就白瞎了一行。
   const log2 = { fills: [], texts: [], images: [], strokes: 0 };
   sandbox.document.createElement = () => ({
     width: 0,
@@ -432,8 +447,8 @@ async function testRenderedLayout() {
   const longSpool = Object.assign({}, spool, { name: "Polymaker PETG 黑色" });
   await sandbox.labelDebug.renderLabel(longSpool, cfg);
   check("长名字不被截断（缩到 62% 下限仍放得下）",
-    log2.texts.length > 0 && log2.texts[0].text === longSpool.name,
-    log2.texts.length ? log2.texts[0].text : "无文字");
+    log2.texts.some((t) => t.text === longSpool.name),
+    log2.texts.map((t) => t.text).join(" | "));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
