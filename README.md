@@ -38,7 +38,7 @@ Panchroma™ PLA（28 色）、Panchroma™ 哑光 PLA（52 色）、Polymaker�
 兰博（13 个 PLA 系列 + 2 个 PETG 系列）、魔创（8 个系列 152 色：PLA / PLA 哑光 / PLA+ /
 HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）、
 **拓竹（PLA Basic 30 / PLA Matte 25 / PETG Basic 13 / PETG HF 14，均取自官方 Hex Code Table，为官方公布色值）**、
-**大简（PETG HF 9 色，取自官方店与官方微博展示）**也已内置。点色块直接填名称和色值；
+**大简（通用 PETG 全 40 色，取自天猫官方店 SKU 列表；另有 PETG HF 9 色取自官方店与官方微博展示）**也已内置。点色块直接填名称和色值；
 无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部、大简取自官方展示图）会标注为近似值。
 
 ### 图片识色 · 找同色耗材
@@ -495,7 +495,7 @@ python tests/test_flow.py
 # 访问控制与登录流程（66 项断言，会真起一个 uvicorn 子进程）
 python tests/test_auth.py
 
-# 图片识色的配色匹配（90 项断言，CIEDE2000 用 Sharma 标准向量校验）
+# 图片识色的配色匹配（102 项断言，CIEDE2000 用 Sharma 标准向量校验）
 python tests/test_color.py
 
 # 每盘价格 / 耗材总价值 / 每次打印耗材费（21 项断言）

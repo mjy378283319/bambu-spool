@@ -331,9 +331,9 @@ BAMBU_PETG_HF: list[dict] = [
 ]
 
 # ── 大简（GreatSimple，中山大简科技）───────────────────────────────
-# 官网 greatsimple.net 为 JS 渲染抓不到色块；色名取自京东/淘宝官方店在售
-# SKU 与官方微博展示，HEX 为近似值。已确认：PETG HF 塑料盘 5 色 + 纸盘
-# 香芋紫/樱花粉/透明蓝/透明色，其余色号待补。
+# 色名取自天猫/京东官方店在售 SKU；HEX 为近似值（官方未公布色值）。
+# PETG 基础系列 40 色取自天猫官方店商品页 SKU 列表截图取色（2026-09-16，
+# 商品 id=944008246964）；PETG HF 先收录已确认的 9 色，全色卡待确认。
 DASU_PETG_HF: list[dict] = [
     _c('黑色', 'Black', '#222325'),
     _c('白色', 'White', '#E9E9E7'),
@@ -344,6 +344,50 @@ DASU_PETG_HF: list[dict] = [
     _c('透明蓝', 'Transparent Blue', '#B7D9EA'),
     _c('香芋紫', 'Taro Purple', '#A88BC4'),
     _c('樱花粉', 'Sakura Pink', '#F0B9C4'),
+]
+
+# 通用 PETG（基础系列）全 40 色，与 PETG HF 已确认 9 色共用同名色值
+DASU_PETG: list[dict] = [
+    _c('白色', 'White', '#E9E9E7'),
+    _c('黑色', 'Black', '#222325'),
+    _c('灰色', 'Gray', '#8E9091'),
+    _c('天蓝色', 'Sky Blue', '#5596E3'),
+    _c('橘色', 'Orange', '#FD641F'),
+    _c('透明色', 'Transparent', '#E3E7E2'),
+    _c('透明紫', 'Transparent Purple', '#B7B1CC'),
+    _c('透明绿', 'Transparent Green', '#CBEBAF'),
+    _c('透明蓝', 'Transparent Blue', '#B7D9EA'),
+    _c('绿色', 'Green', '#67D548'),
+    _c('松石绿', 'Turquoise', '#3AA4A9'),
+    _c('苹果绿', 'Apple Green', '#A0BF45'),
+    _c('青色', 'Cyan Blue', '#3776CE'),
+    _c('蓝色', 'Blue', '#2147EA'),
+    _c('深蓝色', 'Dark Blue', '#1F3B70'),
+    _c('樱花粉', 'Sakura Pink', '#F0B9C4'),
+    _c('柠檬黄', 'Lemon Yellow', '#BCBF3D'),
+    _c('玫红色', 'Rose Red', '#C45A7C'),
+    _c('红色', 'Red', '#C54243'),
+    _c('香芋紫', 'Taro Purple', '#A88BC4'),
+    _c('紫罗兰', 'Violet', '#5252A0'),
+    _c('绀紫色', 'Indigo Purple', '#45395C'),
+    _c('紫色', 'Purple', '#645BB1'),
+    _c('肤色', 'Skin Tone', '#E8DCCF'),
+    _c('暗金色', 'Dark Gold', '#6B5636'),
+    _c('拿铁色', 'Latte', '#9E8F75'),
+    _c('粉红色', 'Pink', '#E779A4'),
+    _c('棕色', 'Brown', '#5E433D'),
+    _c('青铜色', 'Bronze', '#4F482F'),
+    _c('金色', 'Gold', '#9C7D4B'),
+    _c('米白色', 'Off White', '#E3E3DF'),
+    _c('玫紫色', 'Magenta Purple', '#A13B9D'),
+    _c('桃红色', 'Peach Red', '#BD408B'),
+    _c('黄色', 'Yellow', '#F2DD00'),
+    _c('杏色', 'Apricot', '#C6B7BA'),
+    _c('深灰色', 'Dark Gray', '#4E4E4E'),
+    _c('银色', 'Silver', '#D6D6D7'),
+    _c('透明粉', 'Transparent Pink', '#EBDDE3'),
+    _c('薄荷蓝', 'Mint Blue', '#A8D8D8'),
+    _c('蓝灰色', 'Blue Gray', '#565E68'),
 ]
 
 LANBO_SERIES: dict[str, list[dict]] = {
@@ -771,6 +815,7 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PETG HF": BAMBU_PETG_HF,
     },
     "大简": {
+        "PETG": DASU_PETG,
         "PETG HF": DASU_PETG_HF,
     },
     "兰博": LANBO_SERIES,

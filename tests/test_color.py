@@ -261,6 +261,22 @@ dasu_pink = _find("大简", "PETG HF", "樱花粉")
 check("大简 樱花粉 已收录", dasu_pink is not None and dasu_pink["hex"].upper() == "#F0B9C4",
       dasu_pink["hex"] if dasu_pink else "缺失")
 
+# 大简 通用 PETG 基础系列（40 色，取自天猫店 SKU 列表截图取色 2026-09-16）
+dasu_petg_all = [e for e in index["*"] if e["brand"] == "大简" and e["series"] == "PETG"]
+check("大简 PETG 基础系列共 40 色", len(dasu_petg_all) == 40, f"{len(dasu_petg_all)} 色")
+for nm, hx in (("红色", "#C54243"), ("黄色", "#F2DD00"), ("松石绿", "#3AA4A9"),
+               ("拿铁色", "#9E8F75"), ("薄荷蓝", "#A8D8D8"), ("蓝灰色", "#565E68")):
+    e = _find("大简", "PETG", nm)
+    check(f"大简 PETG {nm} 色值正确",
+          e is not None and e["hex"].upper() == hx, e["hex"] if e else "缺失")
+# 同名色在 PETG 与 PETG HF 两系列中色值一致（透明蓝/香芋紫/樱花粉）
+for nm in ("透明蓝", "香芋紫", "樱花粉", "黑色", "绀紫色"):
+    a, b = _find("大简", "PETG", nm), _find("大简", "PETG HF", nm)
+    check(f"大简 {nm} 两系列色值一致",
+          a is not None and b is not None and a["hex"].upper() == b["hex"].upper(),
+          f"{a['hex'] if a else '缺失'} vs {b['hex'] if b else '缺失'}")
+
+
 
 # ══ 6. 料盘匹配 ════════════════════════════════════════════════
 section("6. 库中料盘匹配")
