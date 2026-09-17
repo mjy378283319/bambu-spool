@@ -500,7 +500,7 @@ python tests/test_flow.py
 # 访问控制与登录流程（66 项断言，会真起一个 uvicorn 子进程）
 python tests/test_auth.py
 
-# 图片识色的配色匹配（102 项断言，CIEDE2000 用 Sharma 标准向量校验）
+# 图片识色的配色匹配（104 项断言，CIEDE2000 用 Sharma 标准向量校验）
 python tests/test_color.py
 
 # 每盘价格 / 耗材总价值 / 每次打印耗材费（21 项断言）

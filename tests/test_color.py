@@ -218,8 +218,19 @@ section("5b. 新增品牌色卡")
 brands_in_index = {e["brand"] for e in index["*"]}
 check("索引含拓竹品牌", "拓竹" in brands_in_index, "/".join(sorted(brands_in_index)))
 check("索引含大简品牌", "大简" in brands_in_index)
-check("品牌总数随新色卡增至 ≥6", len(brands_in_index) >= 6, f"{len(brands_in_index)} 个")
-check("色卡总量随新品牌增长 > 700", total > 700, f"{total} 色")
+check("品牌总数随新色卡增至 ≥12", len(brands_in_index) >= 12, f"{len(brands_in_index)} 个")
+check("色卡总量随新品牌增长 > 1600", total > 1600, f"{total} 色")
+
+# ── 每一条颜色都必须有可显示的 name ────────────────────────────────
+# 前端点色块时把 name 填进「颜色名」输入框（app.js pickPresetColor）。
+# 只抓到英文名的品牌（JAYO / 天瑞 / iBOSS / R3D / 爱丽兹）曾经 name 传空串，
+# 表现为「点色块没反应 / 存进去的颜色没名字」。_c()/_co() 已统一兜底成英文名。
+_blank = [(e["brand"], e["series"], e["name"]) for e in index["*"]
+          if not (e.get("name") or "").strip()]
+check("没有无名颜色（name 不可为空）", not _blank, f"{len(_blank)} 条，例：{_blank[:3]}")
+check("每个品牌至少有一条带名字的颜色",
+      all(any((e.get("name") or "").strip() for e in index["*"] if e["brand"] == b)
+          for b in brands_in_index))
 
 def _find(brand, series, name):
     for e in index["*"]:

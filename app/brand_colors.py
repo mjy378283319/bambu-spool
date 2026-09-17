@@ -12,11 +12,14 @@
 
 def _c(name: str, en: str, hex_value: str) -> dict:
     # 该文件里的 HEX 均非官方公布色值，一律视为近似值
-    return {"name": name, "en": en, "hex": hex_value, "official": False}
+    # ⚠️ name 是界面显示名（前端点色块时会把 name 填进「颜色名」输入框）。
+    # 只抓到英文名的品牌（JAYO / 天瑞 / iBOSS / R3D / 爱丽兹）传空串会点出色块却留空颜色名，
+    # 所以这里统一兜底成英文名，别让界面出现无名颜色。
+    return {"name": name or en, "en": en, "hex": hex_value, "official": False}
 
 def _co(name: str, en: str, hex_value: str) -> dict:
     # 厂商官方公布的色值（拓竹 Hex Code Table）
-    return {"name": name, "en": en, "hex": hex_value, "official": True}
+    return {"name": name or en, "en": en, "hex": hex_value, "official": True}
 
 KEXCELLED_K5_PLA: list[dict] = [
     _c('凯蒂粉', 'Kitty Pink', '#FBB3BA'),
