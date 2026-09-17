@@ -759,7 +759,11 @@ async function main() {
   console.log("品牌下拉：", JSON.stringify(brandOptions));
   check("新建料盘的下拉里有自定义品牌", brandOptions.includes("自家作坊"), JSON.stringify(brandOptions));
   check("下拉里没有已删除的品牌",
-        !brandOptions.some((b) => ["eSUN 易生", "三绿 Sunlu", "Overture", "Prusament", "JAYO"].includes(b)),
+        !brandOptions.some((b) => ["eSUN 易生", "三绿 Sunlu", "Overture", "Prusament"].includes(b)),
+        JSON.stringify(brandOptions));
+  // ⚠️ JAYO 已回归（2026-09 补齐官方 225 色色卡后重新上架），不能再断言它「不在下拉里」。
+  check("下拉里有 2026-09 新增的品牌",
+        ["锐造", "JAYO", "天瑞", "iBOSS", "R3D", "爱丽兹 Allizz"].every((b) => brandOptions.includes(b)),
         JSON.stringify(brandOptions));
   check("下拉里有「＋ 自定义品牌…」入口", brandOptions.includes("__custom__"), JSON.stringify(brandOptions));
 

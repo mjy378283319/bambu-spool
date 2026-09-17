@@ -27,7 +27,12 @@ os.environ["ALLOW_PUBLIC_SETUP"] = "1"
 
 from sqlmodel import select  # noqa: E402
 
-from app.catalog import BRAND_PRESETS, normalize_brand  # noqa: E402
+from app.catalog import (  # noqa: E402
+    BRAND_COLOR_SERIES,
+    BRAND_PRESETS,
+    normalize_brand,
+    spool_weight_options,
+)
 from app.db import _migrate_data, init_db, session_scope  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import PrintJob, SlotBinding, Spool, UsageRecord  # noqa: E402
@@ -88,18 +93,42 @@ def test_normalize() -> None:
     # 用户点名删掉的品牌：不再出现在预设里，也不再被归一成别人的名字。
     # 这一条是防回归的 —— 品牌表在 catalog.py 里，删掉之后如果别名表没跟着删，
     # 老写法还会被「复活」成已删除的品牌名，界面上就又冒出来了。
-    removed = ["eSUN 易生", "三绿 Sunlu", "创想三维 Creality", "JAYO", "Overture", "Prusament"]
+    # ⚠️ JAYO 已回归（2026-09：补齐官方 225 色色卡后重新上架），不再列在这里。
+    removed = ["eSUN 易生", "三绿 Sunlu", "创想三维 Creality", "Overture", "Prusament"]
     for name in removed:
         check(f"已删除品牌不在预设里：{name}", name not in BRAND_PRESETS, str(BRAND_PRESETS))
     for raw in ("esun", "易生", "三绿", "sunlu", "creality", "创想三维",
-                "jayo", "jayooh", "overture", "prusament"):
+                "overture", "prusament"):
         got = normalize_brand(raw)
         check(f"已删除品牌的写法原样保留：{raw}", got == raw, f"实际 {got!r}")
 
     # 保留的品牌照旧
-    for name in ("拓竹", "Polymaker", "大简", "爱丽兹 Allizz", "Kexcelled", "兰博", "魔创"):
+    for name in ("拓竹", "Polymaker", "大简", "爱丽兹 Allizz", "Kexcelled", "兰博", "魔创",
+                 "锐造", "JAYO", "天瑞", "iBOSS", "R3D"):
         check(f"品牌预设里有：{name}", name in BRAND_PRESETS, str(BRAND_PRESETS))
     check("「其他」排在候选末尾", BRAND_PRESETS[-1] == "其他", str(BRAND_PRESETS))
+
+    # 2026-09 补齐的五个品牌：各种写法都要能归一，且有皮重预设
+    new_brands = [
+        ("ruizao", "锐造"), ("锐造新材", "锐造"), ("锐造新材料", "锐造"),
+        ("jayo", "JAYO"), ("jayo3d", "JAYO"),
+        ("tinmorry", "天瑞"), ("tinmore", "天瑞"), ("天瑞科技", "天瑞"),
+        ("iboss", "iBOSS"), ("i boss", "iBOSS"),
+        ("r3d", "R3D"), ("r3d印维", "R3D"), ("印维", "R3D"),
+    ]
+    for raw, want in new_brands:
+        got = normalize_brand(raw)
+        check(f"新品牌归一 {raw!r} -> {want}", got == want, f"实际 {got!r}")
+        check(f"新品牌有皮重：{want}", spool_weight_options(want) != [], "空列表")
+        check(f"新品牌在预设里：{want}", want in BRAND_PRESETS, str(BRAND_PRESETS))
+
+    # 每个预设品牌都应挂上色卡系列（否则下拉选了品牌没色可选）
+    for name in BRAND_PRESETS:
+        if name == "其他":
+            continue
+        check(f"品牌有色卡系列：{name}",
+              name in BRAND_COLOR_SERIES and len(BRAND_COLOR_SERIES[name]) > 0,
+              "0 个系列")
 
 
 # ── 2. 品牌下拉框无重复 ───────────────────────────────────────────

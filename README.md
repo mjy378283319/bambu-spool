@@ -31,15 +31,20 @@
 
 全程不需要手动记账。
 
-录入料盘时还内置了**品牌配色卡**：选 Polymaker 会按材料带出
+录入料盘时还内置了**品牌配色卡**（12 个品牌 / 122 个系列 / 1564 个色号）：选 Polymaker 会按材料带出
 Panchroma™ PLA（28 色）、Panchroma™ 哑光 PLA（52 色）、Polymaker™ PETG（24 色）
 的官方色号；Kexcelled（K5 PLA 51 色 / PLA 哑光 55 色 / PETG 52 色 / PETG 哑光 22 色，
 **另有独立系列 K5 PETG Rapid 20 色——你实购的「日落橙 / 星雾紫」就在这一产品线里，之前只录了普通 K5 PETG 故对不上**）、
-兰博（13 个 PLA 系列 + 2 个 PETG 系列）、魔创（8 个系列 152 色：PLA / PLA 哑光 / PLA+ /
+兰博（30 个系列 213 色，整站重抓，先前 24 条灰值已修）、魔创（8 个系列 152 色：PLA / PLA 哑光 / PLA+ /
 HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）、
 **拓竹（PLA Basic 30 / PLA Matte 25 / PETG Basic 13 / PETG HF 14，均取自官方 Hex Code Table，为官方公布色值）**、
-**大简（通用 PETG 全 40 色，取自天猫官方店 SKU 列表；另有 PETG HF 9 色取自官方店与官方微博展示）**也已内置。点色块直接填名称和色值；
-无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部、大简取自官方展示图）会标注为近似值。
+**大简（通用 PETG 全 40 色，取自天猫官方店 SKU 列表；另有 PETG HF 9 色取自官方店与官方微博展示）**、
+**爱丽兹 Allizz（longshanplas.com 官网「Color Options」色卡，7 系列 89 色：
+ABS 17 / ASA 6 / PETG HF 25 / PETG 半透 9 / PLA 哑光 11 / PLA 丝绸 15 / TPU95A 6）**，以及 2026-09 新增的六个品牌
+（锐造 12 系列 122 色 / JAYO 12 系列 225 色 / 天瑞 21 系列 249 色 / iBOSS 9 系列 44 色 /
+R3D 19 系列 132 色，取自官网或 Shopify `products.json`；均从官方商品图提取主色）也已内置。点色块直接填名称和色值；
+无法从官方确认的 HEX（Polymaker 部分色号、Kexcelled 与兰博全部、魔创全部、大简取自官方展示图、
+新增六品牌与爱丽兹为商品图提色）会标注为近似值。
 
 ### 图片识色 · 找同色耗材
 
@@ -47,7 +52,7 @@ HT-PLA / PETG / PETG 哑光 / ASA / ABS，取自官方淘宝店商品 SKU）、
 手机端直接拍照），自动提取画面里的主要颜色，然后帮你回答两个问题——
 
 - **库里现有的料，哪一盘最接近？** 直接按余量、存放位置列出来，告诉你该用哪盘。
-- **想买新的，该买哪个品牌哪个色？** 对 6 个品牌 748 个色号做匹配，
+- **想买新的，该买哪个品牌哪个色？** 对全部内置色号做匹配，
   每个品牌给出它最接近的一个色，方便横向比价。
 
 颜色支持手动微调：点击图片任意位置可以精确吸色，也能手动加色、删掉不需要的色。
@@ -501,7 +506,7 @@ python tests/test_color.py
 # 每盘价格 / 耗材总价值 / 每次打印耗材费（21 项断言）
 python tests/test_price.py
 
-# 料盘删除保护、品牌归一与历史数据迁移（76 项断言）
+# 料盘删除保护、品牌归一与历史数据迁移（129 项断言，含新增品牌别名与色卡覆盖）
 python tests/test_admin.py
 
 # AMS / AMS HT 编号归一、槽位克重折算、位串越界保护（58 项断言）
@@ -539,7 +544,7 @@ node tests/test_panel_fill.mjs
 # 与槽位绑定下拉的候选口径 / 色卡系列名带外观 / 保存链路（168 项断言，node 直跑，不需要相机）
 node tests/test_ui_polish.mjs
 
-# 浏览器实拍验收（98 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）
+# 浏览器实拍验收（99 项断言 + 逐视图截图；需要本机有 Edge / Chrome，不进 CI）
 # 会自己起一个 MOCK 模式的服务、种演示数据、再逐页截图与断言
 PYTHON=python node scripts/shot_ui.mjs
 ```
