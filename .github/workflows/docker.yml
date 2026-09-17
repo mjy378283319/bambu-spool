@@ -61,6 +61,9 @@ jobs:
       - name: 运行应用图标与 favicon 自测
         run: python tests/test_brand_icon.py
 
+      - name: 运行 README 自测（图片直链 / 色卡数字 / 文档引用）
+        run: python tests/test_readme.py
+
       - name: 前端 JS 语法检查
         run: |
           node --check app/static/app.js

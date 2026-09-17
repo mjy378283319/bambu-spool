@@ -252,7 +252,15 @@ function fmtDuration(seconds) {
   return `${m} 分钟`;
 }
 
-function closeModal() { document.getElementById("modalHost").innerHTML = ""; }
+function closeModal() {
+  document.getElementById("modalHost").innerHTML = "";
+  // 深链（#spool= / #bind=）开出来的弹窗关掉后，地址里还留着那段深链，
+  // 不换成 #view= 的话随手一刷新又把它弹回来了。
+  const hash = location.hash.slice(1);
+  if (hash.startsWith("spool=") || hash.startsWith("bind=")) {
+    syncHashView(S.view || "dashboard", true);
+  }
+}
 
 function openModal(title, bodyHtml, actionsHtml, wide = false) {
   const host = document.getElementById("modalHost");
@@ -267,6 +275,30 @@ function openModal(title, bodyHtml, actionsHtml, wide = false) {
 }
 
 /* ── 路由 ─────────────────────────────────────────────── */
+/** 所有可切换的视图名。新增视图时这里要跟着加 —— 少了它，
+ *  `#view=<新视图>` 的链接会被当成无效 hash 而掉回仪表盘。 */
+const VIEW_NAMES = ["dashboard", "spools", "summary", "jobs", "settings"];
+
+/** 把当前视图记进地址栏，刷新后能回到原页面。
+ *
+ *  用 replaceState 而不是 location.hash =：后者会触发 hashchange，
+ *  于是「改 hash → applyHashRoute → switchView → 再改 hash」自成死循环；
+ *  replaceState 只换地址不派发事件，也不往前进/后退历史里塞记录，
+ *  免得用户点一下后退在五个标签之间来回跳。
+ *
+ *  `#spool=` / `#bind=` 这类深链**不覆盖**：扫码进来的那次刷新还应该落在
+ *  那盘料上（弹窗关掉时由 closeModal 换成 `#view=<当前视图>`）。
+ */
+function syncHashView(name, force) {
+  const hash = location.hash.slice(1);
+  const isDeepLink = hash.startsWith("spool=") || hash.startsWith("bind=");
+  if (isDeepLink && !force) return;
+  if (hash === "view=" + name) return;
+  try {
+    history.replaceState(null, "", "#view=" + name);
+  } catch (e) { /* 某些嵌入环境禁改地址，忽略即可 */ }
+}
+
 function switchView(name) {
   S.view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
@@ -274,6 +306,7 @@ function switchView(name) {
   if (target) target.classList.add("active");
   document.querySelectorAll(".nav button").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === name));
+  syncHashView(name);
   if (name === "spools") loadSpools();
   if (name === "jobs") loadJobs();
   if (name === "summary") loadSummary();
@@ -1210,9 +1243,11 @@ function filteredSpools() {
     if (tab === "empty" && use !== "empty") return false;
     if (tab === "low" && !s.is_low) return false;
 
-    if (brand && s.brand !== brand) return false;
-    if (material && s.material !== material) return false;
-    if (finish && (s.finish || "普通") !== finish) return false;
+    // 分组口径统一走 SUMMARY_DRILL_FIELDS.norm：汇总页点名字钻过来时，
+    // 「未填写 / 普通」这类空值归组也要能筛得到，否则跳过去是空列表。
+    if (brand && SUMMARY_DRILL_FIELDS.brand.norm(s) !== brand) return false;
+    if (material && SUMMARY_DRILL_FIELDS.material.norm(s) !== material) return false;
+    if (finish && SUMMARY_DRILL_FIELDS.finish.norm(s) !== finish) return false;
     if (!isNaN(minPrice) && (s.price || 0) < minPrice) return false;
     if (!isNaN(maxPrice) && (s.price || 0) > maxPrice) return false;
     if (kw) {
@@ -2303,8 +2338,13 @@ function jobSetSize(value) {
 async function openJobDetail(jobId) {
   try {
     const job = await api(`/api/jobs/${jobId}`);
+    // 改完料盘要能回到这个弹窗，记一下当前任务
+    S.lastJobId = jobId;
     const filaments = job.filaments || [];
-    const rows = filaments.length ? filaments.map((f) => `
+    const rows = filaments.length ? filaments.map((f) => {
+      const spoolId = Number(f.spool_id) || 0;
+      const usageId = Number(f.usage_id) || 0;
+      return `
       <tr>
         <td><div class="row" style="gap:8px">
           <span class="swatch" style="background:${esc(f.color)}"></span>
@@ -2314,7 +2354,16 @@ async function openJobDetail(jobId) {
         <td class="num">${f.weight_g.toFixed(2)} g</td>
         <td class="num">${f.cost ? "¥" + f.cost.toFixed(2) : "—"}</td>
         <td class="small muted">${esc(f.match_strategy || "")}</td>
-      </tr>`).join("") : '<tr><td colspan="6"><div class="empty-state">这次任务没有解析到耗材明细</div></td></tr>';
+        <td class="cell-actions" data-label="操作">
+          <div class="row-actions main">
+            <button class="sm"${spoolId ? ` onclick="jumpToSpoolFromJob(${spoolId})"` : " disabled"}
+              title="${spoolId ? "打开这盘料的详情" : "这行用量还没绑到料盘"}">查看料盘</button>
+            <button class="sm"${usageId ? ` onclick="openRebindUsage(${usageId}, ${spoolId})"` : " disabled"}
+              title="${usageId ? "把这次用量改扣到另一盘料" : "这次用量没有扣重流水，改不了"}">更改料盘</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join("") : '<tr><td colspan="7"><div class="empty-state">这次任务没有解析到耗材明细</div></td></tr>';
 
     const actions = job.deduction_applied
       ? ""
@@ -2337,9 +2386,70 @@ async function openJobDetail(jobId) {
       </div>
       ${actions ? `<div class="row" style="margin-bottom:12px">${actions}</div>` : ""}
       <table><thead><tr><th>料盘</th><th>槽位</th><th>耗材</th>
-        <th style="text-align:right">用量</th><th style="text-align:right">耗材费</th><th>匹配依据</th></tr></thead>
+        <th style="text-align:right">用量</th><th style="text-align:right">耗材费</th><th>匹配依据</th>
+        <th style="width:170px">操作</th></tr></thead>
         <tbody>${rows}</tbody></table>
+      <p class="hint" style="margin-top:10px">扣错盘了就点「更改料盘」：这次用量会先从原来那盘退回，再扣到新选的那盘。</p>
     `, `<button class="primary" onclick="closeModal()">关闭</button>`, true);
+  } catch (err) { toast(err.message, "err"); }
+}
+
+/** 打印记录里的「查看料盘」：先关掉任务弹窗，再开料盘详情。
+ *  这里是「一层弹窗」的模型（跟手动录入那条路一致），不关的话 openSpoolDetail
+ *  会把 modalHost 整块换掉，看完料盘就回不到任务了。 */
+async function jumpToSpoolFromJob(spoolId) {
+  const id = Number(spoolId);
+  if (!id) { toast("这行用量还没绑到料盘", "err"); return; }
+  closeModal();
+  // 从打印记录直接进来时可能压根没拉过料盘列表（列表只在库存页加载过），
+  // 不补这一下，料盘弹窗会因为找不到这盘料而报错。
+  if (!(S.spools || []).length) {
+    try { await loadSpools(); } catch (err) { /* 接口失败就让 openSpoolDetail 自己提示 */ }
+  }
+  await openSpoolDetail(id);
+}
+
+/** 打印记录里的「更改料盘」：把这条扣重流水从一盘料转到另一盘。 */
+async function openRebindUsage(usageId, currentSpoolId) {
+  const id = Number(usageId);
+  if (!id) { toast("这次用量没有扣重流水，改不了", "err"); return; }
+  const cur = Number(currentSpoolId) || 0;
+  if (!(S.spools || []).length) {
+    try { await loadSpools(); } catch (err) { toast(err.message, "err"); return; }
+  }
+  const list = bindCandidates(cur);
+  if (!list.length) { toast("还没有料盘可改扣，先到「料盘库存」录一盘", "err"); return; }
+  S.rebindUsage = { id, spoolId: cur };
+  openModal("更改料盘", `
+    <p class="hint">这次用量会先从原来那盘料退回去，再扣到下面选的这盘上。
+      用来纠正绑错料盘、扣错盘的情况。</p>
+    <label class="fld"><span>改成这盘料</span>
+      <select id="rebindSpool">
+        ${list.map((s) => spoolOptionHtml(s, s.id === cur)).join("")}
+      </select></label>
+  `, `<button onclick="closeModal()">取消</button>
+      <button class="primary" onclick="submitRebindUsage()">确认更改</button>`);
+}
+
+async function submitRebindUsage() {
+  const ctx = S.rebindUsage;
+  if (!ctx) { toast("页面已刷新过，请重新打开任务详情再试", "err"); return; }
+  const sel = document.getElementById("rebindSpool");
+  const target = Number(sel && sel.value) || 0;
+  if (!target) { toast("先选一盘料", "err"); return; }
+  if (target === ctx.spoolId) { toast("还是原来那盘，没变化", "err"); return; }
+  try {
+    await api(`/api/usages/${ctx.id}/move`, {
+      method: "POST", body: JSON.stringify({ spool_id: target }),
+    });
+    toast("已改扣到新的料盘", "ok");
+    const jobId = S.lastJobId;
+    S.rebindUsage = null;
+    closeModal();
+    await loadJobs();
+    await loadSpools();
+    // 改完回到任务详情，让用户立刻看到新的料盘名和费用
+    if (jobId) await openJobDetail(jobId);
   } catch (err) { toast(err.message, "err"); }
 }
 
@@ -2507,6 +2617,50 @@ function jumpToSpoolsByPrice(from, to) {
   renderSpools();
 }
 
+/* ── 汇总表 → 料盘库存 的钻取 ──────────────────────────── */
+/** 汇总页那三张分组表各自对应库存页的哪个筛选项，以及「分组名怎么从料盘上取」。
+ *
+ *  norm 必须跟后端 `_group_summary` 的口径一致，否则点了汇总表里的名字跳过去是空列表：
+ *  后端把空品牌/空材料归到「未填写」，而外观的空值归到「普通」（外观有默认值）。
+ *  这份表是两边的唯一约定，改后端分组规则时这里要跟着改。 */
+const SUMMARY_DRILL_FIELDS = {
+  brand: { select: "spoolBrand", label: "品牌", norm: (s) => (s.brand || "").trim() || "未填写" },
+  material: { select: "spoolMaterial", label: "材料", norm: (s) => (s.material || "").trim() || "未填写" },
+  finish: { select: "spoolFinish", label: "外观", norm: (s) => s.finish || "普通" },
+};
+
+/** 给下拉赋值；值不在选项里就先补一个 option 再选。
+ *  直接 `sel.value = x` 在没有这个 option 时会静默变回空字符串 ——
+ *  「未填写」和不在预设目录里的老品牌都走这条路，一静默就成了「点了没反应」。 */
+function setSelectValue(id, value) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  if (!value) { sel.value = ""; return; }
+  let has = false;
+  for (const opt of sel.options) { if (opt.value === value) { has = true; break; } }
+  if (!has) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value;
+    sel.appendChild(opt);
+  }
+  sel.value = value;
+}
+
+/** 点汇总表里的品牌 / 材料 / 外观名 -> 跳到料盘库存，只留这一个筛选条件。
+ *  其余筛选先清空：不然「先点品牌再点材料」两个条件叠在一起，筛出的比任何一个都少，
+ *  看起来就像点了没生效。 */
+function jumpToSpoolsByField(field, value) {
+  const cfg = SUMMARY_DRILL_FIELDS[field];
+  if (!cfg) return;
+  switchView("spools");
+  resetSpoolFilters();
+  setSelectValue(cfg.select, value);
+  S.spoolPage = 1;
+  renderSpools();
+  toast(`已按${cfg.label}「${value}」筛选`, "ok");
+}
+
 /* ── 库存数据概览（环形图 + 使用状态） ─────────────────── */
 function renderSummaryOverview() {
   const host = document.getElementById("summaryOverview");
@@ -2617,23 +2771,38 @@ function renderPriceDist() {
     </button>`).join("");
 }
 
-/** 分组汇总表：名称 | 盘数 | 已用 | 剩余 | 余量条 | 采购金额 | 余值。
- *  窄屏会走 .table-card 的卡片式布局，所以每格都要 data-label。 */
-function summaryTable(rows, emptyText) {
+/** 分组汇总表：名称 | 盘数 | 每盘均价 | 满盘净重 | 已用 | 剩余 | 余量条 | 采购金额 | 余值。
+ *  窄屏会走 .table-card 的卡片式布局，所以每格都要 data-label。
+ *
+ *  field 是钻取用的维度（brand / material / finish）：名称列会变成一个按钮，
+ *  点了带着这个名字跳到料盘库存并预填筛选。传空字符串就不带钻取。 */
+function summaryTable(rows, emptyText, field) {
   if (!rows || !rows.length) return `<div class="empty-state">${esc(emptyText)}</div>`;
   return `<table><thead><tr>
       <th>名称</th>
       <th style="text-align:right">盘数</th>
+      <th style="text-align:right">每盘均价</th>
       <th style="text-align:right">满盘净重</th>
       <th style="text-align:right">已用</th>
       <th style="text-align:right">剩余</th>
       <th>余量</th>
       <th style="text-align:right">采购金额</th>
       <th style="text-align:right">余值</th>
-    </tr></thead><tbody>${rows.map((r) => `
+    </tr></thead><tbody>${rows.map((r) => {
+    // 分母只算登记过价的盘：混进没填价的盘会把均价拉低，看着像算错了
+    const priced = Number(r.priced_count) || 0;
+    const avg = priced > 0 ? r.price / priced : null;
+    return `
       <tr>
-        <td class="cell-main"><b>${esc(r.name)}</b></td>
+        <td class="cell-main">${
+          field
+            ? `<button class="cell-link" data-value="${esc(r.name)}"
+                 onclick="jumpToSpoolsByField('${field}', this.dataset.value)"
+                 title="到料盘库存里看这 ${r.count} 盘">${esc(r.name)}</button>`
+            : `<b>${esc(r.name)}</b>`}</td>
         <td class="num" data-label="盘数">${r.count} 盘</td>
+        <td class="num" data-label="每盘均价">${
+          avg == null ? '<span class="tiny muted">未登记</span>' : "¥" + avg.toFixed(2)}</td>
         <td class="num" data-label="满盘净重">${r.initial_g.toFixed(0)} g</td>
         <td class="num" data-label="已用">${r.used_g.toFixed(0)} g</td>
         <td class="num" data-label="剩余">${r.remaining_g.toFixed(0)} g</td>
@@ -2644,7 +2813,56 @@ function summaryTable(rows, emptyText) {
         </td>
         <td class="num" data-label="采购金额">${r.price > 0 ? "¥" + r.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
         <td class="num" data-label="余值">${r.stock_value > 0 ? "¥" + r.stock_value.toFixed(2) : "—"}</td>
-      </tr>`).join("")}</tbody></table>`;
+      </tr>`;
+  }).join("")}</tbody></table>`;
+}
+
+/** 在库料盘的均价口径。分母一律只算「登记过整盘价」的盘 ——
+ *  把没填价的盘算进来会把均价拉低，看着像算错了。
+ *  一条价格都没有时数值全是 null，由调用方决定怎么把这块地方填满，别留个空格。 */
+function summaryPriceStats(spools) {
+  const all = spools || [];
+  const priced = all.filter((s) => (Number(s.price) || 0) > 0);
+  const n = priced.length;
+  if (!n) return { priced: 0, unpriced: all.length, perSpool: null, perKg: null, min: null, max: null };
+  const total = priced.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
+  // 满盘净重缺省 1000 g，跟后端 Spool.initial_weight 的默认值保持一致
+  const grams = priced.reduce((sum, s) => sum + (Number(s.initial_weight) || 1000), 0);
+  const prices = priced.map((s) => Number(s.price) || 0);
+  return {
+    priced: n,
+    unpriced: all.length - n,
+    perSpool: total / n,
+    perKg: grams > 0 ? (total / grams) * 1000 : null,
+    min: Math.min(...prices),
+    max: Math.max(...prices),
+  };
+}
+
+/** 均价三张卡。凑成 9 张（宽屏 3×3）是刻意的：grid-stats 在 ≥980px 是三列，
+ *  6 张卡再加 1 张会在末行空出一格 —— 那正是「不要留空」要避免的样子。
+ *  一条价格都没有时不画数字，改写成「去哪儿登记」，卡里照样有内容。 */
+function priceStatCards() {
+  const ps = summaryPriceStats(S.summarySpools);
+  const word = (text) => `<span class="value-word">${esc(text)}</span>`;
+  const pricedSub = ps.priced
+    ? `${ps.priced} 盘已登记价格${ps.unpriced ? `，另有 ${ps.unpriced} 盘未登记` : ""}`
+    : "到「料盘库存」给料盘填上整盘价格";
+  const card = (label, valueHtml, subText) => `<div class="stat accent"><span class="ico">${ICO.coins}</span>
+      <div class="label">${esc(label)}</div>
+      <div class="value">${valueHtml}</div>
+      <div class="sub">${esc(subText)}</div></div>`;
+  return [
+    card("平均每盘单价",
+      ps.perSpool == null ? word("未登记") : `¥${ps.perSpool.toFixed(2)}`,
+      pricedSub),
+    card("平均每公斤",
+      ps.perKg == null ? word("未登记") : `¥${ps.perKg.toFixed(2)}<small> /kg</small>`,
+      "按满盘净重折算，不同规格可直接比"),
+    card("整盘价格区间",
+      ps.min == null ? word("未登记") : `¥${ps.min.toFixed(0)} - ${ps.max.toFixed(0)}`,
+      "最便宜 / 最贵的一盘"),
+  ].join("");
 }
 
 function renderSummary() {
@@ -2681,17 +2899,18 @@ function renderSummary() {
     <div class="stat accent"><span class="ico">${ICO.coins}</span>
       <div class="label">累计打印耗材费</div>
       <div class="value">¥${(Number(st.print_cost_total) || 0).toFixed(2)}</div>
-      <div class="sub">按每次任务的实际用量逐笔累计</div></div>`;
+      <div class="sub">按每次任务的实际用量逐笔累计</div></div>
+    ${priceStatCards()}`;
 
   const brands = st.by_brand || [];
   const materials = st.by_material_detail || [];
   const finishes = st.by_finish || [];
   document.getElementById("brandSummary").innerHTML =
-    summaryTable(brands, "还没有料盘。先到「料盘库存」里录一盘。");
+    summaryTable(brands, "还没有料盘。先到「料盘库存」里录一盘。", "brand");
   document.getElementById("materialSummary").innerHTML =
-    summaryTable(materials, "还没有料盘。");
+    summaryTable(materials, "还没有料盘。", "material");
   document.getElementById("finishSummary").innerHTML =
-    summaryTable(finishes, "还没有料盘。");
+    summaryTable(finishes, "还没有料盘。", "finish");
   const setCount = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
   setCount("brandSummaryCount", brands.length ? `共 ${brands.length} 个品牌` : "");
   setCount("materialSummaryCount", materials.length ? `共 ${materials.length} 种材料` : "");
@@ -3614,9 +3833,13 @@ function addEvent(event) {
  */
 async function applyHashRoute(options) {
   const opts = options || {};
-  const knownViews = ["dashboard", "spools", "jobs", "settings"];
   const hash = location.hash.slice(1);
-  if (knownViews.includes(hash)) {
+  // 两种写法都认：`#view=summary`（当前形式）和老的裸名 `#spools`。
+  if (hash.startsWith("view=")) {
+    const name = hash.slice(5);
+    if (VIEW_NAMES.includes(name)) { switchView(name); return; }
+  }
+  if (VIEW_NAMES.includes(hash)) {
     switchView(hash);
     return;
   }
@@ -3704,6 +3927,11 @@ window.panelDebug = {
   summaryMaterials, donutChart, allSlotEntries, slotKey,
   // 下拉里的料盘候选：余量缺失别显示成 0 g、归档的除非正绑着否则不进候选
   spoolOptionHtml, bindCandidates,
+  // 视图路由：刷新要能回到原页面，靠的就是把视图名写进 hash
+  VIEW_NAMES, syncHashView,
+  // 汇总页钻取与均价：分组口径（norm）必须与后端 _group_summary 一致，
+  // 均价的分母必须是「登记过价的盘数」，错了就是跳过去空列表 / 均价被拉低
+  SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

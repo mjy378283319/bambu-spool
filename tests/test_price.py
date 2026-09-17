@@ -29,7 +29,7 @@ from app.api import routes  # noqa: E402
 from app.core.deduction import usage_cost  # noqa: E402
 from app.db import init_db, session_scope  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models import PrintJob, Spool  # noqa: E402
+from app.models import PrintJob, Spool, UsageRecord  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
 PASSED: list[str] = []
@@ -158,6 +158,54 @@ def test_logic() -> None:
         check("stats.by_material_price", st["by_material_price"].get("PLA") == 100.0
               and st["by_material_price"].get("PETG") == 120.0, str(st["by_material_price"]))
         check("stats.无价盘不计入", "ABS" not in st["by_material_price"], str(st["by_material_price"]))
+
+    # 5) 任务明细要带上扣重流水 id —— 打印记录里的「更改料盘」按钮靠它调 /move
+    with session_scope() as session:
+        j1 = make_job(session, a_id, b_id, with_snapshot=True)
+        # 手工补两条扣重流水。这里验的是「任务明细和流水按下标配对」这一层，
+        # 流水本身怎么产生由 test_flow 的扣重流程覆盖。
+        for idx, spool_id in enumerate([a_id, b_id]):
+            session.add(UsageRecord(
+                spool_id=spool_id, printer_id=1, job_id=j1, filament_index=idx,
+                weight_g=100.0 + idx, source="cloud_task", note="",
+            ))
+        session.commit()
+        data = routes.job_dict(session.get(PrintJob, j1), session)
+        fils = data["filaments"]
+        check("任务明细每条都带 usage_id",
+              len(fils) == 2 and all(f.get("usage_id") for f in fils),
+              str([f.get("usage_id") for f in fils]))
+        records = session.exec(select(UsageRecord).where(UsageRecord.job_id == j1)).all()
+        want = {r.filament_index: r.id for r in records}
+        check("usage_id 与扣重流水按下标一一对上",
+              all(f["usage_id"] == want.get(f["index"]) for f in fils),
+              str({"got": {f["index"]: f["usage_id"] for f in fils}, "want": want}))
+        # 顺序不能错位：第 0 条用量必须落在第 0 条流水上，否则「更改料盘」会改错盘
+        check("usage_id 没跟 spool_id 错位（第 0 条对应 A 盘）",
+              fils[0]["spool_id"] == a_id
+              and want.get(fils[0]["index"]) == fils[0]["usage_id"],
+              str(fils[0]))
+
+    # 6) 分组汇总里的 priced_count —— 前端「每盘均价」拿它当分母
+    with session_scope() as session:
+        st = routes.stats(session)
+        brand = {x["name"]: x for x in st["by_brand"]}
+        # 三盘全是 Bambu Lab，其中两盘有价（100 / 120），ABS 那盘没填价
+        check("by_brand 只有一组（三盘同品牌）", len(brand) == 1 and "Bambu Lab" in brand, str(brand))
+        check("by_brand.priced_count = 2（有价的盘数，不是总盘数）",
+              brand["Bambu Lab"]["priced_count"] == 2, str(brand["Bambu Lab"]))
+        check("by_brand.count = 3（总盘数另算，别跟 priced_count 混）",
+              brand["Bambu Lab"]["count"] == 3, str(brand["Bambu Lab"]))
+        # 有价的两盘 100 + 120 = 220，除以 priced_count 才是每盘均价 110
+        check("每盘均价 = price / priced_count = 110（不是 220/3）",
+              abs(brand["Bambu Lab"]["price"] / brand["Bambu Lab"]["priced_count"] - 110.0) < 1e-9,
+              str(brand["Bambu Lab"]))
+        mat = {x["name"]: x for x in st["by_material_detail"]}
+        check("无价的材料组 priced_count = 0（前端据此显示「未登记」而不是 ¥0.00）",
+              mat["ABS"]["priced_count"] == 0 and mat["ABS"]["price"] == 0.0, str(mat["ABS"]))
+        check("有价的材料组 priced_count = 1",
+              mat["PLA"]["priced_count"] == 1 and mat["PETG"]["priced_count"] == 1,
+              str({k: v["priced_count"] for k, v in mat.items()}))
 
 
 def test_http() -> None:

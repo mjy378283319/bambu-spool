@@ -135,6 +135,15 @@ def job_dict(job: PrintJob, session: Session, with_filaments: bool = True) -> di
     if with_filaments:
         cost_total, usages = job_cost(job, session)
         data["cost_total"] = cost_total
+        # 每条用量补上它对应的扣重流水 id：打印记录里的「更改料盘」要调
+        # /api/usages/{id}/move，光有 spool_id 是改不动的（流水才是扣重的账本）。
+        # UsageRecord 按 (job_id, filament_index) 与明细一一对应。
+        records = session.exec(
+            select(UsageRecord).where(UsageRecord.job_id == job.id)
+        ).all()
+        by_index = {r.filament_index: r.id for r in records}
+        for u in usages:
+            u.usage_id = by_index.get(u.index)
         data["filaments"] = [u.__dict__ for u in usages]
     else:
         data["cost_total"] = 0.0
@@ -199,7 +208,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.4.1",
+        "version": "0.4.2",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -1130,7 +1139,7 @@ def _group_summary(spools: list[Spool], key_of) -> list[dict]:
         name = (key_of(spool) or "").strip() or "未填写"
         item = buckets.setdefault(name, {
             "name": name, "count": 0, "initial_g": 0.0, "remaining_g": 0.0,
-            "used_g": 0.0, "price": 0.0, "stock_value": 0.0,
+            "used_g": 0.0, "price": 0.0, "stock_value": 0.0, "priced_count": 0,
         })
         item["count"] += 1
         item["initial_g"] += spool.initial_weight
@@ -1138,6 +1147,10 @@ def _group_summary(spools: list[Spool], key_of) -> list[dict]:
         item["used_g"] += spool.used_weight
         item["price"] += spool.price
         item["stock_value"] += spool.stock_value
+        # 登记过价格的盘数。算「每盘均价」必须拿它当分母 —— 用 count 当分母的话，
+        # 组里混进几盘没填价的就会把均价算低，看起来像数据错了。
+        if spool.price > 0:
+            item["priced_count"] += 1
     out: list[dict] = []
     for item in buckets.values():
         item["initial_g"] = round(item["initial_g"], 1)

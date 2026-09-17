@@ -14,7 +14,7 @@
  * 这套工装依赖「真浏览器 + 真服务」，所以不进 CI；CI 里跑的是 tests/*.mjs
  * 那种纯函数自测。两者互补：CI 保证口径，本脚本保证「在浏览器里真的是这个样子」。
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,12 @@ import { fileURLToPath } from "node:url";
 // 脚本在 <repo>/scripts/ 下，仓库根就是它的上一级
 const APP = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT = process.env.SHOT_OUT || path.join(APP, "shots");
-const PROFILE = path.join(APP, "data", "_shotui", "edgeprof");  // 放 data/ 下，跟着一起被 ignore
+// 放 data/ 下，跟着一起被 ignore。按浏览器分开：夸克复用 Edge 留下的 profile 目录
+// 会起不来（两家虽然都是 Chromium，但 profile 里的 First Run / LOCK 之类的约定不同），
+// 表现为页面白屏、CDP 拿不到任何 DOM。
+const PROFILE = process.env.SHOT_PROFILE
+  || path.join(APP, "data", "_shotui",
+       /quark/i.test(process.env.EDGE_EXE || "") ? "quarkprof" : "edgeprof");
 const PORT = Number(process.env.SHOT_PORT || 8791);        // 应用端口
 const CDP_PORT = Number(process.env.SHOT_CDP_PORT || 9333); // 调试端口
 
@@ -60,6 +65,20 @@ const check = (label, ok, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 轮询等页面里的某个条件成立。
+ *  固定 sleep 不够用：换浏览器（夸克比 Edge 起得慢）或机器正忙时，
+ *  后面读 DOM 会读到「应用还没起来」的空页面，把「照片没加载」之类的假失败报出来。 */
+async function waitFor(cdp, sessionId, expr, timeout = 20000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      if (await cdp.evaluate(sessionId, `!!(${expr})`)) return true;
+    } catch (err) { /* 页面正在导航，下一轮再看 */ }
+    await sleep(400);
+  }
+  return false;
+}
+
 // ── 1. 起应用 ───────────────────────────────────────────────────
 // 每次都从空库开始：脚本后面要跑「首次初始化 → 建管理员 → 塞演示数据」这条链路，
 // 库里残留任何东西都会让它走到另一条分支上（表现为演示数据一条都没种进去）。
@@ -71,7 +90,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DATA_DIR = path.join(APP, "data", "_shotui");
 if (fs.existsSync(DATA_DIR)) {
   for (const name of fs.readdirSync(DATA_DIR)) {
-    if (name === "edgeprof") continue;
+    if (name === "edgeprof" || name === "quarkprof") continue;
     fs.rmSync(path.join(DATA_DIR, name), { recursive: true, force: true });
   }
 }
@@ -201,6 +220,20 @@ async function main() {
   if (!await waitForServer()) throw new Error("应用没起来");
   console.log("应用已启动");
 
+  // mock 模式只造打印机和料盘，不造打印任务 —— 打印记录页是空的，
+  // 「查看料盘 / 更改料盘」两个按钮就没东西可点。这里补一条演示任务 + 扣重流水。
+  const seeded = spawnSync(
+    PYTHON, [path.join(APP, "scripts", "seed_demo_job.py")],
+    {
+      cwd: APP,
+      env: { ...process.env, BAMBU_MOCK: "1", DATA_DIR, ALLOW_PUBLIC_SETUP: "1" },
+      encoding: "utf8",
+    },
+  );
+  console.log("演示任务：", (seeded.stdout || "").trim() || (seeded.stderr || "").trim().slice(-200));
+  check("演示用的打印任务灌进去了（打印记录页有东西可点）",
+    seeded.status === 0, `exit=${seeded.status} ${(seeded.stderr || "").slice(-300)}`);
+
   const cdp = new CDP(await browserWs());
   await cdp.ready;
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
@@ -259,7 +292,13 @@ async function main() {
 
   // 带着会话重新加载，走完整的 boot() 流程
   await cdp.send("Page.navigate", { url: `http://127.0.0.1:${PORT}/` }, sessionId);
-  await sleep(2500);
+  // 等仪表盘真的把打印机卡片画出来再看照片 —— 固定 sleep 会在慢机器上读到空页面
+  // 等的是「布局算完了」而不是「DOM 有了」：样式表还在路上时元素宽高是 0，
+  // 下面那条「照片按 240x292 排布」会读成 0×0，白白报一次假失败。
+  await waitFor(cdp, sessionId, `(() => {
+    const img = document.querySelector(".printer-art-wrap .printer-photo");
+    return !!img && img.naturalWidth > 0 && img.getBoundingClientRect().width > 0;
+  })()`);
 
   /* ── 断言：真机照片真的加载出来了 ── */
   const art = await cdp.evaluate(sessionId, `(() => {
@@ -657,6 +696,86 @@ async function main() {
   check("筛选后出现「看全部」按钮", filtered.clearHidden === false);
   check("点「看全部」能还原", restored.label === "", JSON.stringify(restored));
 
+  /* ── 汇总页：均价卡 + 点名字钻到料盘库存 ──
+     沙箱自测证明了「HTML 对」，这里证明「浏览器里点得动、跳得过去、跳过去不是空列表」。 */
+  const avgCards = await cdp.evaluate(sessionId, `(() => {
+    const host = document.getElementById("summaryStats");
+    const cards = [...document.querySelectorAll("#summaryStats .stat")];
+    const labels = cards.map((c) => (c.querySelector(".label") || {}).innerText || "");
+    // 宽屏三列，卡数不是 3 的倍数就会在末行空一格 —— 那正是「不要留空」要避免的
+    const rowFull = cards.length % 3 === 0;
+    const values = cards.map((c) => (c.querySelector(".value") || {}).innerText || "");
+    // 只看均价那三张卡：另外六张里「累计打印耗材费 ¥0.00」是合法的零
+    // （还没有打印任务），拿全部九张来判会误报（实测过一次）。
+    const avgLabels = ["平均每盘单价", "平均每公斤", "整盘价格区间"];
+    const avgValues = cards
+      .filter((c) => avgLabels.includes((c.querySelector(".label") || {}).innerText || ""))
+      .map((c) => (c.querySelector(".value") || {}).innerText || "");
+    return {
+      count: cards.length, labels, rowFull, avgValues,
+      // 没有价格时写「未登记」，不许出现空值
+      emptyValues: values.filter((v) => !v.trim()).length,
+      hasAvgPerSpool: labels.includes("平均每盘单价"),
+      text: (host || {}).innerText || "",
+    };
+  })()`);
+  console.log("汇总页均价卡：", JSON.stringify(avgCards).slice(0, 500));
+  check("汇总页有「平均每盘单价」这张卡", avgCards.hasAvgPerSpool === true, JSON.stringify(avgCards.labels));
+  check("统计卡总数是 3 的倍数（宽屏三列，末行不留空位）",
+    avgCards.rowFull === true && avgCards.count >= 6, `${avgCards.count} 张`);
+  check("每张卡都有值（没有空白的数值位）", avgCards.emptyValues === 0, String(avgCards.emptyValues));
+  check("均价三张卡都拿到了值（不是空、也不是 ¥0.00 冒充）",
+    avgCards.avgValues.length === 3
+    && avgCards.avgValues.every((v) => v.trim() && !v.includes("¥0.00")),
+    JSON.stringify(avgCards.avgValues));
+  check("按材料表有「每盘均价」列",
+    (await cdp.evaluate(sessionId,
+      `[...document.querySelectorAll("#materialSummary th")].map(th => th.innerText.trim())`))
+      .includes("每盘均价"));
+
+  const drill = await cdp.evaluate(sessionId, `(() => {
+    const btn = document.querySelector("#brandSummary tbody .cell-link");
+    if (!btn) return { found: false };
+    // 先给别处塞点脏数据：钻取必须把它们清掉，否则两个条件叠一起看着像没生效
+    const kw = document.getElementById("spoolSearch");
+    if (kw) kw.value = "随便搜点什么";
+    btn.click();
+    return { found: true, name: btn.dataset.value || btn.innerText.trim() };
+  })()`);
+  await sleep(900);
+  const drilled = await cdp.evaluate(sessionId, `(() => {
+    const P = window.panelDebug;
+    const norm = (v) => (String(v || "").trim() || "未填写");
+    const rows = [...document.querySelectorAll("#spoolTable tbody tr")];
+    const ids = rows.map((tr) => tr.cells[0].innerText.trim());
+    return {
+      view: P.state.view, hash: location.hash,
+      brand: (document.getElementById("spoolBrand") || {}).value || "",
+      kw: (document.getElementById("spoolSearch") || {}).value || "",
+      count: rows.length,
+      // 用 S.spools 反查每一盘的 brand，别只信界面上那一行字
+      allMatch: ids.length > 0 && ids.every((id) => {
+        const s = (P.state.spools || []).find((x) => String(x.id) === id) || {};
+        return norm(s.brand) === norm(DRILL_NAME);
+      }),
+      active: ((document.querySelector(".view.active") || {}).id) || "",
+    };
+    // 用函数形式替换：品牌名里万一有 $& 之类的序列会被当成替换模式
+  })()`.replace("DRILL_NAME", () => JSON.stringify(drill.name || "")));
+  console.log("汇总钻取：", JSON.stringify(drill), "→", JSON.stringify(drilled));
+  check("汇总表里的品牌名是可点的按钮", drill.found === true, JSON.stringify(drill));
+  check("点了品牌名 -> 切到料盘库存页",
+    drilled.view === "spools" && drilled.active === "view-spools", JSON.stringify(drilled));
+  check("钻取后下拉里就是那个品牌", drilled.brand === drill.name, `${drilled.brand} vs ${drill.name}`);
+  check("钻取把其它筛选清掉了（关键词不再残留）", drilled.kw === "", drilled.kw);
+  check("钻取跳过去不是空列表（空列表 = 分组口径跟筛选对不上）",
+    drilled.count > 0, `${drilled.count} 行`);
+  check("列表里每一盘都属于这个品牌", drilled.allMatch === true, JSON.stringify(drilled));
+
+  // 钻完把筛选清掉，别污染后面「表头排序」那一段（它要比对全部料盘）
+  await cdp.evaluate(sessionId, `resetSpoolFilters()`);
+  await sleep(500);
+
   /* ── 料盘库存：表头排序、行内快捷操作、已用尽标签页 ── */
   await cdp.evaluate(sessionId, `switchView("spools")`);
   await sleep(700);
@@ -738,6 +857,102 @@ async function main() {
     spoolUI.emptyRows === spoolUI.expectedEmpty,
     `${spoolUI.emptyRows} vs ${spoolUI.expectedEmpty}`);
   check("点标签页会高亮它自己", spoolUI.tabActive === "已用尽", spoolUI.tabActive);
+
+  /* ── 打印记录：任务详情里的「查看料盘」「更改料盘」 ──
+     沙箱自测只能验「弹窗 HTML 对」，这里验「真点得动、跳得过去、改得动」。 */
+  await cdp.evaluate(sessionId, `switchView("jobs")`);
+  await sleep(800);
+  const jobButtons = await cdp.evaluate(sessionId, `(() => {
+    const P = window.panelDebug;
+    // 找一条真的有耗材费用的任务（一条费用都没有的行两个按钮都是禁用的）
+    const jobs = P.state.jobs || [];
+    const job = jobs.find((j) => Number(j.cost_total) > 0) || jobs[0];
+    if (!job) return { noJob: true, total: jobs.length };
+    openJobDetail(job.id);
+    return { jobId: job.id, total: jobs.length };
+  })()`);
+  // 等弹窗里的表格真的渲染出来：固定 sleep 在机器忙时会读到「还没渲染」的空弹窗
+  await waitFor(cdp, sessionId, `!!document.querySelector("#modalBody table")`, 10000).catch(() => {});
+  const jobRow = await cdp.evaluate(sessionId, `(() => {
+    const tr = document.querySelector("#modalBody tbody tr");
+    if (!tr) return { noRow: true, body: (document.getElementById("modalBody") || {}).innerText || "" };
+    const btns = [...tr.querySelectorAll("button")].map((b) => ({
+      text: b.innerText.trim(), disabled: !!b.disabled,
+    }));
+    return {
+      btns,
+      hasView: btns.some((b) => b.text === "查看料盘"),
+      hasRebind: btns.some((b) => b.text === "更改料盘"),
+      viewDisabled: (btns.find((b) => b.text === "查看料盘") || {}).disabled,
+      rebindDisabled: (btns.find((b) => b.text === "更改料盘") || {}).disabled,
+      spoolName: (tr.cells[0] || {}).innerText || "",
+    };
+  })()`);
+  console.log("选中任务：", JSON.stringify(jobButtons), "明细行：", JSON.stringify(jobRow).slice(0, 400));
+  check("打印记录里有任务可点开", jobButtons.noJob !== true, JSON.stringify(jobButtons));
+  check("任务详情每行都有「查看料盘」", jobRow.hasView === true, JSON.stringify(jobRow).slice(0, 300));
+  check("任务详情每行都有「更改料盘」", jobRow.hasRebind === true, JSON.stringify(jobRow).slice(0, 300));
+  check("绑了料盘的行「查看料盘」可点（不是禁用）",
+    jobRow.viewDisabled === false || String(jobRow.spoolName).includes("未绑定"),
+    JSON.stringify(jobRow).slice(0, 300));
+  check("有扣重流水的行「更改料盘」可点（不是禁用）",
+    jobRow.rebindDisabled === false, JSON.stringify(jobRow).slice(0, 300));
+
+  // 真点一次「查看料盘」：要真的打开那盘料的详情，不是原地不动
+  const jumped = await cdp.evaluate(sessionId, `(() => {
+    const tr = document.querySelector("#modalBody tbody tr");
+    const btn = [...tr.querySelectorAll("button")].find((b) => b.innerText.trim() === "查看料盘");
+    const want = tr.cells[0].innerText.trim();
+    if (!btn || btn.disabled) return { skipped: true, want };
+    btn.click();
+    return { want };
+  })()`);
+  await sleep(900);
+  const spoolModal = await cdp.evaluate(sessionId, `(() => {
+    const m = document.querySelector("#modalHost .modal");
+    return {
+      title: m ? (m.querySelector("h3") || {}).innerText || "" : "",
+      text: m ? m.innerText.slice(0, 300) : "",
+      hasHistory: m ? m.innerText.includes("使用历史") : false,
+    };
+  })()`);
+  console.log("查看料盘：", JSON.stringify(jumped), "→", JSON.stringify(spoolModal).slice(0, 300));
+  check("点「查看料盘」真的打开了料盘详情（弹窗标题 = 那盘料的名字）",
+    jumped.skipped === true || spoolModal.title === jumped.want,
+    `${spoolModal.title} vs ${jumped.want}`);
+  check("料盘详情里有「使用历史」（确认打开的是料盘页不是别的）",
+    jumped.skipped === true || spoolModal.hasHistory === true, spoolModal.title);
+
+  // 真点一次「更改料盘」：要弹出带下拉的改绑窗，且下拉里有料盘可选
+  await cdp.evaluate(sessionId, `openJobDetail(${JSON.stringify(jobButtons.jobId)})`);
+  await sleep(900);
+  const rebind = await cdp.evaluate(sessionId, `(() => {
+    const tr = document.querySelector("#modalBody tbody tr");
+    const btn = [...tr.querySelectorAll("button")].find((b) => b.innerText.trim() === "更改料盘");
+    if (!btn || btn.disabled) return { skipped: true };
+    btn.click();
+    return {};
+  })()`);
+  await sleep(800);
+  const rebindModal = await cdp.evaluate(sessionId, `(() => {
+    const sel = document.getElementById("rebindSpool");
+    return {
+      title: ((document.querySelector("#modalHost .modal h3") || {}).innerText || "").trim(),
+      hasSelect: !!sel,
+      opts: sel ? sel.options.length : 0,
+      selected: sel ? (sel.options[sel.selectedIndex] || {}).textContent || "" : "",
+    };
+  })()`);
+  console.log("更改料盘：", JSON.stringify(rebind), "→", JSON.stringify(rebindModal));
+  check("点「更改料盘」弹出改绑窗",
+    rebind.skipped === true || rebindModal.title === "更改料盘", rebindModal.title);
+  check("改绑窗里的下拉有料盘可选（空下拉 = 点了没反应）",
+    rebind.skipped === true || (rebindModal.hasSelect && rebindModal.opts >= 2),
+    JSON.stringify(rebindModal));
+  check("下拉默认选中当前那盘",
+    rebind.skipped === true || rebindModal.selected.length > 0, JSON.stringify(rebindModal));
+  await cdp.evaluate(sessionId, `closeModal()`);
+  await sleep(300);
 
   /* ── 自定义品牌出现在该出现的地方 ── */
   await cdp.evaluate(sessionId, `switchView("settings")`);
@@ -1048,6 +1263,48 @@ async function main() {
   }
   await cdp.evaluate(sessionId, `closeModal(); location.hash = ""`);
   await sleep(300);
+
+  /* ── 刷新后要停在原视图 ──
+   * 用户原话：「每次刷新都会回到仪表盘界面。只是想刷新一下，要在原界面不要动。」
+   * 现在视图名会写进 hash（#view=<name>），刷新一次看它能不能落回去。
+   * 挑汇总页做样本：它不在最初的 knownViews 里（漏加就会掉回仪表盘）。 */
+  await cdp.evaluate(sessionId, `closeModal(); switchView("summary")`);
+  await sleep(700);
+  const beforeReload = await cdp.evaluate(sessionId, `({
+    view: (window.panelDebug.state || {}).view || "",
+    hash: location.hash,
+  })`);
+  console.log("刷新前：", JSON.stringify(beforeReload));
+  check("切到汇总页后，hash 里记下了视图名",
+    beforeReload.hash === "#view=summary" && beforeReload.view === "summary",
+    JSON.stringify(beforeReload));
+
+  await cdp.send("Page.reload", { ignoreCache: false }, sessionId);
+  // reload 之后要重新走一遍 boot → enterApp，等它把视图真正切过去再断言
+  let afterReload = {};
+  for (let i = 0; i < 24; i++) {
+    await sleep(500);
+    afterReload = await cdp.evaluate(sessionId, `(() => {
+      const st = (window.panelDebug || {}).state || {};
+      return {
+        // 「应用起来了」的信号：状态数据有了 + 有激活视图。
+        // 只判断 view 非空会踩坑 —— S.view 的初始值就是 dashboard，
+        // boot 还没跑到 applyHashRoute 时读到的正是这个中间态。
+        ready: !!st.status && !!document.querySelector(".view.active"),
+        view: st.view || "",
+        hash: location.hash,
+        active: ((document.querySelector(".view.active") || {}).id) || "",
+        navActive: ((document.querySelector(".nav button.active") || {}).dataset || {}).view || "",
+      };
+    })()`).catch(() => ({}));
+    if (afterReload.ready) break;
+  }
+  console.log("刷新后：", JSON.stringify(afterReload));
+  // 先确认「等到了应用起来」：没等到就断言视图，失败原因会被误读成「路由没生效」
+  check("刷新后应用重新起来了（等待没有超时）", afterReload.ready === true, JSON.stringify(afterReload));
+  check("刷新后还停在汇总页（不被弹回仪表盘）", afterReload.view === "summary", JSON.stringify(afterReload));
+  check("刷新后 DOM 上激活的也是汇总页", afterReload.active === "view-summary", JSON.stringify(afterReload));
+  check("刷新后导航高亮跟着落在汇总页", afterReload.navActive === "summary", JSON.stringify(afterReload));
 
   /* ── 手机端 ── */
   await cdp.evaluate(sessionId, `closeModal(); switchView("dashboard")`);

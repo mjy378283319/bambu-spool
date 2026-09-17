@@ -42,7 +42,12 @@ function stubEl() {
     value: "", checked: false, hidden: false, disabled: false,
     files: [], children: [], options: [], selectedIndex: 0,
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    appendChild(node) { return node; },
+    // 真的把节点挂上去：钻取那条断言要看「下拉里有没有补出这个 option」
+    appendChild(node) {
+      this.children.push(node);
+      if (node && node.tagName === "OPTION") this.options.push(node);
+      return node;
+    },
     removeChild() {}, remove() {},
     setAttribute() {}, getAttribute() { return null; },
     hasAttribute() { return false; }, removeAttribute() {},
@@ -88,14 +93,34 @@ const sandbox = {
     mediaDevices: { getUserMedia: async () => { throw new Error("no camera in test"); } },
   },
   location: { hash: "", href: "http://localhost/", pathname: "/", search: "", reload() {} },
+  // 视图路由靠 history.replaceState 改地址：它只换地址不派发 hashchange，
+  // 否则「改 hash → applyHashRoute → switchView → 再改 hash」会自激成死循环
+  history: {
+    replaceState(_state, _title, url) {
+      const i = String(url).indexOf("#");
+      sandbox.location.hash = i >= 0 ? String(url).slice(i) : "";
+    },
+    pushState() {},
+  },
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
+// 按 id 缓存元素：钻取这类「给下拉赋值、再读回来」的断言必须拿到同一个对象。
+// 每次 getElementById 都发一个新的 stub 的话，写进去的值下一次调用就读不出来了，
+// 断言会永远是「看起来通过了」（写这条时实测过，确实读不到）。
+const elCache = new Map();
 sandbox.document = {
-  getElementById: () => stubEl(),
+  getElementById(id) {
+    if (!elCache.has(id)) elCache.set(id, stubEl());
+    return elCache.get(id);
+  },
   querySelector: () => stubEl(),
   querySelectorAll: () => [],
-  createElement: () => stubEl(),
+  createElement: (tag) => {
+    const el = stubEl();
+    el.tagName = String(tag || "").toUpperCase();
+    return el;
+  },
   createDocumentFragment: () => stubEl(),
   addEventListener() {}, removeEventListener() {},
   body: stubEl(), head: stubEl(), documentElement: stubEl(), cookie: "",
@@ -126,6 +151,8 @@ const {
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries,
   spoolOptionHtml, bindCandidates,
+  VIEW_NAMES, syncHashView,
+  SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -525,9 +552,18 @@ check("主操作组就是这轮新增的三个（详情 / 绑定 / 克隆）",
   /class="row-actions main">[\s\S]{0,700}?详情[\s\S]{0,300}?绑定[\s\S]{0,300}?克隆/.test(appSrc));
 check("次操作组是排在后排的四个",
   /class="row-actions sub">[\s\S]{0,700}?标签[\s\S]{0,400}?补录[\s\S]{0,400}?校准[\s\S]{0,400}?删除/.test(appSrc));
+// 比的是「次操作行比主操作行小」，不是写死 11.5px —— 整体放大那一轮字号全调过一次，
+// 写死数值的断言立刻误报（实测过：放大后这里就红了，代码其实没问题）。
+const rulePx = (rule) => {
+  const m = rule.match(/font-size:\s*([\d.]+)px/);
+  return m ? parseFloat(m[1]) : NaN;
+};
+const subBtnRule = (cssSrc.match(/\.row-actions\.sub button\s*\{([^}]*)\}/) || [, ""])[1];
+const mainBtnRule = (cssSrc.match(/\.row-actions button\s*\{([^}]*)\}/) || [, ""])[1];
 check("次操作行字号更小、颜色更淡（视觉上分主次）",
-  /\.row-actions\.sub button\s*\{[^}]*font-size:\s*11\.5px/.test(cssSrc)
-  && /\.row-actions\.sub\s*\{[^}]*margin-top/.test(cssSrc));
+  rulePx(subBtnRule) < rulePx(mainBtnRule)
+  && /\.row-actions\.sub\s*\{[^}]*margin-top/.test(cssSrc),
+  `sub=${rulePx(subBtnRule)} main=${rulePx(mainBtnRule)}`);
 // 桌面端两行都不换行（换行会连带把列宽算窄 → 又回到竖着堆的老问题）
 const rowActionsRule = (cssSrc.match(/\.row-actions\s*\{([^}]*)\}/) || [, ""])[1];
 check("桌面端两组操作都不换行（flex-wrap 只在窄屏媒体查询里开）",
@@ -677,6 +713,221 @@ check("bind= 深链也会确保料盘列表已加载（与 spool= 分支口径�
   || (appSrc.match(/if \(!\(S\.spools \|\| \[\]\)\.length\) await loadSpools\(\)\.catch/g) || []).length >= 2,
   String((appSrc.match(/await loadSpools\(\)\.catch/g) || []).length));
 
+state.spools = [];
+
+// ── 15. 视图路由：刷新后留在原页面 ──────────────────────────────
+console.log("== 视图路由（刷新要停在原页面，不能每次都被弹回仪表盘） ==");
+
+const navViews = [...new Set([...htmlSrc.matchAll(/data-view="([^"]+)"/g)].map((m) => m[1]))];
+check("导航栏里每个视图都有对应的 hash 名（新增视图最容易漏这一处）",
+  navViews.length > 0 && navViews.every((v) => VIEW_NAMES.includes(v)),
+  `nav=${JSON.stringify(navViews)} VIEW_NAMES=${JSON.stringify(VIEW_NAMES)}`);
+check("VIEW_NAMES 含汇总页（漏了它，#view=summary 会被当无效 hash 掉回仪表盘）",
+  VIEW_NAMES.includes("summary"), JSON.stringify(VIEW_NAMES));
+// 注意：这里用**运行时**断言而不是「源码里出现了 syncHashView(name)」——
+// 后者连被注释掉的那行都能匹配上（写这条时实测：把调用注释掉，测试照样全绿）。
+// dashboard 不触发任何数据加载，用来验证路由最干净。
+sandbox.location.hash = "";
+sandbox.switchView("dashboard");
+check("switchView 之后地址栏记下了当前视图（刷新就靠它回来）",
+  sandbox.location.hash === "#view=dashboard", sandbox.location.hash || "(空)");
+sandbox.location.hash = "";
+check("写地址用 replaceState 而不是 location.hash =（后者触发 hashchange 会自激成死循环）",
+  /history\.replaceState\(null, "", "#view=" \+ name\)/.test(appSrc)
+  && !/location\.hash\s*=\s*["'`]#view/.test(appSrc),
+  "视图路由不该用 location.hash 赋值");
+check("applyHashRoute 认识 #view=<name>", /hash\.startsWith\("view="\)/.test(appSrc));
+check("#view= 的名字要过白名单（不能拿任意字符串去 switchView）",
+  /if \(VIEW_NAMES\.includes\(name\)\) \{ switchView\(name\); return; \}/.test(appSrc));
+check("启动时 hash 为空仍落到仪表盘（首次打开的默认页不变）",
+  /if \(opts\.initial\) switchView\("dashboard"\);/.test(appSrc));
+check("关掉深链弹窗会把 hash 换成 #view=（否则随手刷新又把它弹回来）",
+  /function closeModal\(\)[\s\S]{0,400}?syncHashView\(S\.view \|\| "dashboard", true\)/.test(appSrc));
+
+sandbox.location.hash = "";
+syncHashView("summary");
+check("切到汇总页后地址栏是 #view=summary",
+  sandbox.location.hash === "#view=summary", sandbox.location.hash);
+
+sandbox.location.hash = "#spool=12";
+syncHashView("spools");
+check("扫码深链不被 #view= 盖掉（盖了刷新就找不到那盘料了）",
+  sandbox.location.hash === "#spool=12", sandbox.location.hash);
+syncHashView("spools", true);
+check("强制写入时深链换成 #view=spools（关弹窗那条路径）",
+  sandbox.location.hash === "#view=spools", sandbox.location.hash);
+sandbox.location.hash = "";
+
+// ── 16. 汇总页钻取 + 均价卡 ─────────────────────────────────────
+console.log("== 耗材汇总：点名字钻到库存、每盘均价 ==");
+
+// 后端 _group_summary 把空品牌/空材料归到「未填写」，把空外观归到「普通」。
+// 前端的 norm 必须与它一字不差，否则点了汇总表里的名字跳过去是空列表。
+check("空品牌归到「未填写」（与后端 _group_summary 同口径）",
+  SUMMARY_DRILL_FIELDS.brand.norm({ brand: "" }) === "未填写"
+  && SUMMARY_DRILL_FIELDS.brand.norm({ brand: "  " }) === "未填写"
+  && SUMMARY_DRILL_FIELDS.brand.norm({ brand: "拓竹" }) === "拓竹");
+check("空材料归到「未填写」",
+  SUMMARY_DRILL_FIELDS.material.norm({ material: "" }) === "未填写"
+  && SUMMARY_DRILL_FIELDS.material.norm({ material: "PLA" }) === "PLA");
+check("空外观归到「普通」而不是「未填写」（外观有默认值，跟前两项不一样）",
+  SUMMARY_DRILL_FIELDS.finish.norm({ finish: "" }) === "普通"
+  && SUMMARY_DRILL_FIELDS.finish.norm({ finish: "丝绸" }) === "丝绸");
+
+const spoolForDrill = (id, brand, material, finish) => ({
+  id, brand, material, finish, price: 0, name: `料${id}`,
+  remaining_weight: 500, used_weight: 500, initial_weight: 1000,
+  archived: false, slots: [],
+});
+state.spools = [
+  spoolForDrill(1, "拓竹", "PLA", "丝绸"),
+  spoolForDrill(2, "", "PLA", ""),      // 没填品牌、没填外观，材料还是 PLA
+  spoolForDrill(3, "Polymaker", "PETG", "哑光"),
+];
+
+// 运行时断言：真的点一次，再真的问筛选器要列表。
+// 只断言「HTML 里有 jumpToSpoolsByField」是没用的 —— 函数写错、norm 对不上，
+// 按钮照样在，跳过去却是个空列表。
+// 先给其它筛选塞点脏数据再钻取。不先污染就断言「被清空」是假断言 ——
+// 从没设过值当然也是空的，把 resetSpoolFilters 删掉照样全绿（实测过）。
+sandbox.document.getElementById("spoolPriceMin").value = "50";
+sandbox.document.getElementById("spoolSearch").value = "随便搜点什么";
+sandbox.jumpToSpoolsByField("brand", "拓竹");
+check("点品牌名 -> 切到料盘库存页", state.view === "spools", String(state.view));
+check("点品牌名 -> 库存列表只剩这个品牌",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[1]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+check("钻取只留这一个条件（关键词 / 价格区间被清掉，否则两个条件叠一起看着像没生效）",
+  sandbox.document.getElementById("spoolPriceMin").value === ""
+  && sandbox.document.getElementById("spoolSearch").value === "",
+  `min=${sandbox.document.getElementById("spoolPriceMin").value} `
+  + `kw=${sandbox.document.getElementById("spoolSearch").value}`);
+
+sandbox.jumpToSpoolsByField("brand", "未填写");
+check("点「未填写」也能筛出空品牌的那些盘（norm 口径不一致就跳过去是空列表）",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[2]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+check("「未填写」不在下拉选项里时会补一个 option（直接 sel.value= 会静默变空字符串）",
+  sandbox.document.getElementById("spoolBrand").value === "未填写"
+  && sandbox.document.getElementById("spoolBrand").options.some((o) => o.value === "未填写"));
+
+sandbox.jumpToSpoolsByField("material", "PLA");
+check("点材料名 -> 只剩这种材料",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[1,2]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+sandbox.jumpToSpoolsByField("finish", "普通");
+check("点外观「普通」-> 只剩没填外观的盘",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[2]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+sandbox.resetSpoolFilters();
+
+// 汇总表：名称列可点 + 每盘均价列
+const drillRow = {
+  name: "拓竹", count: 3, price: 300, priced_count: 2,
+  initial_g: 3000, remaining_g: 1500, used_g: 1500,
+  stock_value: 150, remaining_percent: 50,
+};
+const tbl = summaryTable([drillRow], "", "brand");
+// 只看「每盘均价」那一格。断言绝不能写成 `html.includes("未登记")` ——
+// 采购金额列在无价时也写「未登记」，那样写等于什么都验不出来
+// （写这条时实测：把分母改成总盘数，测试依然 204 项全绿）。
+const cellOf = (html, label) => {
+  const m = html.match(new RegExp(`data-label="${label}">([\\s\\S]*?)</td>`));
+  return m ? m[1] : "";
+};
+check("汇总表的名称是可点的按钮（带钻取维度）",
+  /class="cell-link"/.test(tbl) && /jumpToSpoolsByField\('brand', this\.dataset\.value\)/.test(tbl),
+  tbl.slice(0, 300));
+check("名称用 data-value 传值，不拼进 JS 字符串字面量（品牌名带引号会打断 onclick）",
+  /data-value="拓竹"/.test(tbl));
+check("汇总表有「每盘均价」列", /每盘均价/.test(tbl));
+// 关键：分母是 priced_count(2) 不是 count(3)。写错的话这里会变成 ¥100.00。
+check("每盘均价按「登记过价的盘数」算，不是按总盘数（¥300 / 2 = ¥150）",
+  cellOf(tbl, "每盘均价").includes("¥150.00"), cellOf(tbl, "每盘均价"));
+const noPriceRow = summaryTable([{ ...drillRow, price: 0, priced_count: 0 }], "", "brand");
+check("一组里一条价格都没有时均价格写「未登记」，不是 ¥0.00",
+  cellOf(noPriceRow, "每盘均价").includes("未登记")
+  && !cellOf(noPriceRow, "每盘均价").includes("¥0.00"),
+  cellOf(noPriceRow, "每盘均价"));
+check("不给钻取维度时名称是普通文本（不是按钮）",
+  !/class="cell-link"/.test(summaryTable([drillRow], "", "")));
+
+// 均价卡
+const ps = summaryPriceStats([
+  { price: 100, initial_weight: 1000 }, { price: 200, initial_weight: 1000 },
+  { price: 300, initial_weight: 1000 }, { price: 0, initial_weight: 1000 },
+]);
+check("每盘均价的分母只算登记过价的盘（100+200+300）/3 = ¥200，不是 /4 = ¥150",
+  ps.perSpool === 200 && ps.priced === 3 && ps.unpriced === 1, JSON.stringify(ps));
+check("每公斤价按满盘净重折算（¥200 / 1000g = ¥200/kg）", ps.perKg === 200, String(ps.perKg));
+check("价格区间取最低 / 最高", ps.min === 100 && ps.max === 300, `${ps.min}~${ps.max}`);
+const psEmpty = summaryPriceStats([{ price: 0, initial_weight: 1000 }]);
+check("一条价格都没有时数值是 null（交给调用方填文案，不许拿 0 冒充）",
+  psEmpty.perSpool === null && psEmpty.perKg === null && psEmpty.priced === 0);
+
+// 「不要留空」：没有价格时三张卡都得有内容，不能是个空格子
+const cardsNone = priceStatCards();
+const valueHtmls = [...cardsNone.matchAll(/<div class="value">([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+check("没登记价格时均价卡也不留空（三张卡的值都不是空串）",
+  valueHtmls.length === 3 && valueHtmls.every((v) => v.trim().length > 0),
+  JSON.stringify(valueHtmls));
+check("没登记价格时写「未登记」并说明去哪儿补",
+  cardsNone.includes("未登记") && cardsNone.includes("料盘库存"));
+check("有三张均价卡（6 + 3 = 9 张，宽屏 3×3 正好铺满，末行不留空位）",
+  (cardsNone.match(/class="stat/g) || []).length === 3,
+  String((cardsNone.match(/class="stat/g) || []).length));
+
+// 真跑一次 renderSummary，数一数 stat 卡总数：宽屏三列，卡数不是 3 的倍数就会空一格
+state.stats = {
+  spool_count: 4, archived_count: 0, price_total: 600, used_total: 1500,
+  remaining_total: 2500, used_value: 300, stock_value: 300, print_cost_total: 12.5,
+  by_brand: [], by_material_detail: [], by_finish: [],
+};
+state.summarySpools = [
+  { price: 100, initial_weight: 1000 }, { price: 200, initial_weight: 1000 },
+  { price: 300, initial_weight: 1000 }, { price: 0, initial_weight: 1000 },
+];
+sandbox.renderSummary();
+const statCount = (sandbox.document.getElementById("summaryStats").innerHTML.match(/class="stat/g) || []).length;
+check("汇总页统计卡总数是 3 的倍数（宽屏三列排，末行不留空位）",
+  statCount === 9 && statCount % 3 === 0, `共 ${statCount} 张`);
+check("统计卡里出现「平均每盘单价」", /平均每盘单价/.test(sandbox.document.getElementById("summaryStats").innerHTML));
+state.stats = null;
+state.spools = [];
+state.summarySpools = [];
+
+// ── 17. 打印记录：查看料盘 / 更改料盘 ───────────────────────────
+console.log("== 打印记录：跳转耗材、更改盘料 ==");
+
+state.spools = [
+  { id: 1, name: "A 盘", archived: false, remaining_weight: 500 },
+  { id: 2, name: "B 盘", archived: false, remaining_weight: 500 },
+  { id: 3, name: "C 盘（已归档）", archived: true, remaining_weight: 500 },
+];
+// 运行时断言：真的开一次弹窗，读 modalHost 里渲染出来的 HTML。
+// 只断言「源码里有 openRebindUsage」拦不住「下拉是空的」—— 那正是用户看到的「点了没反应」。
+await sandbox.openRebindUsage(11, 1);
+const rebindHtml = sandbox.document.getElementById("modalHost").innerHTML;
+check("「更改料盘」弹窗里有料盘下拉", /id="rebindSpool"/.test(rebindHtml), rebindHtml.slice(0, 200));
+check("下拉默认选中当前那盘（打开就能看出改的是哪条）",
+  /<option value="1"[^>]*selected/.test(rebindHtml), (rebindHtml.match(/<option[^>]*>/g) || []).join(" "));
+check("候选里有其它在库料盘", /value="2"/.test(rebindHtml));
+check("归档的料盘不进候选（改扣到归档盘上没意义）",
+  !/value="3"/.test(rebindHtml), (rebindHtml.match(/<option[^>]*>[^<]*/g) || []).join(" "));
+check("弹窗里说明了会「先退回再扣到新盘」", /退回/.test(rebindHtml));
+// 当前盘是归档盘时例外：必须留在候选里，否则打开看到空下拉会以为绑定丢了
+await sandbox.openRebindUsage(11, 3);
+const rebindArchived = sandbox.document.getElementById("modalHost").innerHTML;
+check("当前那盘即使已归档也要留在候选里",
+  /value="3"/.test(rebindArchived) && /<option value="3"[^>]*selected/.test(rebindArchived),
+  (rebindArchived.match(/<option[^>]*>/g) || []).join(" "));
+// 没有流水（usage_id = 0）时不该弹窗 —— 弹了也改不动
+sandbox.document.getElementById("modalHost").innerHTML = "SENTINEL";
+await sandbox.openRebindUsage(0, 1);
+check("没有扣重流水时不弹改绑窗（弹了也改不动）",
+  sandbox.document.getElementById("modalHost").innerHTML === "SENTINEL",
+  sandbox.document.getElementById("modalHost").innerHTML.slice(0, 120));
+sandbox.closeModal();
 state.spools = [];
 
 // ── 汇总 ────────────────────────────────────────────────────────
