@@ -171,6 +171,21 @@ App 已开着时靠 `hashchange` 就地跳转，否则表现为「扫了但什�
 iPhone 只能用「导出标签图」；Web Bluetooth 要求 https 或 localhost，`http://192.168.x.x` 下按钮是灰的
 （挂 HTTPS 反代即可）；蓝牙链路**尚未在真机 T260LR 上实测**，协议依据官方知识库的指令样本推断。
 
+### 打印成果图
+
+打印记录列表每行有一张成果缩略图，点开任务详情能看到大图（点图新窗口打开原图）。
+
+> ⚠️ **这张图是切片时的盘面预览图，不是摄像头实拍。** 云端任务接口只给这个（文件名形如
+> `plate_1.png`），摄像头画面云端不提供——要拿只能走局域网模式的摄像头流。界面上如实标注了这一点。
+
+**为什么必须当场抓下来**：云端给的 `cover` 是阿里云 OSS 的**预签名链接**（`X-Amz-Expires=1800`），
+**30 分钟就失效**。任务列表里存 URL、过一会儿再取就是 403——所以结算（轮询到任务记录）那一刻就把字节
+下载到 `DATA_DIR/covers/<任务ID>.png`，界面只读本地那份。
+
+抓图**失败不影响扣重**：`app/core/covers.py` 内部吞掉所有异常并记日志，非 200 / 非图片 content-type /
+不足 512 字节（多半是错误页或占位图）一律跳过，任务照常结算、料照常扣。校准类任务本来就没有成果图，
+这种情况列表显示「—」、详情显示占位说明，而不是破图。
+
 ### 界面
 
 顶部图标导航、卡片式统计；料盘页是状态标签 + 筛选栏 + 表格 + 分页；仪表盘带「最近使用 / 最近添加 /
@@ -366,12 +381,13 @@ python tests/test_finish_summary.py    # 外观字段归一与回填、耗材汇
 python tests/test_cloud_endpoints.py   # 拓竹云接口地址与验证码登录状态流转（离线）
 python tests/test_labels.py            # 标签二维码取整、?box / ?dots 与响应头
 python tests/test_slot_label.py        # 槽位展示名：AMS A-D / HT A-D / 外挂料盘
+python tests/test_cover.py             # 打印成果图：云端 cover 抓取、本地缓存、取图接口
 python tests/test_brand_icon.py        # 应用图标文件、ICO 结构与三种引用
 python tests/test_readme.py            # README 的图片直链、色卡数字与文档引用是否过期
 
 node tests/test_label_raster.mjs       # 1 位光栅打包、ESC/POS 报文与标签渲染尺寸
 node tests/test_panel_fill.mjs         # 风扇命名与料条高度口径
-node tests/test_ui_polish.mjs          # 外观预填、扫码认码、相机被拦归因、汇总页等界面口径
+node tests/test_ui_polish.mjs          # 外观预填、扫码认码、相机被拦归因、成果图、汇总页等界面口径
 
 PYTHON=python node scripts/shot_ui.mjs # 浏览器实拍验收（截图 + 断言，不进 CI）
 ```

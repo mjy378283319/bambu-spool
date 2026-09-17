@@ -58,6 +58,9 @@ jobs:
       - name: 运行槽位展示名自测（AMS / AMS HT / 外挂料盘）
         run: python tests/test_slot_label.py
 
+      - name: 运行打印成果图自测（云端 cover 抓取 / 本地缓存 / 取图接口）
+        run: python tests/test_cover.py
+
       - name: 运行应用图标与 favicon 自测
         run: python tests/test_brand_icon.py
 

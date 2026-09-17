@@ -898,9 +898,81 @@ async function main() {
   check("有扣重流水的行「更改料盘」可点（不是禁用）",
     jobRow.rebindDisabled === false, JSON.stringify(jobRow).slice(0, 300));
 
+  /* ── 打印成果图：列表缩略图 + 详情大图 ──
+     只断言「有 <img>」是不够的：src 404 时 <img> 也在，只是画成破图。
+     所以必须等图片真的解码完，量 naturalWidth —— 它 >0 才代表字节真的取到了。
+     这是「假断言」的高发区（沙箱里那条只验了 HTML 字符串）。 */
+  await cdp.evaluate(sessionId, `closeModal(); switchView("jobs")`);
+  await sleep(600);
+  const coverUI = await cdp.evaluate(sessionId, `(async () => {
+    const img = document.querySelector("#jobTable img.job-thumb")
+      || [...document.querySelectorAll("#jobTable img")][0];
+    if (!img) return { noImg: true, table: (document.getElementById("jobTable") || {}).innerHTML?.slice(0, 300) };
+    // src 有了不代表加载成功，等它 load/error 再说
+    if (!img.complete) await new Promise((r) => { img.onload = r; img.onerror = r; setTimeout(r, 4000); });
+    const r = img.getBoundingClientRect();
+    return {
+      src: img.getAttribute("src"), alt: img.getAttribute("alt"),
+      naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
+      w: Math.round(r.width), h: Math.round(r.height),
+      complete: img.complete,
+      all: document.querySelectorAll("#jobTable img.job-thumb").length,
+    };
+  })()`);
+  console.log("列表成果缩略图：", JSON.stringify(coverUI));
+  check("打印记录列表里有成果缩略图", coverUI.noImg !== true, JSON.stringify(coverUI).slice(0, 300));
+  check("成果缩略图 src 指向本地取图接口（不是云端过期链接）",
+    /^\/api\/jobs\/\d+\/cover$/.test(String(coverUI.src)), String(coverUI.src));
+  check("成果缩略图真的取到字节（naturalWidth>0，不是 404 破图）",
+    Number(coverUI.naturalWidth) > 0,
+    `naturalWidth=${coverUI.naturalWidth} complete=${coverUI.complete} src=${coverUI.src}`);
+  check("成果缩略图在列表里真的占了地方（没被压成 0 宽）",
+    Number(coverUI.w) > 8 && Number(coverUI.h) > 8,
+    `${coverUI.w}x${coverUI.h}`);
+
+  // 详情里的大图，以及口径文案（别让人以为这是摄像头实拍）
+  const coverDetail = await cdp.evaluate(sessionId, `(async () => {
+    const jobs = (window.panelDebug.state.jobs || []);
+    const job = jobs.find((j) => j.has_cover) || jobs[0];
+    if (!job) return { noJob: true };
+    openJobDetail(job.id);
+    await new Promise((r) => setTimeout(r, 500));
+    const img = document.querySelector("#modalBody .job-cover img");
+    if (!img) {
+      return { noImg: true, hasCover: !!job.has_cover,
+               body: (document.getElementById("modalBody") || {}).innerText?.slice(0, 300) || "" };
+    }
+    if (!img.complete) await new Promise((r) => { img.onload = r; img.onerror = r; setTimeout(r, 4000); });
+    const r = img.getBoundingClientRect();
+    return {
+      src: img.getAttribute("src"), naturalWidth: img.naturalWidth,
+      w: Math.round(r.width), h: Math.round(r.height),
+      note: (document.querySelector("#modalBody .job-cover p") || {}).innerText || "",
+      title: (document.querySelector(".modal h3") || {}).innerText || "",
+    };
+  })()`);
+  console.log("详情成果图：", JSON.stringify(coverDetail));
+  check("详情里渲染出成果大图", coverDetail.noImg !== true, JSON.stringify(coverDetail).slice(0, 300));
+  check("详情大图真的取到字节（naturalWidth>0）",
+    Number(coverDetail.naturalWidth) > 0, `naturalWidth=${coverDetail.naturalWidth}`);
+  check("详情大图有实际尺寸（没被全局 svg/图标规则压扁）",
+    Number(coverDetail.w) > 40, `${coverDetail.w}x${coverDetail.h}`);
+  check("详情写明了是切片盘面预览图、不是摄像头实拍",
+    String(coverDetail.note).includes("切片盘面预览图")
+    && String(coverDetail.note).includes("不是摄像头实拍"),
+    String(coverDetail.note).slice(0, 200));
+
+  // 接着的一段要靠任务详情弹窗里的表格来点「查看料盘」。
+  // 上面为了验详情图已经把这个弹窗关掉了，这里必须重新打开 ——
+  // 否则下一段读 #modalBody 拿到 null，整个实拍直接抛错中断（不是断言失败，是崩）。
+  await cdp.evaluate(sessionId, `openJobDetail(${jobButtons.jobId})`);
+  await waitFor(cdp, sessionId, `!!document.querySelector("#modalBody tbody tr")`, 10000).catch(() => {});
+  await sleep(300);
+
   // 真点一次「查看料盘」：要真的打开那盘料的详情，不是原地不动
   const jumped = await cdp.evaluate(sessionId, `(() => {
     const tr = document.querySelector("#modalBody tbody tr");
+    if (!tr) return { skipped: true, want: "", reason: "任务详情弹窗没打开" };
     const btn = [...tr.querySelectorAll("button")].find((b) => b.innerText.trim() === "查看料盘");
     const want = tr.cells[0].innerText.trim();
     if (!btn || btn.disabled) return { skipped: true, want };

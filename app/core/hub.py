@@ -24,6 +24,7 @@ from ..cloud.api import ApiClient, AuthRequired, BambuCloudError, token_valid_fo
 from ..cloud.mock import MockSource
 from ..cloud.mqtt import CloudMqttConnection
 from ..config import settings
+from .covers import save_cover
 from ..db import session_scope
 from ..models import CloudAccount, Printer, PrintJob, parse_cloud_time, utcnow
 from ..notify import notify
@@ -740,7 +741,14 @@ class PrinterHub:
                 total = apply_deduction(session, job, usages)
                 job.cloud_task_id = str(task.get("id") or "")
                 job.source = "cloud_task"
-                job.cover_url = str(task.get("cover") or "")
+                cover = str(task.get("cover") or "")
+                job.cover_url = cover
+                # 封面是 OSS 预签名链接，30 分钟就过期——必须现在抓下来存本地，
+                # 存 URL 过一会儿就是 403。抓图失败不影响扣重（save_cover 内部吞异常）。
+                if cover and not job.cover_file and job.id:
+                    job.cover_file = await asyncio.to_thread(
+                        save_cover, cover, int(job.id)
+                    )
                 session.add(job)
                 self._used_cloud_tasks.add(str(task.get("id")))
                 self._pending.pop(job_id, None)

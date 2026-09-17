@@ -2277,6 +2277,44 @@ function jobStatusTag(status, pending) {
   return `<span class="tag ${cls}">${label}</span>`;
 }
 
+/** 打印成果图的地址。
+ *  云端任务给的 cover 是 OSS 预签名链接，**30 分钟就过期**，存着过一会儿就是 403，
+ *  所以界面只认结算时抓下来存本地的那一份；没抓到就是空，画占位而不是破图。
+ *
+ *  判定以服务端 `has_cover` 为准（= 有文件名 **且** 文件真在），不要自己看 `cover_file`：
+ *  文件被清理掉时 `cover_file` 仍有值，前端会渲染出一个 404 破图。 */
+function jobCoverUrl(job) {
+  return job && job.has_cover ? `/api/jobs/${job.id}/cover` : "";
+}
+
+/** 列表里的成果缩略图。行本身有 onclick 打开详情，点图要 stopPropagation，
+ *  否则会一边开大图一边把详情弹窗也顶上来。 */
+function jobThumbHtml(job) {
+  const url = jobCoverUrl(job);
+  return url
+    ? `<img class="job-thumb" src="${esc(url)}" alt="打印成果"
+         onclick="event.stopPropagation();openJobCover(${job.id})" title="点开看大图">`
+    : `<span class="tiny muted">—</span>`;
+}
+
+function openJobCover(jobId) {
+  window.open(`/api/jobs/${Number(jobId) || 0}/cover`, "_blank");
+}
+
+/** 详情里的成果图。口径必须写清楚：这是切片盘面预览图，不是摄像头实拍。 */
+function jobCoverBlock(job) {
+  const url = jobCoverUrl(job);
+  if (!url) {
+    return `<div class="job-cover-empty">这次打印云端没有给成果图
+      <span class="muted">（校准类任务本来就没有；也可能是抓图时签名链接已过期）</span></div>`;
+  }
+  return `<div class="job-cover">
+      <img src="${esc(url)}" alt="打印成果" onclick="openJobCover(${job.id})" title="点开看大图">
+      <p class="tiny muted">云端任务附带的是<b>切片盘面预览图</b>，不是摄像头实拍
+        —— 摄像头画面云端不提供，要拿只能走局域网模式的摄像头流。</p>
+    </div>`;
+}
+
 function renderJobs() {
   const host = document.getElementById("jobTable");
   const totalCost = S.jobs.reduce((sum, j) => sum + (j.cost_total || 0), 0);
@@ -2297,6 +2335,7 @@ function renderJobs() {
 
   host.innerHTML = `<table>
     <thead><tr>
+      <th style="width:60px">成果</th>
       <th style="width:96px">任务 ID</th>
       <th>任务标题</th>
       <th style="width:118px">打印机</th>
@@ -2308,6 +2347,7 @@ function renderJobs() {
     </tr></thead>
     <tbody>${slice.map((job) => `
       <tr class="clickable" onclick="openJobDetail(${job.id})">
+        <td data-label="成果">${jobThumbHtml(job)}</td>
         <td class="small muted" data-label="任务 ID">${esc(job.task_id || job.cloud_task_id || job.id)}</td>
         <td class="cell-main"><div>${esc(job.title)}</div>
             <div class="tiny muted">${esc(fmtDuration(job.duration_seconds))} · 结束于 ${esc(job.progress_at_end)}%</div></td>
@@ -2385,6 +2425,7 @@ async function openJobDetail(jobId) {
           : job.source === "manual" ? "手动录入" : "暂无"}</span>
       </div>
       ${actions ? `<div class="row" style="margin-bottom:12px">${actions}</div>` : ""}
+      ${jobCoverBlock(job)}
       <table><thead><tr><th>料盘</th><th>槽位</th><th>耗材</th>
         <th style="text-align:right">用量</th><th style="text-align:right">耗材费</th><th>匹配依据</th>
         <th style="width:170px">操作</th></tr></thead>

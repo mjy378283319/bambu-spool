@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -42,6 +42,7 @@ from ..catalog import (
     normalize_finish,
     spool_weight_options,
 )
+from ..core.covers import cover_dir, cover_media_type
 from ..colors import (
     catalog_index,
     match_catalog,
@@ -125,7 +126,13 @@ def job_dict(job: PrintJob, session: Session, with_filaments: bool = True) -> di
         "progress_at_end": job.progress_at_end,
         "total_weight_g": job.total_weight_g,
         "source": job.source,
+        # 云端给的原始 URL（OSS 预签名，过期后取不到），只用于排查
         "cover_url": job.cover_url,
+        # 界面真正该用的：抓下来存在本地的成果图文件名，空串表示这次没有
+        "cover_file": job.cover_file,
+        # 给前端一个明确的布尔量，免得前端自己拼 `cover_file ? ... : ...` 时
+        # 把 null/undefined 当成「有图」；口径 = 有文件名 **且** 文件真的在
+        "has_cover": bool(job.cover_file) and (cover_dir() / job.cover_file).is_file(),
         "deduction_applied": job.deduction_applied,
         "note": job.note,
         "pending": job.id in hub.pending_jobs() if job.id else False,
@@ -208,7 +215,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.4.2",
+        "version": "0.5.0",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -966,6 +973,22 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job_dict(job, session)
+
+
+@router.get("/api/jobs/{job_id}/cover")
+def job_cover(job_id: int, session: Session = Depends(get_session)) -> Response:
+    """取这次打印的成果图（结算时从云端抓下来存本地的那张）。
+
+    为什么不让前端直接拿云端的 URL：那个链接是 OSS 预签名地址，30 分钟就过期，
+    存在列表里过一会儿就是 403。所以只暴露本地缓存的这一张。
+    """
+    job = session.get(PrintJob, job_id)
+    if job is None or not job.cover_file:
+        raise HTTPException(status_code=404, detail="这次打印没有云端成果图")
+    path = cover_dir() / job.cover_file
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="成果图文件已丢失")
+    return FileResponse(path, media_type=cover_media_type(job.cover_file))
 
 
 @router.post("/api/jobs/{job_id}/retry")

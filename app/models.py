@@ -186,7 +186,11 @@ class PrintJob(SQLModel, table=True):
     total_weight_g: float = 0.0
     # 数据来源：cloud_task / manual / none
     source: str = "none"
+    # 云端任务给的封面 URL。注意它是 OSS 预签名链接，**30 分钟就过期**，
+    # 只能当时抓下来用，存着没意义（留着是为了排查）
     cover_url: str = ""
+    # 抓下来存在本地的成果图文件名（空=这次没有）。真正给界面用的是这个
+    cover_file: str = ""
 
     deduction_applied: bool = False
     note: str = ""

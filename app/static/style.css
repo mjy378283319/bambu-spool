@@ -1143,3 +1143,26 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 
 /* 汇总表上方那句「点名称可跳转」的说明 */
 .sum-hint { font-size: 13px; color: var(--text-3); margin: -4px 0 10px; }
+
+/* ── 打印成果图（列表缩略图 / 详情大图） ───────────────────── */
+.job-thumb {
+  width: 46px; height: 34px; object-fit: cover; display: block;
+  border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--surface-2); cursor: zoom-in;
+}
+.job-thumb:hover { border-color: var(--accent); }
+
+.job-cover { margin: 0 0 12px; }
+.job-cover img {
+  width: 100%; max-width: 420px; max-height: 320px; object-fit: contain;
+  display: block; border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  cursor: zoom-in;
+}
+.job-cover p { margin: 6px 0 0; }
+
+.job-cover-empty {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3); font-size: 13px; line-height: 1.6;
+}

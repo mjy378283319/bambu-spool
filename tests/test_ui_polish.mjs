@@ -930,6 +930,54 @@ check("没有扣重流水时不弹改绑窗（弹了也改不动）",
 sandbox.closeModal();
 state.spools = [];
 
+// ── 打印成果图（cover） ─────────────────────────────────────────
+// 这一段专门盯「下拉空着也能通过」那类假断言：断言不能只看「有 img」，
+// 要同时验「有图时才出图」「无图时不许出破图」两个方向。
+console.log("");
+console.log("── 打印成果图 ──");
+{
+  const okJob = { id: 42, cover_file: "42.png", has_cover: true };
+  const noJob = { id: 43, cover_file: "", has_cover: false };
+  // 最容易错的一种：文件名还在（文件被别人清掉了），has_cover=False
+  const staleJob = { id: 44, cover_file: "44.png", has_cover: false };
+
+  check("有成果图 → 地址指向本地接口",
+    sandbox.jobCoverUrl(okJob) === "/api/jobs/42/cover", sandbox.jobCoverUrl(okJob));
+  check("无成果图 → 地址是空串（不许拼出一个 404 的地址）",
+    sandbox.jobCoverUrl(noJob) === "", sandbox.jobCoverUrl(noJob));
+  check("文件名在但文件已丢 → 也当无图（has_cover 才作数）",
+    sandbox.jobCoverUrl(staleJob) === "", sandbox.jobCoverUrl(staleJob));
+  check("job 为 null 不炸", sandbox.jobCoverUrl(null) === "");
+
+  const thumbOk = sandbox.jobThumbHtml(okJob);
+  check("列表缩略图：有图时确实渲染出 <img>", /<img[^>]*class="job-thumb"/.test(thumbOk), thumbOk);
+  check("列表缩略图：src 指向本地成果图接口",
+    /src="\/api\/jobs\/42\/cover"/.test(thumbOk), thumbOk);
+  check("列表缩略图：点击不会连带打开详情弹窗（stopPropagation）",
+    /stopPropagation/.test(thumbOk), thumbOk);
+  check("列表缩略图：点击走 openJobCover 开新窗口",
+    /openJobCover\(42\)/.test(thumbOk), thumbOk);
+
+  const thumbNo = sandbox.jobThumbHtml(noJob);
+  check("列表缩略图：无图时不渲染 <img>（占位而不是破图）",
+    !/<img/.test(thumbNo), thumbNo);
+  check("列表缩略图：无图时给出破折号占位", /—/.test(thumbNo), thumbNo);
+
+  const blockOk = sandbox.jobCoverBlock(okJob);
+  check("详情：有图时渲染 <img>", /<img[^>]*src="\/api\/jobs\/42\/cover"/.test(blockOk), blockOk);
+  check("详情：说明了这是切片盘面预览图、不是摄像头实拍",
+    /切片盘面预览图/.test(blockOk) && /不是摄像头实拍/.test(blockOk), blockOk);
+
+  const blockNo = sandbox.jobCoverBlock(noJob);
+  check("详情：无图时不渲染 <img>", !/<img/.test(blockNo), blockNo);
+  check("详情：无图时给出解释文案", /没有给成果图/.test(blockNo), blockNo);
+
+  // 深链/异常入口：job.id 缺失时不许拼出 /api/jobs/NaN/cover
+  check("job.id 缺失时 openJobCover 不拼出 NaN",
+    !/NaN/.test(String(sandbox.jobCoverUrl({ id: undefined, has_cover: true }))),
+    String(sandbox.jobCoverUrl({ id: undefined, has_cover: true })));
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");
 if (FAILED.length) {

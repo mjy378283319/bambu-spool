@@ -35,6 +35,9 @@ def _migrate_columns() -> None:
             ("price", "REAL NOT NULL DEFAULT 0.0"),
             ("finish", "TEXT NOT NULL DEFAULT ''"),
         ],
+        "print_job": [
+            ("cover_file", "TEXT NOT NULL DEFAULT ''"),
+        ],
     }
     with engine.begin() as conn:
         for table, columns in wanted.items():
