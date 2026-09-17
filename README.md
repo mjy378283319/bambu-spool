@@ -33,7 +33,7 @@
 
 ### 品牌配色卡
 
-录入料盘时点色块即填色名与色值，内置 **12 个品牌 · 132 个系列 · 1661 个色号**：
+录入料盘时点色块即填色名与色值，内置 **13 个品牌 · 140 个系列 · 1811 个色号**：
 
 | 品牌 | 系列 | 色号 | 色值来源 |
 |---|---|---|---|
@@ -49,8 +49,11 @@
 | iBOSS | 9 | 44 | 官网 |
 | R3D | 19 | 132 | 官网 |
 | 爱丽兹 Allizz | 7 | 89 | 官网 Color Options |
+| 彩多屋 | 8 | 150 | 官网 products.json（色号官方 / HEX 提色近似） |
 
-无法从官方确认的 HEX 会在界面上标注为近似值。
+无法从官方确认的 HEX 会在界面上标注为近似值。彩多屋的**色名与官方色号（AC199 / MT9003 / G419 …）
+是官方字段**，但官方不公布 Hex Code Table，HEX 取自官方逐色色片图，属近似值；
+三色丝绸、彩虹渐变这类没有单一定义色的系列不参与色值比对（用中性占位灰）。
 
 ### 图片识色 · 找同色耗材
 
@@ -382,8 +385,7 @@ python tests/test_cloud_endpoints.py   # 拓竹云接口地址与验证码登录
 python tests/test_labels.py            # 标签二维码取整、?box / ?dots 与响应头
 python tests/test_slot_label.py        # 槽位展示名：AMS A-D / HT A-D / 外挂料盘
 python tests/test_cover.py             # 打印成果图：云端 cover 抓取、本地缓存、取图接口
-python tests/test_brand_icon.py        # 应用图标文件、ICO 结构与三种引用
-python tests/test_readme.py            # README 的图片直链、色卡数字与文档引用是否过期
+python tests/test_brand_icon.py        # 应用图标文件、ICO 结构与三种引用python tests/test_readme.py            # README 的图片直链、色卡数字与文档引用是否过期
 
 node tests/test_label_raster.mjs       # 1 位光栅打包、ESC/POS 报文与标签渲染尺寸
 node tests/test_panel_fill.mjs         # 风扇命名与料条高度口径
@@ -425,9 +427,13 @@ app/
    └─ vendor/    jsQR（Apache-2.0，本地化，含许可证）
 
 scripts/build_printer_photo.py   把实物照片处理成可用的机型图（裁剪 / 修掉压上去的浮标 / 补背景）
+scripts/build_cailab_colors.py   抓彩多屋官方商城色卡，生成 app/brand_colors_cailab.py
 scripts/shot_ui.mjs              无头浏览器实拍验收（截图 + 断言）
 scripts/seed_demo_job.py         给模拟模式灌一条演示打印任务（实拍验收用）
 ```
+
+色卡抓取脚本两段跑：`--fetch` 把官方 `/products.json` 与每个色号的色块图缓存到 `data/_cailab_src/`，
+`--build` 再离线生成色卡模块（色号为官方货号，HEX 取自色块图采样，因此 `official=False`）。
 
 ## 路线图
 

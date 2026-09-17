@@ -211,6 +211,7 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "天瑞": [200.0],                   # 官网未公布空盘重量，估算值，建议称重校准
     "iBOSS": [200.0],                  # 官网未公布空盘重量，估算值，建议称重校准
     "R3D": [200.0],                    # 官网未公布空盘重量，估算值，建议称重校准
+    "彩多屋": [200.0],                 # 官网未公布空盘重量，估算值，建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -245,6 +246,10 @@ BRAND_ALIASES: dict[str, str] = {
     "r3d": "R3D",
     "r3d印维": "R3D",
     "印维": "R3D",
+    "cailab": "彩多屋",
+    "cailab3d": "彩多屋",
+    "彩多屋cailab": "彩多屋",
+    "彩多屋旗舰店": "彩多屋",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭
@@ -435,14 +440,20 @@ MATERIAL_COLOR_SERIES: dict[str, list[str]] = {
     "PETG": ["PETG"],
 }
 
-# Kexcelled / 兰博 / 魔创 的配色数据在 brand_colors.py（自动生成），在此合并
+# Kexcelled / 兰博 / 魔创 / 大简 的配色数据在 brand_colors.py（自动生成），在此合并
 from .brand_colors import (  # noqa: E402
     BRAND_COLOR_SERIES_EXTRA,
     MATERIAL_COLOR_SERIES_EXTRA,
 )
+# 彩多屋（CAILAB）单独一份，来源是官网 Shopify 结构化数据，生成脚本与上面那个不同
+from .brand_colors_cailab import (  # noqa: E402
+    BRAND_COLOR_SERIES_EXTRA as _CAILAB_SERIES,
+    MATERIAL_COLOR_SERIES_EXTRA as _CAILAB_MATERIALS,
+)
 
 BRAND_COLOR_SERIES.update(BRAND_COLOR_SERIES_EXTRA)
-for _mat, _series in MATERIAL_COLOR_SERIES_EXTRA.items():
+BRAND_COLOR_SERIES.update(_CAILAB_SERIES)
+for _mat, _series in {**MATERIAL_COLOR_SERIES_EXTRA, **_CAILAB_MATERIALS}.items():
     _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
     MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _series if s not in _existing]
 

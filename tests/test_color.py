@@ -46,6 +46,8 @@ def section(title: str) -> None:
 # ══ 1. 色值解析 ════════════════════════════════════════════════
 section("1. 色值解析与归一化")
 
+from app.catalog import BRAND_PRESETS, normalize_brand  # noqa: E402
+
 from app.colors import (  # noqa: E402
     catalog_index,
     delta_e00,
@@ -287,6 +289,59 @@ for nm in ("透明蓝", "香芋紫", "樱花粉", "黑色", "绀紫色"):
           a is not None and b is not None and a["hex"].upper() == b["hex"].upper(),
           f"{a['hex'] if a else '缺失'} vs {b['hex'] if b else '缺失'}")
 
+
+# ══ 5c. 彩多屋（CAILAB）═══════════════════════════════════════════
+# 数据源是官网 Shopify 的 /products.json：**色名与官方色号是官方字段**，
+# HEX 是从官方逐色色片图取主色得到的近似值（官方不公布 Hex Code Table）。
+# 断言要盯住这两件事：色号没被拆掉、近似值的 official 标成 False。
+section("5c. 彩多屋（CAILAB）色卡")
+
+cai = [e for e in index["*"] if e["brand"] == "彩多屋"]
+check("索引含彩多屋品牌", "彩多屋" in brands_in_index, "/".join(sorted(brands_in_index)))
+check("彩多屋色数 ≥140（官方在售）", len(cai) >= 140, f"{len(cai)} 色")
+
+cai_series = {e["series"] for e in cai}
+for s, want in (("PLA+", 34), ("PETG", 29), ("哑光 PLA", 12), ("丝绸 PLA", 17),
+                ("三色丝绸 PLA", 41), ("金属 PLA", 7), ("PETG-CF", 9), ("PLA-CF", 1)):
+    n = sum(1 for e in cai if e["series"] == s)
+    check(f"彩多屋 {s} 共 {want} 色", n == want, f"{n} 色")
+
+# 官方色号必须保留在显示名里 —— 这是这家品牌最有辨识度的字段，
+# 拆丢了就没法跟包装/官方页对上号
+for series, code in (("PLA+", "AC199"), ("PETG", "G419"), ("哑光 PLA", "MT9003"),
+                     ("丝绸 PLA", "AS199"), ("金属 PLA", "ATM422")):
+    hit = next((e for e in cai if e["series"] == series
+                and code in (e.get("name") or "")), None)
+    check(f"彩多屋 {series} 保留官方色号 {code}", hit is not None,
+          str([e["name"] for e in cai if e["series"] == series][:4]))
+
+# 关键色值抽查（近似值，但要在合理范围内：名实相符）
+for series, nm, want in (("PLA+", "Silver", "#C0C0C0"), ("哑光 PLA", "Latte", "#A88058"),
+                         ("哑光 PLA", "Matcha Green", "#B0B860"),
+                         ("金属 PLA", "Silver", "#C0C0C0")):
+    hit = next((x for x in cai if x["series"] == series and x.get("en") == nm), None)
+    check(f"彩多屋 {series} {nm} 色值正确",
+          hit is not None and hit["hex"].upper() == want,
+          hit["hex"] if hit else "缺失")
+
+# 近似值必须标 official=False，别冒充官方色值
+check("彩多屋色块均标 official=False（HEX 非官方公布）",
+      all(e.get("official") is False for e in cai))
+check("彩多屋每条都有可显示名（点色块能填出颜色名）",
+      all((e.get("name") or "").strip() for e in cai))
+
+# 渐变/三色这类没有「单一定义色」的，HEX 必须是中性占位灰，
+# 否则会拿一个假色值去参与 ΔE 匹配、推荐出根本不存在的颜色
+multi = [e for e in cai if e["series"] == "三色丝绸 PLA"]
+check("三色丝绸用中性占位灰（不拿假色去比对）",
+      all(e["hex"].upper() == "#CCCCCC" for e in multi),
+      str(sorted({e["hex"] for e in multi}))[:80])
+
+# 品牌写法归一
+for variant in ("cailab", "CAILAB", "CaiLab", "cailab3d", "彩多屋旗舰店"):
+    check(f"品牌归一 {variant} → 彩多屋",
+          normalize_brand(variant) == "彩多屋", normalize_brand(variant))
+check("彩多屋在品牌下拉预设里", "彩多屋" in BRAND_PRESETS)
 
 
 # ══ 6. 料盘匹配 ════════════════════════════════════════════════
