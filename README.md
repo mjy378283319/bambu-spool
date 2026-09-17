@@ -404,15 +404,23 @@ Docker 页面 → Add Container，按下面填：
 ##### 容器图标
 
 Unraid 的容器图标**不是从镜像里自动读的**，得在一处填一个**公网可访问的图片直链**；
-留空就是那个灰色问号方块。仓库根目录放了 `icon.png`（512×512），按你的网络选一种填：
+留空就是那个灰色问号方块。仓库根目录放了 `icon.png`（512×512），**优先填第 ① 条**：
 
 ```
-# ① 直连 GitHub（最标准，Unraid 默认走这条）
-https://raw.githubusercontent.com/mjy378283319/bambu-spool/main/icon.png
-
-# ② CDN 镜像（国内网络更稳；raw.githubusercontent.com 被污染时用这条）
+# ① CDN 镜像（首选，国内网络实测可达）
 https://cdn.jsdelivr.net/gh/mjy378283319/bambu-spool@main/icon.png
+
+# ② 直连 GitHub（海外/直连环境可用；raw.githubusercontent.com 被 DNS 污染时必然失败）
+https://raw.githubusercontent.com/mjy378283319/bambu-spool/main/icon.png
 ```
+
+> **为什么把 CDN 放前面**：如果仓库放在 GitHub 上，Unraid 拉图标是一次**服务端直连**，
+> 和你的浏览器走不走代理无关。国内网络下 `raw.githubusercontent.com` 常被 DNS 污染
+> （现象是解析到 `0.0.0.0` 或直接 `getaddrinfo failed`，填进去就是永远转圈不出图，
+> 看起来和「仓库里没有图标」一模一样）。jsDelivr 走的是国内可达的 CDN，更稳。
+>
+> 两条都可以直接 curl 验证，返回 `image/png` 且大小约 48 KB 就是对的：
+> `curl -sI https://cdn.jsdelivr.net/gh/mjy378283319/bambu-spool@main/icon.png | head -3`
 
 填完在 Docker 页面点容器 → `Edit` → 改 Icon URL → 保存，图标立刻刷新（不用重建容器）。
 

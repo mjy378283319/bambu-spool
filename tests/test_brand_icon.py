@@ -8,6 +8,7 @@
   这些路径必须在外壳放行名单里；掉进鉴权中间件就会 401，书签栏一片空白）
 - /favicon.ico 返回真正的 ICO（含多尺寸），不是 HTML 错误页
 - index.html 正确引用了 ico / svg / apple-touch-icon 三种图标
+- README 里给出的容器图标直链，反解出的仓库路径真实存在
 - Dockerfile 会把图标打进镜像，且 .dockerignore 没有把它们排除掉
 """
 from __future__ import annotations
@@ -176,7 +177,31 @@ def main() -> int:
           bool(at) and at.group(1).endswith(".png"),
           at.group(1) if at else "未找到")
 
-    section("四、Dockerfile / .dockerignore 会把图标带进镜像")
+    section("五、README 给出的容器图标直链，指向的文件真在仓库里")
+    # 用户实际踩的坑：按 README 填了 Icon URL 却始终不出图。除了网络问题，
+    # 还有一种情况是链接写错/指向不存在的路径 —— 这里把 URL 反解成仓库路径做校验。
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # 两种形态都要抓：
+    #   https://raw.githubusercontent.com/<o>/<r>/<ref>/<path>
+    #   https://cdn.jsdelivr.net/gh/<o>/<r>@<ref>/<path>
+    raw_urls = re.findall(
+        r"raw\.githubusercontent\.com/mjy378283319/bambu-spool/[^/\s]+/([^\s`)\"']+)", readme)
+    cdn_urls = re.findall(
+        r"cdn\.jsdelivr\.net/gh/mjy378283319/bambu-spool@[^/\s]+/([^\s`)\"']+)", readme)
+    icon_urls = raw_urls + cdn_urls
+    check("README 至少给出一个图标直链", len(icon_urls) >= 1, str(icon_urls))
+    check("raw 与 jsDelivr 两种直链都给了（用户网络可能只通一条）",
+          len(raw_urls) >= 1 and len(cdn_urls) >= 1,
+          f"raw={len(raw_urls)} cdn={len(cdn_urls)}")
+    for rel in icon_urls:
+        rel = rel.rstrip(".,;")            # 句末标点不算路径
+        target = ROOT / rel
+        check(f"直链指向的文件存在：{rel}",
+              target.is_file(), f"{target.stat().st_size} B" if target.is_file() else "缺失")
+    check("首选直链是 jsDelivr CDN（raw 域名国内常被污染）",
+          "cdn.jsdelivr.net/gh/mjy378283319/bambu-spool" in readme)
+
+    section("六、Dockerfile / .dockerignore 会把图标带进镜像")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     check("Dockerfile 有 COPY icon.png icon.svg",
           bool(re.search(r"^COPY\s+icon\.png\s+icon\.svg\s", dockerfile, re.M)))
@@ -191,7 +216,7 @@ def main() -> int:
     check("icon.png 未被 .dockerignore 排除", "icon.png" not in ignored)
     check("icon.svg 未被 .dockerignore 排除", "icon.svg" not in ignored)
 
-    section("五、未登录也能取到图标（登录页本身要显示 logo）")
+    section("七、未登录也能取到图标（登录页本身要显示 logo）")
     data_dir = ROOT / "data" / ".icontest"
     shutil.rmtree(data_dir, ignore_errors=True)
     data_dir.mkdir(parents=True, exist_ok=True)
