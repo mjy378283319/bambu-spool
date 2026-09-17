@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="拓竹耗材管家">
+  <title>拓竹耗材管家</title>
+  <defs>
+    <linearGradient id="spoolBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="0.55" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 底板：圆角方块 + 青绿渐变 -->
+  <rect width="64" height="64" rx="16" fill="url(#spoolBg)"/>
+
+  <!-- 盘绕的料丝：柱身上的绕线 -->
+  <g stroke="#ffffff" stroke-width="2.1" stroke-linecap="round" opacity="0.92">
+    <path d="M26.4 27.2h11.2"/>
+    <path d="M26.4 32h11.2"/>
+    <path d="M26.4 36.8h11.2"/>
+  </g>
+
+  <!-- 料盘正视：上下两片外伸的盘边，中间是内缩的料柱 -->
+  <g fill="none" stroke="#ffffff" stroke-width="3.9" stroke-linecap="round">
+    <ellipse cx="32" cy="19" rx="15.6" ry="5.8"/>
+    <path d="M23.3 22.6v17.8M40.7 22.6v17.8"/>
+    <ellipse cx="32" cy="44.6" rx="15.6" ry="5.8"/>
+  </g>
+
+  <!-- 出丝：从盘边引出一段料丝 -->
+  <path d="M47.4 40.2c2.6.4 4.4 1.6 5.4 3.4" fill="none" stroke="#ffffff"
+        stroke-width="2.6" stroke-linecap="round" opacity="0.95"/>
+</svg>

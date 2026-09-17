@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="拓竹耗材管家",
-    version="0.4.0",
+    version="0.4.1",
     lifespan=lifespan,
     # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
     docs_url=None,
@@ -141,6 +141,18 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/", include_in_schema=False)
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+# 图标：index.html 用 icon.svg，但浏览器/抓取器仍会按惯例请求 /favicon.ico。
+# 没有这条路由时它落在鉴权中间件之后 → 401（或 404），控制台一直报错、书签栏空白。
+# OPEN_EXACT 里已放行 /favicon.ico，这里只要把文件吐出去即可。
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    ico = STATIC_DIR / "favicon.ico"
+    if not ico.exists():
+        # 兜底：没生成 ico 就退 SVG（浏览器认 type）
+        return FileResponse(STATIC_DIR / "icon.svg", media_type="image/svg+xml")
+    return FileResponse(ico, media_type="image/x-icon")
 
 
 @app.get("/health", include_in_schema=False)

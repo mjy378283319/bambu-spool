@@ -312,8 +312,11 @@ AMS 编号按官方语义归一：`ams_id` 0–3 是普通 AMS（A/B/C/D），12
 普通 AMS 上报 0–5 档位（显示为「湿度 3 级 · 正常」），AMS HT 上报百分比（显示为「湿度 21%」）。
 槽位克重优先用本系统料盘台账的实测余重，没绑定料盘时按「remain% × 官方标称满重」估算。
 
-应用图标（`app/static/icon.svg` + `docs/icon-512.png`）是一枚料盘造型，
-青绿渐变圆角方块 + 盘绕的料丝，可直接用作 Unraid 的容器图标。
+应用图标（仓库根 `icon.png` / `icon.svg`，网页端 `app/static/icon.svg` + `favicon.ico`）
+是一枚料盘造型，青绿渐变圆角方块 + 盘绕的料丝。
+
+Unraid 容器图标要在容器设置里**手动填一个图片直链**（镜像里带不动它），
+见 [在 Unraid 上部署 → 容器图标](#容器图标)。
 
 ## 架构与数据来源
 
@@ -396,6 +399,29 @@ Docker 页面 → Add Container，按下面填：
 | Variable | `PUID` = `99` |
 | Variable | `PGID` = `100` |
 | Variable | `TASK_POLL_INTERVAL` = `60` |
+| **Icon URL** | 见下方「容器图标」一节 |
+
+##### 容器图标
+
+Unraid 的容器图标**不是从镜像里自动读的**，得在一处填一个**公网可访问的图片直链**；
+留空就是那个灰色问号方块。仓库根目录放了 `icon.png`（512×512），按你的网络选一种填：
+
+```
+# ① 直连 GitHub（最标准，Unraid 默认走这条）
+https://raw.githubusercontent.com/mjy378283319/bambu-spool/main/icon.png
+
+# ② CDN 镜像（国内网络更稳；raw.githubusercontent.com 被污染时用这条）
+https://cdn.jsdelivr.net/gh/mjy378283319/bambu-spool@main/icon.png
+```
+
+填完在 Docker 页面点容器 → `Edit` → 改 Icon URL → 保存，图标立刻刷新（不用重建容器）。
+
+> 两条都试过还不出图，就把 `icon.png` 下载到 Unraid 本地再指过去：
+> `http://<你的Unraid地址>/plugins/dynamix.docker.manager/images/` 之类能公网访问的位置，
+> 或者干脆用 Unraid 自带的「上传图标」功能。
+
+图标文件同时也在镜像里（`/app/brand/icon.png`、`/app/brand/icon.svg`），
+网页端用的是 `/static/icon.svg` 与 `/favicon.ico`。
 
 > **拉取报 `denied` 怎么办**：说明 GHCR 上的包还是私有状态。去
 > `https://github.com/users/mjy378283319/packages/container/bambu-spool/settings`
@@ -521,17 +547,14 @@ python tests/test_finish_summary.py
 # 拓竹云接口地址与验证码登录状态流转（23 项断言，全程离线）
 python tests/test_cloud_endpoints.py
 
-# 登录 / 验证码连续失败锁定状态流转（66 项断言）
-python tests/test_auth.py
-
-# 端到端全流程：登录 → 建盘 → 匹配 → 归档（32 项断言）
-python tests/test_flow.py
-
 # 标签二维码取整、?box / ?dots 参数与响应头（70 项断言）
 python tests/test_labels.py
 
 # 槽位展示名：AMS A-D / HT A-D / 外挂料盘（26 项断言）
 python tests/test_slot_label.py
+
+# 应用图标：文件就位、ICO 结构、三种引用、匿名可取 /favicon.ico（25 项断言）
+python tests/test_brand_icon.py
 
 # 1 位光栅打包、ESC/POS 报文、对话框装配与标签实际渲染尺寸（87 项断言，node 直跑，不需要浏览器）
 node tests/test_label_raster.mjs

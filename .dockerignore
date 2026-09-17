@@ -1,5 +1,6 @@
 # 构建上下文里不该出现的东西。
-# Dockerfile 只 COPY app/ 和 tests/，但整个目录都会被当上下文发给守护进程 ——
+# Dockerfile 只 COPY app/ 和 tests/（外加根目录的 icon.png / icon.svg），
+# 但整个目录都会被当上下文发给守护进程 ——
 # data/ 里有运行时 SQLite 与截图，白传几十兆还会让每次构建都换一次缓存键。
 .git
 .github
@@ -17,3 +18,5 @@ venv
 .env
 .edgeprof
 .DS_Store
+
+# 注意：不要在这里忽略 icon.png / icon.svg —— Dockerfile 要用它们打品牌目录。

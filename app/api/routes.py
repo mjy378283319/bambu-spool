@@ -199,7 +199,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.4.0",
+        "version": "0.4.1",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
