@@ -75,7 +75,7 @@ const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintBle",
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity", "labelPickCopies", "labelPickShowAll",
+  "labelPickDensity", "labelPickCopies", "labelPickFeedMode", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -179,6 +179,7 @@ function testEscPosJob() {
     widthDots: 16,
   };
 
+  // 默认「按间隙定位」：每张位图后 FF（0x0C），最后一张再 ESC d n 送过撕纸口
   const job = buildEscPosJob(raster, { copies: 1, feed: 3 });
   const head = Array.from(job.slice(0, 8));
   check("以 ESC @ 复位开头", head[0] === 0x1b && head[1] === 0x40, head.join(","));
@@ -193,31 +194,47 @@ function testEscPosJob() {
   check("位图数据紧随其后（不丢不改）",
     Array.from(job.slice(16, 20)).join(",") === "170,187,204,221",
     Array.from(job.slice(16, 20)).join(","));
-  check("以 ESC d 3 走纸收尾",
-    job[20] === 0x1b && job[21] === 0x64 && job[22] === 3,
-    `${job[20]},${job[21]},${job[22]}`);
-  check("单份长度 = 2+6+8+4+3 = 23", job.length === 23, String(job.length));
+  check("位图后接 FF（0x0C）按间隙走纸",
+    job[20] === 0x0c, "0x" + job[20].toString(16));
+  check("最后一张再 ESC d 3 送过撕纸口",
+    job[21] === 0x1b && job[22] === 0x64 && job[23] === 3,
+    `${job[21]},${job[22]},${job[23]}`);
+  check("单份长度 = 2+6+8+4+1+3 = 24", job.length === 24, String(job.length));
 
   const two = buildEscPosJob(raster, { copies: 2, feed: 3 });
-  check("两份 = 2+6+2×(8+4+3) = 38", two.length === 38, String(two.length));
-  // 第 2 份从第 23 字节开始（2 复位 + 6 标签模式 + 15 第一份）
-  check("两份的第二份仍是完整报文",
-    two[23] === 0x1d && two[24] === 0x76 && two[25] === 0x30 && two[26] === 0x00 &&
-      two[27] === 0x02 && two[29] === 0x02 && two[37] === 3,
-    Array.from(two.slice(23)).join(","));
-  check("两份逐字节相同（除长度翻倍）",
-    Array.from(two.slice(8, 23)).join(",") === Array.from(two.slice(23, 38)).join(","),
-    Array.from(two.slice(23, 38)).join(","));
+  check("两份 = 2+6+2×(8+4+1)+3 = 37", two.length === 37, String(two.length));
+  check("第一张位图后就是 FF（串位修复的关键：每张按间隙对齐）",
+    two[20] === 0x0c && two[21] === 0x1d && two[22] === 0x76,
+    Array.from(two.slice(19, 24)).join(","));
+  check("第二份仍是完整光栅报文",
+    two[21] === 0x1d && two[22] === 0x76 && two[23] === 0x30 && two[24] === 0x00 &&
+      two[25] === 0x02 && two[27] === 0x02,
+    Array.from(two.slice(21)).join(","));
+  check("收尾 = 位图 + FF + ESC d 3",
+    two[33] === 0x0c && two[34] === 0x1b && two[35] === 0x64 && two[36] === 3,
+    Array.from(two.slice(33)).join(","));
 
-  check("份数 0 兜底成 1 份", buildEscPosJob(raster, { copies: 0 }).length === 23,
-    String(buildEscPosJob(raster, { copies: 0 }).length));
+  // 旧行为兜底：feedMode="lines" 时保持历史报文（每张后 ESC d 固定行数）
+  const legacy = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "lines" });
+  check("lines 模式 = 旧行为 23 字节", legacy.length === 23, String(legacy.length));
+  check("lines 模式以 ESC d 3 收尾（没有 FF）",
+    legacy[20] === 0x1b && legacy[21] === 0x64 && legacy[22] === 3,
+    `${legacy[20]},${legacy[21]},${legacy[22]}`);
+  const legacyTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "lines" });
+  check("lines 模式两份逐字节相同（除长度翻倍）",
+    Array.from(legacyTwo.slice(8, 23)).join(",") === Array.from(legacyTwo.slice(23, 38)).join(","),
+    Array.from(legacyTwo.slice(23, 38)).join(","));
+
+  check("份数 0 兜底成 1 份",
+    buildEscPosJob(raster, { copies: 0, feed: 3 }).length === 24,
+    String(buildEscPosJob(raster, { copies: 0, feed: 3 }).length));
   check("份数超上限夹到 50",
-    buildEscPosJob(raster, { copies: 999 }).length === 2 + 6 + 50 * 15,
-    String(buildEscPosJob(raster, { copies: 999 }).length));
-  check("feed 缺省按 0（不崩）", buildEscPosJob(raster, {}).length === 23);
-  check("feed 负数夹成 0",
-    buildEscPosJob(raster, { copies: 1, feed: -5 })[22] === 0,
-    String(buildEscPosJob(raster, { copies: 1, feed: -5 })[22]));
+    buildEscPosJob(raster, { copies: 999, feed: 3 }).length === 2 + 6 + 50 * 13 + 3,
+    String(buildEscPosJob(raster, { copies: 999, feed: 3 }).length));
+  check("feed 缺省按 0（不崩，也不发 ESC d）", buildEscPosJob(raster, {}).length === 21);
+  check("feed 负数夹成 0（同样省掉 ESC d）",
+    buildEscPosJob(raster, { copies: 1, feed: -5 }).length === 21,
+    String(buildEscPosJob(raster, { copies: 1, feed: -5 }).length));
 
   // 403 点宽（50mm @ 203dpi）时行宽高字节仍要为 0，不能溢出成 0x00 0x00 之外的值
   const wide = buildEscPosJob(
@@ -266,6 +283,8 @@ async function testDialogHtml() {
   check("含尺寸预设", html.includes("50×30 mm"));
   check("含 dpi 选项", html.includes('value="203"') && html.includes('value="300"'));
   check("含浓度与份数", html.includes('id="labelDensity"') && html.includes('id="labelCopies"'));
+  check("含走纸方式选项（默认按间隙定位）",
+    html.includes('id="labelFeedMode"') && html.includes("按间隙定位") && html.includes("固定行数"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
   check("含预览挂点", html.includes('id="labelPreviewHost"'));
   check("提示语提到 T260LR 蓝牙方案", html.includes("T260LR"));

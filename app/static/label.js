@@ -135,7 +135,7 @@
   /* ── 配置 ───────────────────────────────────────────────── */
 
   function defaultCfg() {
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, showAll: false };
+    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap", showAll: false };
   }
 
   function loadCfg() {
@@ -358,7 +358,16 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     return { bytes: out, widthDots: w, heightDots: h, bytesPerRow };
   }
 
-  /** 组装 ESC/POS 作业：初始化 → 标签纸模式 → 光栅 → 走纸。 */
+  /** 组装 ESC/POS 作业：初始化 → 标签纸模式 → 光栅 → 走纸。
+   *
+   *  走纸方式（cfg.feedMode，默认 "gap"）：
+   *  - "gap"   每张位图后发 FF（0x0C）：打印机会按间隙学习的结果走纸到
+   *            下一张标签的起点。之前用固定行数 ESC d，标签 240 点 + 2 行
+   *            远小于「标签+间隙」的真实节距（50×30 纸约 264 点），每张少走
+   *            20 多点、误差逐张累积 —— 第 2 张开始串位、第 3 张更严重，
+   *            就是这么来的。FF 走纸每张都重新对齐间隙，多张永远不串。
+   *  - "lines" 旧行为：每张后发 ESC d n 固定行数（协议不吃 FF 时的兜底，
+   *            多张会累积串位，单张不受影响）。 */
   function buildEscPosJob(raster, cfg) {
     const parts = [];
     parts.push(Uint8Array.from([0x1b, 0x40])); // ESC @ 复位
@@ -366,6 +375,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     parts.push(Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]));
 
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
+    const feedLines = Math.max(0, cfg.feed | 0) & 0xff;
+    const gapMode = cfg.feedMode !== "lines";
     for (let c = 0; c < copies; c++) {
       parts.push(
         Uint8Array.from([
@@ -375,8 +386,17 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         ])
       );
       parts.push(raster.bytes);
-      // ESC d n：走 n 行，把标签送过撕纸口
-      parts.push(Uint8Array.from([0x1b, 0x64, Math.max(0, cfg.feed | 0) & 0xff]));
+      if (gapMode) {
+        // FF：打印缓冲并按间隙走纸到下一张标签起点（每张都对齐，不累积误差）
+        parts.push(Uint8Array.from([0x0c]));
+        if (c === copies - 1 && feedLines > 0) {
+          // 最后一张再额外走几行，把标签送过撕纸口
+          parts.push(Uint8Array.from([0x1b, 0x64, feedLines]));
+        }
+      } else {
+        // ESC d n：固定行数走纸（旧行为）
+        parts.push(Uint8Array.from([0x1b, 0x64, feedLines]));
+      }
     }
     return concatBytes(parts);
   }
@@ -639,9 +659,17 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
   async function labelBleCalibrate() {
     try {
       await bleConnect(loadCfg().showAll);
-      // 官方知识库：1d 73 65 74 4c = GS "setL"，间隙/黑标学习
+      // 官方知识库：1d 73 65 74 4c = GS "setL"，间隙/黑标学习。
+      // 学习完成后打印机会停在「间隙对齐打印头」的位置，不会倒回上一张 ——
+      // 这是刻意的：那个停位就是下一张标签的起点，接着打印正好从这走。
       await bleSendRaw(parseHex("1D 73 65 74 4C"), "间隙学习（GS setL）");
-      toast("已下发间隙学习指令，打印机会走一段纸做定位", "ok");
+      toast("已下发间隙学习指令，机器会走一段纸做定位（停在间隙属正常）", "ok");
+      // 等学习动作走完（约 2~3 秒），再发一个 FF 让它走到下一张标签起点；
+      // 顺带当 FF 支持度的探针：走整张标签 = 认 FF，串位修复就靠它。
+      await sleep(2500);
+      if (LABEL.ble.char && LABEL.ble.device && LABEL.ble.device.gatt.connected) {
+        await bleSendRaw(parseHex("0C"), "走纸到下一张起点（FF）");
+      }
       renderBlePanel();
     } catch (err) {
       toast(err.message, "err");
@@ -800,6 +828,10 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
             cfg.density + '" oninput="labelPickDensity(this.value)" /></label>' +
           '<label class="field"><span>份数</span><input type="number" id="labelCopies" min="1" max="50" value="' +
             cfg.copies + '" onchange="labelPickCopies(this.value)" /></label>' +
+          '<label class="field"><span>走纸方式</span><select id="labelFeedMode" onchange="labelPickFeedMode(this.value)">' +
+            '<option value="gap"' + (cfg.feedMode !== "lines" ? " selected" : "") + '>按间隙定位（多张不串位，推荐）</option>' +
+            '<option value="lines"' + (cfg.feedMode === "lines" ? " selected" : "") + '>固定行数（旧行为，多张会累积串位）</option>' +
+          "</select></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -814,6 +846,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，' +
       "所以只能走蓝牙。打印原理是把整张标签当位图用 ESC/POS 光栅指令 <code>GS v 0</code> 发过去" +
       "（官方知识库的校准指令 <code>1D 73 65 74 4C</code> 也是 ESC/POS 派生，所以这套大概率可用）。" +
+      "多张打印的走纸默认「按间隙定位」：每张位图后发 <code>FF（0x0C）</code>，机器按间隙学习结果" +
+      "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
+      "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
       "要是打不出内容，先点「查询状态」看有没有回执：有回执说明链路通，可调浓度或换尺寸重试；" +
       "完全没回执则是指令集不匹配，「收发记录」里能看到实际发出的字节，" +
       "也可以在那里用「原始指令」手工试协议。</p>";
@@ -895,6 +930,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     saveCfg();
   }
 
+  function labelPickFeedMode(value) {
+    const cfg = loadCfg();
+    cfg.feedMode = value === "lines" ? "lines" : "gap";
+    saveCfg();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -932,6 +973,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelPickDpi,
     labelPickDensity,
     labelPickCopies,
+    labelPickFeedMode,
     labelPickShowAll,
   });
 })();
