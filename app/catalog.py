@@ -102,10 +102,13 @@ def hms_text(attr: int, code: int) -> str:
 
 
 # ── 材料与皮重 ─────────────────────────────────────────────────
+# 2026-09-19 反馈：原 29 项里 TPU/TPU-AMS、PA/PA6-CF/PAHT-CF、PETG/PETG-HT
+# 这类变体挤在下拉里像重复项。收成常用清单；料盘弹窗的材料框已改成可搜索
+# 组合框，冷门材料（PLA-AERO、TPU-AMS、PCTG…）直接打字即可，不做限制。
+# 旧库里的 PETG-HT 等历史写法照常显示，不受此清单影响。
 MATERIALS = [
-    "PLA", "PLA-CF", "PLA-AERO", "PETG", "PETG-CF", "PETG-HT", "ABS", "ASA", "ASA-CF",
-    "PC", "PA", "PA-CF", "PA6-CF", "PAHT-CF", "TPU", "TPU-AMS", "PVA", "BVOH",
-    "HIPS", "PPS", "PPS-CF", "PPA-CF", "PP", "PCTG", "PE", "EVA", "PHA", "其他",
+    "PLA", "PLA+", "PLA-CF", "PETG", "PETG-HF", "PETG-CF", "ABS", "ASA",
+    "PC", "PA", "PA-CF", "TPU", "PVA", "BVOH", "HIPS", "PPS", "其他",
 ]
 
 # ── 外观（表面工艺） ────────────────────────────────────────────
@@ -471,6 +474,20 @@ for _src in (MATERIAL_COLOR_SERIES_EXTRA, _CAILAB_MATERIALS):
     for _mat, _series in _src.items():
         _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
         MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _series if s not in _existing]
+
+# 拓竹全系官方色卡（2026-09-19 扩充）：brand_colors_bambu.py 从官方 Hex Code
+# Table PDF 离线构建；个别无 PDF 的系列用商品页色片取色兜底（official=False）。
+# 按系列整体覆盖 brand_colors.py 里的旧拓竹四系列，以官方最新数据为准。
+from .brand_colors_bambu import (  # noqa: E402
+    BAMBU_SERIES,
+    BAMBU_MATERIAL_SERIES,
+)
+_BAMBU = BRAND_COLOR_SERIES.setdefault("拓竹", {})
+for _name, _colors in BAMBU_SERIES.items():
+    _BAMBU[_name] = _colors
+for _mat, _names in BAMBU_MATERIAL_SERIES.items():
+    _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
+    MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _names if s not in _existing]
 
 
 def color_series_for(brand: str, material: str) -> list[dict]:

@@ -252,7 +252,7 @@ check("Kexcelled 星雾紫 已补录且色值正确",
       hit_mist is not None and hit_mist["hex"].upper() == "#5C30B4",
       hit_mist["hex"] if hit_mist else "缺失")
 
-# 拓竹官方 Hex Code Table（official=True）
+# 拓竹官方 Hex Code Table（official=True）；2026-09-19 起为全系 38 系列
 bambu_jade = _find("拓竹", "PLA Basic", "玉石白")
 check("拓竹 玉石白 官方色值正确",
       bambu_jade is not None and bambu_jade["hex"].upper() == "#FFFFFF"
@@ -262,9 +262,24 @@ bambu_green = _find("拓竹", "PLA Basic", "拓竹绿")
 check("拓竹 拓竹绿 官方色值正确",
       bambu_green is not None and bambu_green["hex"].upper() == "#00AE42",
       bambu_green["hex"] if bambu_green else "缺失")
+bambu_series = {e["series"] for e in index["*"] if e["brand"] == "拓竹"}
+check("拓竹全系 ≥35 个系列", len(bambu_series) >= 35, f"{len(bambu_series)} 个")
+for s in ("PLA Silk+", "PLA Glow", "PLA Galaxy", "PETG HF", "TPU for AMS",
+          "PAHT-CF", "PVA", "PLA Silk Multi-Color"):
+    check(f"拓竹 {s} 系列已收录", s in bambu_series)
 bambu_count = sum(1 for e in index["*"] if e["brand"] == "拓竹")
-check("拓竹四系列共 82 色", bambu_count == 82, f"{bambu_count} 色")
-check("拓竹色块均为官方色值", all(e.get("official") is True for e in index["*"] if e["brand"] == "拓竹"))
+check("拓竹全系共 240 色", bambu_count == 240, f"{bambu_count} 色")
+# 丝绸多色（色片取色近似）是唯一非官方色值来源
+_bambu_unofficial = [(e["series"], e["name"]) for e in index["*"]
+                     if e["brand"] == "拓竹" and e.get("official") is not True]
+check("拓竹非官方色值仅丝绸多色系列",
+      all(s == "PLA Silk Multi-Color" for s, _ in _bambu_unofficial),
+      f"{len(_bambu_unofficial)} 条，例：{_bambu_unofficial[:3]}")
+# 新系列的中文名抽查
+bambu_silk = _find("拓竹", "PLA Silk+", "糖果红")
+check("拓竹 丝绸+ 糖果红 中文对照正确",
+      bambu_silk is not None and bambu_silk["hex"].upper() == "#D02727",
+      bambu_silk["hex"] if bambu_silk else "缺失")
 
 # 大简 PETG HF（近似值，HEX 取自官方店/微博展示）
 dasu_taro = _find("大简", "PETG HF", "香芋紫")
@@ -274,20 +289,17 @@ dasu_pink = _find("大简", "PETG HF", "樱花粉")
 check("大简 樱花粉 已收录", dasu_pink is not None and dasu_pink["hex"].upper() == "#F0B9C4",
       dasu_pink["hex"] if dasu_pink else "缺失")
 
-# 大简 通用 PETG 基础系列（40 色，取自天猫店 SKU 列表截图取色 2026-09-16）
+# 大简 PETG HF 全 40 色（2026-09-19 用户确认：大简全系都是 PETG HF，
+# 原「PETG」40 色系列已并入，不再单列；取自天猫店 SKU 列表截图取色 2026-09-16）
 dasu_petg_all = [e for e in index["*"] if e["brand"] == "大简" and e["series"] == "PETG"]
-check("大简 PETG 基础系列共 40 色", len(dasu_petg_all) == 40, f"{len(dasu_petg_all)} 色")
+check("大简 已无独立 PETG 系列", len(dasu_petg_all) == 0, f"{len(dasu_petg_all)} 色")
+dasu_hf_all = [e for e in index["*"] if e["brand"] == "大简" and e["series"] == "PETG HF"]
+check("大简 PETG HF 系列 40 色", len(dasu_hf_all) == 40, f"{len(dasu_hf_all)} 色")
 for nm, hx in (("红色", "#C54243"), ("黄色", "#F2DD00"), ("松石绿", "#3AA4A9"),
                ("拿铁色", "#9E8F75"), ("薄荷蓝", "#A8D8D8"), ("蓝灰色", "#565E68")):
-    e = _find("大简", "PETG", nm)
-    check(f"大简 PETG {nm} 色值正确",
+    e = _find("大简", "PETG HF", nm)
+    check(f"大简 PETG HF {nm} 色值正确",
           e is not None and e["hex"].upper() == hx, e["hex"] if e else "缺失")
-# 同名色在 PETG 与 PETG HF 两系列中色值一致（透明蓝/香芋紫/樱花粉）
-for nm in ("透明蓝", "香芋紫", "樱花粉", "黑色", "绀紫色"):
-    a, b = _find("大简", "PETG", nm), _find("大简", "PETG HF", nm)
-    check(f"大简 {nm} 两系列色值一致",
-          a is not None and b is not None and a["hex"].upper() == b["hex"].upper(),
-          f"{a['hex'] if a else '缺失'} vs {b['hex'] if b else '缺失'}")
 
 
 # ══ 5c. 彩多屋（CAILAB）═══════════════════════════════════════════

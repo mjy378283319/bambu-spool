@@ -13,8 +13,8 @@
 def _c(name: str, en: str, hex_value: str) -> dict:
     # 该文件里的 HEX 均非官方公布色值，一律视为近似值
     # ⚠️ name 是界面显示名（前端点色块时会把 name 填进「颜色名」输入框）。
-    # 只抓到英文名的品牌（JAYO / 天瑞 / iBOSS / R3D / 爱丽兹）传空串会点出色块却留空颜色名，
-    # 所以这里统一兜底成英文名，别让界面出现无名颜色。
+    # 2026-09-19 起全部品牌的 name 都是中文（en 保留原名做对照/识色备注）；
+    # 新增品牌时务必直接填中文名，别再传空串。
     return {"name": name or en, "en": en, "hex": hex_value, "official": False}
 
 def _co(name: str, en: str, hex_value: str) -> dict:
@@ -335,22 +335,11 @@ BAMBU_PETG_HF: list[dict] = [
 
 # ── 大简（GreatSimple，中山大简科技）───────────────────────────────
 # 色名取自天猫/京东官方店在售 SKU；HEX 为近似值（官方未公布色值）。
-# PETG 基础系列 40 色取自天猫官方店商品页 SKU 列表截图取色（2026-09-16，
-# 商品 id=944008246964）；PETG HF 先收录已确认的 9 色，全色卡待确认。
+# PETG HF 全 40 色取自天猫官方店商品页 SKU 列表截图取色（2026-09-16，
+# 商品 id=944008246964）；其中 9 色为早期已确认色。
+# 2026-09-19 用户确认：大简家没有普通 PETG，全系都是 PETG HF ——
+# 原「PETG」系列整体并入「PETG HF」，不再单列。
 DASU_PETG_HF: list[dict] = [
-    _c('黑色', 'Black', '#222325'),
-    _c('白色', 'White', '#E9E9E7'),
-    _c('灰色', 'Gray', '#8E9091'),
-    _c('深蓝色', 'Dark Blue', '#1F3B70'),
-    _c('绀紫色', 'Indigo Purple', '#45395C'),
-    _c('透明色', 'Transparent', '#E3E7E2'),
-    _c('透明蓝', 'Transparent Blue', '#B7D9EA'),
-    _c('香芋紫', 'Taro Purple', '#A88BC4'),
-    _c('樱花粉', 'Sakura Pink', '#F0B9C4'),
-]
-
-# 通用 PETG（基础系列）全 40 色，与 PETG HF 已确认 9 色共用同名色值
-DASU_PETG: list[dict] = [
     _c('白色', 'White', '#E9E9E7'),
     _c('黑色', 'Black', '#222325'),
     _c('灰色', 'Gray', '#8E9091'),
@@ -1008,954 +997,1090 @@ RUIZAO_PLA_木质: list[dict] = [
 # ---- JAYO（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 JAYO_HS_PETG_哑光: list[dict] = [
-    _c('', 'Black', '#6C6C6C'),
-    _c('', 'Blue', '#3432BA'),
-    _c('', 'Gray', '#676767'),
-    _c('', 'Green', '#29E739'),
-    _c('', 'Mint Green', '#44D9C2'),
-    _c('', 'Orange', '#F46136'),
-    _c('', 'Pink', '#FAA1D2'),
-    _c('', 'Red', '#F2585A'),
-    _c('', 'Sky Blue', '#59C2F2'),
-    _c('', 'White', '#D4D4D4'),
-    _c('', 'Yellow', '#F6F344'),
+    _c('黑色', 'Black', '#6C6C6C'),
+    _c('蓝色', 'Blue', '#3432BA'),
+    _c('灰色', 'Gray', '#676767'),
+    _c('绿色', 'Green', '#29E739'),
+    _c('薄荷绿', 'Mint Green', '#44D9C2'),
+    _c('橙色', 'Orange', '#F46136'),
+    _c('粉色', 'Pink', '#FAA1D2'),
+    _c('红色', 'Red', '#F2585A'),
+    _c('天蓝色', 'Sky Blue', '#59C2F2'),
+    _c('白色', 'White', '#D4D4D4'),
+    _c('黄色', 'Yellow', '#F6F344'),
+
+
 ]
 
 JAYO_HS_PLA: list[dict] = [
-    _c('', 'Black', '#282928'),
-    _c('', 'Blue', '#575857'),
-    _c('', 'Gray', '#636363'),
-    _c('', 'Green 1.1K', '#17D238'),
-    _c('', 'Olive Green', '#435733'),
-    _c('', 'Orange', '#FD7401'),
-    _c('', 'Pink', '#5A5B59'),
-    _c('', 'Red', '#636362'),
-    _c('', 'White', '#E2EBF9'),
-    _c('', 'Yellow', '#F3DA08'),
+    _c('黑色', 'Black', '#282928'),
+    _c('蓝色', 'Blue', '#575857'),
+    _c('灰色', 'Gray', '#636363'),
+    _c('绿色 1.1K', 'Green 1.1K', '#17D238'),
+    _c('橄榄绿', 'Olive Green', '#435733'),
+    _c('橙色', 'Orange', '#FD7401'),
+    _c('粉色', 'Pink', '#5A5B59'),
+    _c('红色', 'Red', '#636362'),
+    _c('白色', 'White', '#E2EBF9'),
+    _c('黄色', 'Yellow', '#F3DA08'),
+
+
 ]
 
 JAYO_HS_PLA_哑光: list[dict] = [
-    _c('', 'Black', '#363636'),
-    _c('', 'Cherry Red', '#C62728'),
-    _c('', 'chocolate', '#654538'),
-    _c('', 'Gray', '#949493'),
-    _c('', 'Lemon Yellow', '#DBD761'),
-    _c('', 'Mint Green', '#656364'),
-    _c('', 'Olive Green', '#536332'),
-    _c('', 'Sakura Pink', '#F5B0B3'),
-    _c('', 'Sky Blue', '#64C5DA'),
-    _c('', 'Sunny Orange', '#E86329'),
-    _c('', 'White', '#E2EBF9'),
+    _c('黑色', 'Black', '#363636'),
+    _c('樱桃红', 'Cherry Red', '#C62728'),
+    _c('巧克力色', 'chocolate', '#654538'),
+    _c('灰色', 'Gray', '#949493'),
+    _c('柠檬黄', 'Lemon Yellow', '#DBD761'),
+    _c('薄荷绿', 'Mint Green', '#656364'),
+    _c('橄榄绿', 'Olive Green', '#536332'),
+    _c('樱花粉', 'Sakura Pink', '#F5B0B3'),
+    _c('天蓝色', 'Sky Blue', '#64C5DA'),
+    _c('艳阳橙', 'Sunny Orange', '#E86329'),
+    _c('白色', 'White', '#E2EBF9'),
+
+
 ]
 
 JAYO_HS_PLA_大理石: list[dict] = [
-    _c('', 'Ashen Concrete', '#838383'),
-    _c('', 'Brick Red', '#742516'),
-    _c('', 'Chestnut Brown', '#D3C9C7'),
-    _c('', 'Forest Green', '#BBC6C2'),
-    _c('', 'Oreo Marble', '#C3C7C8'),
-    _c('', 'Shadow Storm', '#D3D7D8'),
+    _c('混凝土灰', 'Ashen Concrete', '#838383'),
+    _c('砖红色', 'Brick Red', '#742516'),
+    _c('栗棕色', 'Chestnut Brown', '#D3C9C7'),
+    _c('森林绿', 'Forest Green', '#BBC6C2'),
+    _c('奥利奥大理石', 'Oreo Marble', '#C3C7C8'),
+    _c('暗影灰', 'Shadow Storm', '#D3D7D8'),
+
+
 ]
 
 JAYO_PETG: list[dict] = [
-    _c('', 'Beige', '#F8D8C7'),
-    _c('', 'Black', '#777777'),
-    _c('', 'Blue', '#3552EB'),
-    _c('', 'Cherry Red', '#F54753'),
-    _c('', 'Chocolate', '#674337'),
-    _c('', 'Coffee', '#B78A61'),
-    _c('', 'Cyan', '#29C0E0'),
-    _c('', 'Gray', '#666666'),
-    _c('', 'Green', '#15D834'),
-    _c('', 'Lemon Yellow', '#E9E661'),
-    _c('', 'Mint Green', '#33C7B7'),
-    _c('', 'Olive Green', '#69825A'),
-    _c('', 'Orange', '#F58536'),
-    _c('', 'Pink', '#FDA0B4'),
-    _c('', 'Purple', '#8454E7'),
-    _c('', 'Red', '#C53535'),
-    _c('', 'Sakura Pink', '#F2C8D2'),
-    _c('', 'Silver', '#A2A2AA'),
-    _c('', 'Sky Blue', '#29C0E0'),
-    _c('', 'Sunny Orange', '#F68058'),
-    _c('', 'Transparent', '#979391'),
-    _c('', 'Transparent Blue', '#0843C5'),
-    _c('', 'Transparent Green', '#02A004'),
-    _c('', 'Transparent Orange', '#E86129'),
-    _c('', 'Transparent Red', '#D63436'),
-    _c('', 'Transparent Yellow', '#C5B402'),
-    _c('', 'White', '#F6F6F6'),
-    _c('', 'Yellow', '#F5D41C'),
+    _c('米色', 'Beige', '#F8D8C7'),
+    _c('黑色', 'Black', '#777777'),
+    _c('蓝色', 'Blue', '#3552EB'),
+    _c('樱桃红', 'Cherry Red', '#F54753'),
+    _c('巧克力色', 'Chocolate', '#674337'),
+    _c('咖啡色', 'Coffee', '#B78A61'),
+    _c('青色', 'Cyan', '#29C0E0'),
+    _c('灰色', 'Gray', '#666666'),
+    _c('绿色', 'Green', '#15D834'),
+    _c('柠檬黄', 'Lemon Yellow', '#E9E661'),
+    _c('薄荷绿', 'Mint Green', '#33C7B7'),
+    _c('橄榄绿', 'Olive Green', '#69825A'),
+    _c('橙色', 'Orange', '#F58536'),
+    _c('粉色', 'Pink', '#FDA0B4'),
+    _c('紫色', 'Purple', '#8454E7'),
+    _c('红色', 'Red', '#C53535'),
+    _c('樱花粉', 'Sakura Pink', '#F2C8D2'),
+    _c('银色', 'Silver', '#A2A2AA'),
+    _c('天蓝色', 'Sky Blue', '#29C0E0'),
+    _c('艳阳橙', 'Sunny Orange', '#F68058'),
+    _c('透明色', 'Transparent', '#979391'),
+    _c('透明蓝', 'Transparent Blue', '#0843C5'),
+    _c('透明绿', 'Transparent Green', '#02A004'),
+    _c('透明橙', 'Transparent Orange', '#E86129'),
+    _c('透明红', 'Transparent Red', '#D63436'),
+    _c('透明黄', 'Transparent Yellow', '#C5B402'),
+    _c('白色', 'White', '#F6F6F6'),
+    _c('黄色', 'Yellow', '#F5D41C'),
+
+
 ]
 
 JAYO_PLA: list[dict] = [
-    _c('', 'Beige', '#F9D6C5'),
-    _c('', 'Black', '#686868'),
-    _c('', 'Blue', '#3452EA'),
-    _c('', 'Blue Gray', '#4377D3'),
-    _c('', 'Cherry Red', '#F64752'),
-    _c('', 'Chocolate', '#664237'),
-    _c('', 'Coffee', '#7A6243'),
-    _c('', 'Cyan', '#29C4E1'),
-    _c('', 'Fuchsia', '#E730B6'),
-    _c('', 'Galaxy Green', '#446665'),
-    _c('', 'Gold', '#D59435'),
-    _c('', 'Grass Green', '#297862'),
-    _c('', 'Gray', '#686868'),
-    _c('', 'Green', '#15D834'),
-    _c('', 'Grey', '#737979'),
-    _c('', 'Lemon Yellow', '#E9E661'),
-    _c('', 'Light Gold', '#F5C520'),
-    _c('', 'Mint Green', '#33C7B7'),
-    _c('', 'Olive Green', '#698259'),
-    _c('', 'Orange', '#F58738'),
-    _c('', 'Pink', '#FFA1B6'),
-    _c('', 'Pri-Yellow', '#F2B548'),
-    _c('', 'Purple', '#8454E4'),
-    _c('', 'Red', '#C53334'),
-    _c('', 'Sakura Pink', '#FBC9D2'),
-    _c('', 'Silver', '#A9AAB2'),
-    _c('', 'Sky Blue', '#36C2EB'),
-    _c('', 'Stardust Purple', '#383258'),
-    _c('', 'Starlit Flow', '#44566B'),
-    _c('', 'Sunny Orange', '#F78056'),
-    _c('', 'Transparent', '#969696'),
-    _c('', 'Transparent Blue', '#0746CB'),
-    _c('', 'Transparent Green', '#01A401'),
-    _c('', 'Transparent Orange', '#E76129'),
-    _c('', 'Transparent Purple', '#8453FC'),
-    _c('', 'Transparent Red', '#D73434'),
-    _c('', 'Transparent Yellow', '#B4A402'),
-    _c('', 'White', '#F7F7F7'),
-    _c('', 'Wood-Like', '#D9B289'),
-    _c('', 'Yellow', '#E8C200'),
+    _c('米色', 'Beige', '#F9D6C5'),
+    _c('黑色', 'Black', '#686868'),
+    _c('蓝色', 'Blue', '#3452EA'),
+    _c('蓝灰色', 'Blue Gray', '#4377D3'),
+    _c('樱桃红', 'Cherry Red', '#F64752'),
+    _c('巧克力色', 'Chocolate', '#664237'),
+    _c('咖啡色', 'Coffee', '#7A6243'),
+    _c('青色', 'Cyan', '#29C4E1'),
+    _c('紫红', 'Fuchsia', '#E730B6'),
+    _c('星河绿', 'Galaxy Green', '#446665'),
+    _c('金色', 'Gold', '#D59435'),
+    _c('草绿色', 'Grass Green', '#297862'),
+    _c('灰色', 'Gray', '#686868'),
+    _c('绿色', 'Green', '#15D834'),
+    _c('灰色', 'Grey', '#737979'),
+    _c('柠檬黄', 'Lemon Yellow', '#E9E661'),
+    _c('浅金', 'Light Gold', '#F5C520'),
+    _c('薄荷绿', 'Mint Green', '#33C7B7'),
+    _c('橄榄绿', 'Olive Green', '#698259'),
+    _c('橙色', 'Orange', '#F58738'),
+    _c('粉色', 'Pink', '#FFA1B6'),
+    _c('荧光黄', 'Pri-Yellow', '#F2B548'),
+    _c('紫色', 'Purple', '#8454E4'),
+    _c('红色', 'Red', '#C53334'),
+    _c('樱花粉', 'Sakura Pink', '#FBC9D2'),
+    _c('银色', 'Silver', '#A9AAB2'),
+    _c('天蓝色', 'Sky Blue', '#36C2EB'),
+    _c('星尘紫', 'Stardust Purple', '#383258'),
+    _c('星辉流彩', 'Starlit Flow', '#44566B'),
+    _c('艳阳橙', 'Sunny Orange', '#F78056'),
+    _c('透明色', 'Transparent', '#969696'),
+    _c('透明蓝', 'Transparent Blue', '#0746CB'),
+    _c('透明绿', 'Transparent Green', '#01A401'),
+    _c('透明橙', 'Transparent Orange', '#E76129'),
+    _c('透明紫', 'Transparent Purple', '#8453FC'),
+    _c('透明红', 'Transparent Red', '#D73434'),
+    _c('透明黄', 'Transparent Yellow', '#B4A402'),
+    _c('白色', 'White', '#F7F7F7'),
+    _c('仿木色', 'Wood-Like', '#D9B289'),
+    _c('黄色', 'Yellow', '#E8C200'),
+
+
 ]
 
 JAYO_PLA_CLASSIC: list[dict] = [
-    _c('', 'Black', '#050505'),
-    _c('', 'Cherry Red', '#737373'),
-    _c('', 'Chocolate', '#525252'),
-    _c('', 'Gray', '#646873'),
-    _c('', 'Lemon Yellow', '#E4E867'),
-    _c('', 'Mint Green', '#37C7B0'),
-    _c('', 'Olive Green', '#658B52'),
-    _c('', 'Sakura Pink', '#F6B7D2'),
-    _c('', 'Sky Blue', '#65C7F5'),
-    _c('', 'Sunny Orange', '#F88140'),
-    _c('', 'White', '#555555'),
+    _c('黑色', 'Black', '#050505'),
+    _c('樱桃红', 'Cherry Red', '#737373'),
+    _c('巧克力色', 'Chocolate', '#525252'),
+    _c('灰色', 'Gray', '#646873'),
+    _c('柠檬黄', 'Lemon Yellow', '#E4E867'),
+    _c('薄荷绿', 'Mint Green', '#37C7B0'),
+    _c('橄榄绿', 'Olive Green', '#658B52'),
+    _c('樱花粉', 'Sakura Pink', '#F6B7D2'),
+    _c('天蓝色', 'Sky Blue', '#65C7F5'),
+    _c('艳阳橙', 'Sunny Orange', '#F88140'),
+    _c('白色', 'White', '#555555'),
+
+
 ]
 
 JAYO_PLA_META: list[dict] = [
-    _c('', 'Beige', '#FDDAC6'),
-    _c('', 'Black', '#6C6C6C'),
-    _c('', 'Blue', '#3938F4'),
-    _c('', 'Cherry Red', '#F74158'),
-    _c('', 'Coffee', '#B78A61'),
-    _c('', 'Fuchsia', '#D63BF1'),
-    _c('', 'Gray', '#636568'),
-    _c('', 'Green', '#15D836'),
-    _c('', 'Lemon Yellow', '#E5E399'),
-    _c('', 'Mint Green', '#08D2BC'),
-    _c('', 'Olive Green', '#819564'),
-    _c('', 'Orange', '#FB9829'),
-    _c('', 'Pink', '#FD9AC1'),
-    _c('', 'Purple', '#A377E6'),
-    _c('', 'Red', '#D43939'),
-    _c('', 'Sakura Pink', '#F2C8D2'),
-    _c('', 'Sky Blue', '#23CBF7'),
-    _c('', 'Sunny Orange', '#FD9254'),
-    _c('', 'White', '#D6D6D6'),
-    _c('', 'Yellow', '#F9E329'),
+    _c('米色', 'Beige', '#FDDAC6'),
+    _c('黑色', 'Black', '#6C6C6C'),
+    _c('蓝色', 'Blue', '#3938F4'),
+    _c('樱桃红', 'Cherry Red', '#F74158'),
+    _c('咖啡色', 'Coffee', '#B78A61'),
+    _c('紫红', 'Fuchsia', '#D63BF1'),
+    _c('灰色', 'Gray', '#636568'),
+    _c('绿色', 'Green', '#15D836'),
+    _c('柠檬黄', 'Lemon Yellow', '#E5E399'),
+    _c('薄荷绿', 'Mint Green', '#08D2BC'),
+    _c('橄榄绿', 'Olive Green', '#819564'),
+    _c('橙色', 'Orange', '#FB9829'),
+    _c('粉色', 'Pink', '#FD9AC1'),
+    _c('紫色', 'Purple', '#A377E6'),
+    _c('红色', 'Red', '#D43939'),
+    _c('樱花粉', 'Sakura Pink', '#F2C8D2'),
+    _c('天蓝色', 'Sky Blue', '#23CBF7'),
+    _c('艳阳橙', 'Sunny Orange', '#FD9254'),
+    _c('白色', 'White', '#D6D6D6'),
+    _c('黄色', 'Yellow', '#F9E329'),
+
+
 ]
 
 JAYO_PLA_哑光: list[dict] = [
-    _c('', 'Beige', '#F9D6C5'),
-    _c('', 'Black', '#6C6C6C'),
-    _c('', 'Blue', '#4438D6'),
-    _c('', 'Blue Gray', '#4377D3'),
-    _c('', 'Bone-white', '#DBD4C2'),
-    _c('', 'Cherry Red', '#F64752'),
-    _c('', 'Chocolate', '#664237'),
-    _c('', 'Coffee', '#7A6243'),
-    _c('', 'Cyan', '#29C4E1'),
-    _c('', 'Fuchsia', '#E730B6'),
-    _c('', 'Gold', '#D59435'),
-    _c('', 'Grass Green', '#297862'),
-    _c('', 'Gray', '#65646A'),
-    _c('', 'Green', '#65B763'),
-    _c('', 'Lemon Yellow', '#E9E661'),
-    _c('', 'Light Blue', '#87C2F1'),
-    _c('', 'Light Gold', '#F5C520'),
-    _c('', 'Light Yellow', '#E1F541'),
-    _c('', 'Mint Green', '#33C7B7'),
-    _c('', 'Olive Green', '#556741'),
-    _c('', 'Orange', '#FB9857'),
-    _c('', 'Pink', '#E476A7'),
-    _c('', 'Pink Blue', '#B2D5DB'),
-    _c('', 'Pri-Yellow', '#F2B548'),
-    _c('', 'Purple', '#B455D7'),
-    _c('', 'Red', '#D54545'),
-    _c('', 'Sakura Pink', '#FBC9D2'),
-    _c('', 'Silver', '#A9AAB2'),
-    _c('', 'Sky Blue', '#36C2EB'),
-    _c('', 'Sunny Orange', '#F78056'),
-    _c('', 'Terracotta', '#686254'),
-    _c('', 'Transparent', '#969696'),
-    _c('', 'Transparent Blue', '#0746CB'),
-    _c('', 'Transparent Green', '#01A401'),
-    _c('', 'Transparent Orange', '#E76129'),
-    _c('', 'Transparent Purple', '#8453FC'),
-    _c('', 'Transparent Red', '#D73434'),
-    _c('', 'Transparent Yellow', '#B4A402'),
-    _c('', 'White', '#152891'),
-    _c('', 'Wood-Like', '#D9B289'),
-    _c('', 'Yellow', '#E8C200'),
+    _c('米色', 'Beige', '#F9D6C5'),
+    _c('黑色', 'Black', '#6C6C6C'),
+    _c('蓝色', 'Blue', '#4438D6'),
+    _c('蓝灰色', 'Blue Gray', '#4377D3'),
+    _c('骨白色', 'Bone-white', '#DBD4C2'),
+    _c('樱桃红', 'Cherry Red', '#F64752'),
+    _c('巧克力色', 'Chocolate', '#664237'),
+    _c('咖啡色', 'Coffee', '#7A6243'),
+    _c('青色', 'Cyan', '#29C4E1'),
+    _c('紫红', 'Fuchsia', '#E730B6'),
+    _c('金色', 'Gold', '#D59435'),
+    _c('草绿色', 'Grass Green', '#297862'),
+    _c('灰色', 'Gray', '#65646A'),
+    _c('绿色', 'Green', '#65B763'),
+    _c('柠檬黄', 'Lemon Yellow', '#E9E661'),
+    _c('浅蓝', 'Light Blue', '#87C2F1'),
+    _c('浅金', 'Light Gold', '#F5C520'),
+    _c('浅黄', 'Light Yellow', '#E1F541'),
+    _c('薄荷绿', 'Mint Green', '#33C7B7'),
+    _c('橄榄绿', 'Olive Green', '#556741'),
+    _c('橙色', 'Orange', '#FB9857'),
+    _c('粉色', 'Pink', '#E476A7'),
+    _c('粉蓝', 'Pink Blue', '#B2D5DB'),
+    _c('荧光黄', 'Pri-Yellow', '#F2B548'),
+    _c('紫色', 'Purple', '#B455D7'),
+    _c('红色', 'Red', '#D54545'),
+    _c('樱花粉', 'Sakura Pink', '#FBC9D2'),
+    _c('银色', 'Silver', '#A9AAB2'),
+    _c('天蓝色', 'Sky Blue', '#36C2EB'),
+    _c('艳阳橙', 'Sunny Orange', '#F78056'),
+    _c('赤陶色', 'Terracotta', '#686254'),
+    _c('透明色', 'Transparent', '#969696'),
+    _c('透明蓝', 'Transparent Blue', '#0746CB'),
+    _c('透明绿', 'Transparent Green', '#01A401'),
+    _c('透明橙', 'Transparent Orange', '#E76129'),
+    _c('透明紫', 'Transparent Purple', '#8453FC'),
+    _c('透明红', 'Transparent Red', '#D73434'),
+    _c('透明黄', 'Transparent Yellow', '#B4A402'),
+    _c('白色', 'White', '#152891'),
+    _c('仿木色', 'Wood-Like', '#D9B289'),
+    _c('黄色', 'Yellow', '#E8C200'),
+
+
 ]
 
 JAYO_PLA_闪点: list[dict] = [
-    _c('', 'Black', '#6C6C6C'),
-    _c('', 'Blue', '#84C6E7'),
+    _c('黑色', 'Black', '#6C6C6C'),
+    _c('蓝色', 'Blue', '#84C6E7'),
+
+
 ]
 
 JAYO_PLA_20: list[dict] = [
-    _c('', 'Beige', '#F9D6C5'),
-    _c('', 'Black', '#686868'),
-    _c('', 'Blue', '#3452EA'),
-    _c('', 'Blue Gray', '#4377D3'),
-    _c('', 'Cherry Red', '#F64752'),
-    _c('', 'Chocolate', '#664237'),
-    _c('', 'Coffee', '#7A6243'),
-    _c('', 'Cyan', '#29C4E1'),
-    _c('', 'Fuchsia', '#E730B6'),
-    _c('', 'Gold', '#D59435'),
-    _c('', 'Grass Green', '#297862'),
-    _c('', 'Gray', '#727372'),
-    _c('', 'Green', '#15D834'),
-    _c('', 'Lemon Yellow', '#E9E661'),
-    _c('', 'Light Gold', '#F5C520'),
-    _c('', 'Mint Green', '#33C7B7'),
-    _c('', 'Olive Green', '#698259'),
-    _c('', 'Orange', '#F58738'),
-    _c('', 'Pink', '#FFA1B6'),
-    _c('', 'Pri-Yellow', '#F2B548'),
-    _c('', 'Purple', '#8454E4'),
-    _c('', 'Red', '#C53334'),
-    _c('', 'Sakura Pink', '#FBC9D2'),
-    _c('', 'Silver', '#A9AAB2'),
-    _c('', 'Sky Blue', '#36C2EB'),
-    _c('', 'Sunny Orange', '#F78056'),
-    _c('', 'White', '#F7F7F7'),
-    _c('', 'Wood-Like', '#D9B289'),
-    _c('', 'Yellow', '#E8C200'),
+    _c('米色', 'Beige', '#F9D6C5'),
+    _c('黑色', 'Black', '#686868'),
+    _c('蓝色', 'Blue', '#3452EA'),
+    _c('蓝灰色', 'Blue Gray', '#4377D3'),
+    _c('樱桃红', 'Cherry Red', '#F64752'),
+    _c('巧克力色', 'Chocolate', '#664237'),
+    _c('咖啡色', 'Coffee', '#7A6243'),
+    _c('青色', 'Cyan', '#29C4E1'),
+    _c('紫红', 'Fuchsia', '#E730B6'),
+    _c('金色', 'Gold', '#D59435'),
+    _c('草绿色', 'Grass Green', '#297862'),
+    _c('灰色', 'Gray', '#727372'),
+    _c('绿色', 'Green', '#15D834'),
+    _c('柠檬黄', 'Lemon Yellow', '#E9E661'),
+    _c('浅金', 'Light Gold', '#F5C520'),
+    _c('薄荷绿', 'Mint Green', '#33C7B7'),
+    _c('橄榄绿', 'Olive Green', '#698259'),
+    _c('橙色', 'Orange', '#F58738'),
+    _c('粉色', 'Pink', '#FFA1B6'),
+    _c('荧光黄', 'Pri-Yellow', '#F2B548'),
+    _c('紫色', 'Purple', '#8454E4'),
+    _c('红色', 'Red', '#C53334'),
+    _c('樱花粉', 'Sakura Pink', '#FBC9D2'),
+    _c('银色', 'Silver', '#A9AAB2'),
+    _c('天蓝色', 'Sky Blue', '#36C2EB'),
+    _c('艳阳橙', 'Sunny Orange', '#F78056'),
+    _c('白色', 'White', '#F7F7F7'),
+    _c('仿木色', 'Wood-Like', '#D9B289'),
+    _c('黄色', 'Yellow', '#E8C200'),
+
+
 ]
 
 JAYO_丝绸_PLA: list[dict] = [
-    _c('', 'Black', '#6C6C6C'),
-    _c('', 'Blue', '#14A2D5'),
-    _c('', 'Brass', '#C58807'),
-    _c('', 'Bronze', '#537857'),
-    _c('', 'Candy Dandy', '#D84962'),
-    _c('', 'Gray', '#6A7275'),
-    _c('', 'Green', '#08B6A4'),
-    _c('', 'Light Gold', '#E5B344'),
-    _c('', 'Orange', '#F58643'),
-    _c('', 'Pink', '#F8C6D9'),
-    _c('', 'Purple', '#A259A8'),
-    _c('', 'Red', '#D53245'),
-    _c('', 'Red Copper', '#9B5641'),
-    _c('', 'Silver', '#8797B1'),
-    _c('', 'White', '#D8D8D8'),
-    _c('', 'Yellow', '#F6E125'),
+    _c('黑色', 'Black', '#6C6C6C'),
+    _c('蓝色', 'Blue', '#14A2D5'),
+    _c('黄铜', 'Brass', '#C58807'),
+    _c('青铜色', 'Bronze', '#537857'),
+    _c('糖果红', 'Candy Dandy', '#D84962'),
+    _c('灰色', 'Gray', '#6A7275'),
+    _c('绿色', 'Green', '#08B6A4'),
+    _c('浅金', 'Light Gold', '#E5B344'),
+    _c('橙色', 'Orange', '#F58643'),
+    _c('粉色', 'Pink', '#F8C6D9'),
+    _c('紫色', 'Purple', '#A259A8'),
+    _c('红色', 'Red', '#D53245'),
+    _c('红铜色', 'Red Copper', '#9B5641'),
+    _c('银色', 'Silver', '#8797B1'),
+    _c('白色', 'White', '#D8D8D8'),
+    _c('黄色', 'Yellow', '#F6E125'),
+
+
 ]
 
 # ---- 天瑞（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 TINMORRY_ASA_大理石: list[dict] = [
-    _c('', 'Light Grey', '#C6C6C6'),
+    _c('浅灰色', 'Light Grey', '#C6C6C6'),
+
+
 ]
 
 TINMORRY_PETGECO: list[dict] = [
-    _c('', 'Translucent Purple', '#530247'),
-    _c('', 'Translucent Yellow', '#F3D900'),
-    _c('', 'Translucent Orange', '#D54307'),
-    _c('', 'Translucent Pink', '#F4D0D3'),
-    _c('', 'Translucent Emerald Green', '#D0D1CB'),
-    _c('', 'Dark Grey', '#353535'),
-    _c('', 'Khaki', '#DBB381'),
-    _c('', 'Lavender', '#A7A3E4'),
-    _c('', 'Translucent Olive Green', '#BDCBBA'),
-    _c('', 'Baby Blue', '#87B4D6'),
-    _c('', 'Bone White', '#B7B286'),
-    _c('', 'Grey', '#737874'),
-    _c('', 'Mocha Mousse Chocolate Brown', '#866347'),
-    _c('', 'Horizon Green', '#01A6B3'),
-    _c('', 'Ice Blue', '#B5D8D2'),
-    _c('', 'Light Grey', '#444444'),
-    _c('', 'Coffee', '#866849'),
-    _c('', 'Sakura Pink', '#EBB4D3'),
-    _c('', 'Fluorescent Fuchsia', '#FB31BA'),
-    _c('', 'Fluorescent Yellow', '#E2E604'),
-    _c('', 'Meeple White', '#C7C4B4'),
-    _c('', 'Fluorescent Green', '#63D603'),
-    _c('', 'Bright Yellow', '#D7B104'),
-    _c('', 'Black', '#2E2C37'),
-    _c('', 'Sky Blue', '#0A84C1'),
-    _c('', 'Transparent', '#E4E4E4'),
-    _c('', 'Green', '#01981D'),
-    _c('', 'Olive Green', '#555827'),
-    _c('', 'Carter Yellow', '#D4A601'),
-    _c('', 'Klein Blue', '#2A49B3'),
-    _c('', 'Apricot', '#B49B80'),
-    _c('', 'Ivory White', '#DAD8D5'),
-    _c('', 'Cold White', '#CCD3D7'),
-    _c('', 'Orange', '#F53409'),
-    _c('', 'Red', '#850017'),
-    _c('', 'Vinca Blue', '#5744A2'),
-    _c('', 'Mint Green', '#01BBB2'),
-    _c('', 'Pink', '#F683A0'),
-    _c('', 'Transparent Red', '#960616'),
-    _c('', 'Transparent Green', '#019800'),
-    _c('', 'Transparent Blue', '#025088'),
-    _c('', 'Skin', '#D4BAA8'),
-    _c('', 'Fluorescent Rose Red', '#F1377B'),
+    _c('半透紫', 'Translucent Purple', '#530247'),
+    _c('半透黄', 'Translucent Yellow', '#F3D900'),
+    _c('半透橙', 'Translucent Orange', '#D54307'),
+    _c('半透粉', 'Translucent Pink', '#F4D0D3'),
+    _c('半透祖母绿', 'Translucent Emerald Green', '#D0D1CB'),
+    _c('深灰色', 'Dark Grey', '#353535'),
+    _c('卡其', 'Khaki', '#DBB381'),
+    _c('薰衣草紫', 'Lavender', '#A7A3E4'),
+    _c('半透橄榄绿', 'Translucent Olive Green', '#BDCBBA'),
+    _c('婴儿蓝', 'Baby Blue', '#87B4D6'),
+    _c('骨白色', 'Bone White', '#B7B286'),
+    _c('灰色', 'Grey', '#737874'),
+    _c('摩卡慕斯棕', 'Mocha Mousse Chocolate Brown', '#866347'),
+    _c('天际绿', 'Horizon Green', '#01A6B3'),
+    _c('冰蓝色', 'Ice Blue', '#B5D8D2'),
+    _c('浅灰色', 'Light Grey', '#444444'),
+    _c('咖啡色', 'Coffee', '#866849'),
+    _c('樱花粉', 'Sakura Pink', '#EBB4D3'),
+    _c('荧光紫红', 'Fluorescent Fuchsia', '#FB31BA'),
+    _c('荧光黄', 'Fluorescent Yellow', '#E2E604'),
+    _c('米宝白', 'Meeple White', '#C7C4B4'),
+    _c('荧光绿', 'Fluorescent Green', '#63D603'),
+    _c('亮黄色', 'Bright Yellow', '#D7B104'),
+    _c('黑色', 'Black', '#2E2C37'),
+    _c('天蓝色', 'Sky Blue', '#0A84C1'),
+    _c('透明色', 'Transparent', '#E4E4E4'),
+    _c('绿色', 'Green', '#01981D'),
+    _c('橄榄绿', 'Olive Green', '#555827'),
+    _c('卡特黄', 'Carter Yellow', '#D4A601'),
+    _c('克莱因蓝', 'Klein Blue', '#2A49B3'),
+    _c('杏色', 'Apricot', '#B49B80'),
+    _c('象牙白', 'Ivory White', '#DAD8D5'),
+    _c('冷白色', 'Cold White', '#CCD3D7'),
+    _c('橙色', 'Orange', '#F53409'),
+    _c('红色', 'Red', '#850017'),
+    _c('长春花蓝', 'Vinca Blue', '#5744A2'),
+    _c('薄荷绿', 'Mint Green', '#01BBB2'),
+    _c('粉色', 'Pink', '#F683A0'),
+    _c('透明红', 'Transparent Red', '#960616'),
+    _c('透明绿', 'Transparent Green', '#019800'),
+    _c('透明蓝', 'Transparent Blue', '#025088'),
+    _c('肤色', 'Skin', '#D4BAA8'),
+    _c('荧光玫瑰红', 'Fluorescent Rose Red', '#F1377B'),
+
+
 ]
 
 TINMORRY_PLA_大理石: list[dict] = [
-    _c('', 'Granite', '#D5D5D4'),
-    _c('', 'White', '#CACCC9'),
-    _c('', 'Light Brown', '#CBC6C2'),
+    _c('花岗灰色', 'Granite', '#D5D5D4'),
+    _c('白色', 'White', '#CACCC9'),
+    _c('浅棕', 'Light Brown', '#CBC6C2'),
+
+
 ]
 
 TINMORRY_PLA_CLASSIC: list[dict] = [
-    _c('', 'Black', '#242226'),
+    _c('黑色', 'Black', '#242226'),
+
+
 ]
 
 TINMORRY_PETG_GF: list[dict] = [
-    _c('', 'Carter Yellow', '#F2B601'),
-    _c('', 'Turquoise blue', '#018A8A'),
-    _c('', 'Apricot', '#C6A383'),
-    _c('', 'Signal Green', '#339B53'),
-    _c('', 'Traffic Red', '#E43226'),
-    _c('', 'Light Grey', '#272727'),
-    _c('', 'Frosted  Apricot', '#B39573'),
-    _c('', 'Frosted Dark Blue', '#5864A4'),
-    _c('', 'Frosted Pine-Green', '#01472A'),
-    _c('', 'Frosted Water Blue', '#35979C'),
-    _c('', 'Frosted Brown', '#A47956'),
-    _c('', 'Frosted Ruby Red', '#A61224'),
-    _c('', 'Frosted Warm Light Grey', '#D3D4D4'),
-    _c('', 'Frosted White', '#E3E0D7'),
-    _c('', 'Frosted Black', '#949494'),
-    _c('', 'Frosted Mint green', '#A4E7D1'),
-    _c('', 'Frosted Navy Blue', '#626D83'),
-    _c('', 'Frosted Dark Green', '#838A55'),
-    _c('', 'Frosted Sakura Pink', '#EAB4C4'),
-    _c('', 'Frosted Lilac purple', '#B3B5E7'),
-    _c('', 'Frosted Ice Blue', '#95D6DA'),
-    _c('', 'Black', '#282828'),
-    _c('', 'Frosted Beige', '#C7B284'),
-    _c('', 'Frosted Carter Yellow', '#F8C707'),
-    _c('', 'Frosted Orange', '#F78431'),
-    _c('', 'Frosted Green', '#27B148'),
-    _c('', 'Frosted Red', '#B62422'),
-    _c('', 'Frosted Blue', '#0B4693'),
-    _c('', 'Frosted Grey', '#A2A6A9'),
+    _c('卡特黄', 'Carter Yellow', '#F2B601'),
+    _c('绿松石蓝', 'Turquoise blue', '#018A8A'),
+    _c('杏色', 'Apricot', '#C6A383'),
+    _c('信号绿', 'Signal Green', '#339B53'),
+    _c('交通红', 'Traffic Red', '#E43226'),
+    _c('浅灰色', 'Light Grey', '#272727'),
+    _c('磨砂杏', 'Frosted  Apricot', '#B39573'),
+    _c('磨砂深蓝', 'Frosted Dark Blue', '#5864A4'),
+    _c('磨砂松绿', 'Frosted Pine-Green', '#01472A'),
+    _c('磨砂水蓝', 'Frosted Water Blue', '#35979C'),
+    _c('磨砂棕', 'Frosted Brown', '#A47956'),
+    _c('磨砂红宝石红', 'Frosted Ruby Red', '#A61224'),
+    _c('磨砂暖浅灰', 'Frosted Warm Light Grey', '#D3D4D4'),
+    _c('磨砂白', 'Frosted White', '#E3E0D7'),
+    _c('磨砂黑', 'Frosted Black', '#949494'),
+    _c('磨砂薄荷绿', 'Frosted Mint green', '#A4E7D1'),
+    _c('磨砂藏青蓝', 'Frosted Navy Blue', '#626D83'),
+    _c('磨砂深绿', 'Frosted Dark Green', '#838A55'),
+    _c('磨砂樱花粉', 'Frosted Sakura Pink', '#EAB4C4'),
+    _c('磨砂丁香紫', 'Frosted Lilac purple', '#B3B5E7'),
+    _c('磨砂冰蓝', 'Frosted Ice Blue', '#95D6DA'),
+    _c('黑色', 'Black', '#282828'),
+    _c('磨砂米', 'Frosted Beige', '#C7B284'),
+    _c('磨砂卡特黄', 'Frosted Carter Yellow', '#F8C707'),
+    _c('磨砂橙', 'Frosted Orange', '#F78431'),
+    _c('磨砂绿', 'Frosted Green', '#27B148'),
+    _c('磨砂红', 'Frosted Red', '#B62422'),
+    _c('磨砂蓝', 'Frosted Blue', '#0B4693'),
+    _c('磨砂灰', 'Frosted Grey', '#A2A6A9'),
+
+
 ]
 
 TINMORRY_PETG_哑光: list[dict] = [
-    _c('', 'Matte Ivory White', '#D8D9D4'),
-    _c('', 'Matte Sakura Pink', '#E9C2D4'),
-    _c('', 'Matte White', '#D5D4D9'),
-    _c('', 'Matte Smog Blue', '#7789A1'),
-    _c('', 'Matte Warm Light Grey', '#A59482'),
-    _c('', 'Matte Scarlet Red', '#763230'),
-    _c('', 'Matte Brown', '#744639'),
-    _c('', 'Matte Emerald Green', '#366237'),
-    _c('', 'Matte Light Blue', '#82B4D3'),
-    _c('', 'Matte Mint Green', '#85C7C6'),
-    _c('', 'Matte Yellow', '#E3D30B'),
-    _c('', 'Matte Black', '#282828'),
+    _c('哑光象牙白', 'Matte Ivory White', '#D8D9D4'),
+    _c('哑光樱花粉', 'Matte Sakura Pink', '#E9C2D4'),
+    _c('哑光白', 'Matte White', '#D5D4D9'),
+    _c('哑光雾霾蓝', 'Matte Smog Blue', '#7789A1'),
+    _c('哑光暖浅灰', 'Matte Warm Light Grey', '#A59482'),
+    _c('哑光猩红红', 'Matte Scarlet Red', '#763230'),
+    _c('哑光棕', 'Matte Brown', '#744639'),
+    _c('哑光祖母绿', 'Matte Emerald Green', '#366237'),
+    _c('哑光浅蓝', 'Matte Light Blue', '#82B4D3'),
+    _c('哑光薄荷绿', 'Matte Mint Green', '#85C7C6'),
+    _c('哑光黄', 'Matte Yellow', '#E3D30B'),
+    _c('哑光黑', 'Matte Black', '#282828'),
+
+
 ]
 
 TINMORRY_PLA: list[dict] = [
-    _c('', 'Reddish Brown', '#351610'),
-    _c('', 'Apricot', '#CABDB7'),
-    _c('', 'Transparent', '#C9C2A4'),
-    _c('', 'Magenta', '#E93096'),
-    _c('', 'Light Blue', '#8498CB'),
-    _c('', 'Light Grey', '#353430'),
-    _c('', 'Lemon Green', '#85B742'),
-    _c('', 'Cold White', '#E6E5EA'),
-    _c('', 'Grey', '#545453'),
-    _c('', 'Sky Blue', '#0173CE'),
-    _c('', 'Warm Yellow', '#C7A440'),
-    _c('', 'Khaki', '#C99266'),
-    _c('', 'Pink', '#E96B81'),
-    _c('', 'Royal Blue', '#162497'),
-    _c('', 'Blue', '#7981C1'),
-    _c('', 'Lavender Pink', '#C47CA5'),
-    _c('', 'Cyan', '#01C2B3'),
-    _c('', 'Grape Purple', '#7751A7'),
-    _c('', 'Apple Green', '#B4E952'),
-    _c('', 'Yellow', '#F8EC01'),
-    _c('', 'Purple', '#351752'),
-    _c('', 'Light Wood', '#A68855'),
-    _c('', 'Red', '#E53836'),
-    _c('', 'Red Bean Colour', '#C35C53'),
-    _c('', 'Light Orange', '#D48868'),
-    _c('', 'Black', '#363636'),
-    _c('', 'Orange', '#FE7220'),
-    _c('', 'Green', '#017237'),
+    _c('红棕棕', 'Reddish Brown', '#351610'),
+    _c('杏色', 'Apricot', '#CABDB7'),
+    _c('透明色', 'Transparent', '#C9C2A4'),
+    _c('品红', 'Magenta', '#E93096'),
+    _c('浅蓝', 'Light Blue', '#8498CB'),
+    _c('浅灰色', 'Light Grey', '#353430'),
+    _c('柠檬绿', 'Lemon Green', '#85B742'),
+    _c('冷白色', 'Cold White', '#E6E5EA'),
+    _c('灰色', 'Grey', '#545453'),
+    _c('天蓝色', 'Sky Blue', '#0173CE'),
+    _c('暖黄', 'Warm Yellow', '#C7A440'),
+    _c('卡其', 'Khaki', '#C99266'),
+    _c('粉色', 'Pink', '#E96B81'),
+    _c('宝蓝色', 'Royal Blue', '#162497'),
+    _c('蓝色', 'Blue', '#7981C1'),
+    _c('薰衣草粉', 'Lavender Pink', '#C47CA5'),
+    _c('青色', 'Cyan', '#01C2B3'),
+    _c('葡萄紫', 'Grape Purple', '#7751A7'),
+    _c('苹果绿', 'Apple Green', '#B4E952'),
+    _c('黄色', 'Yellow', '#F8EC01'),
+    _c('紫色', 'Purple', '#351752'),
+    _c('浅木色', 'Light Wood', '#A68855'),
+    _c('红色', 'Red', '#E53836'),
+    _c('红豆色', 'Red Bean Colour', '#C35C53'),
+    _c('浅橙', 'Light Orange', '#D48868'),
+    _c('黑色', 'Black', '#363636'),
+    _c('橙色', 'Orange', '#FE7220'),
+    _c('绿色', 'Green', '#017237'),
+
+
 ]
 
 TINMORRY_碳纤维系列: list[dict] = [
-    _c('', 'Black', '#D1A779'),
-    _c('', 'Dark Grey', '#343434'),
-    _c('', 'Matte Black', '#252422'),
-    _c('', 'Carbon Blue', '#3B5673'),
-    _c('', 'Cool Grey', '#363A41'),
-    _c('', 'Peacock Green', '#143844'),
-    _c('', 'Olive Green', '#18171A'),
-    _c('', 'Marble Grey', '#636C74'),
+    _c('黑色', 'Black', '#D1A779'),
+    _c('深灰色', 'Dark Grey', '#343434'),
+    _c('哑光黑', 'Matte Black', '#252422'),
+    _c('碳蓝', 'Carbon Blue', '#3B5673'),
+    _c('冷灰色', 'Cool Grey', '#363A41'),
+    _c('孔雀绿', 'Peacock Green', '#143844'),
+    _c('橄榄绿', 'Olive Green', '#18171A'),
+    _c('大理石灰', 'Marble Grey', '#636C74'),
+
+
 ]
 
 TINMORRY_PETG_闪粉: list[dict] = [
-    _c('', 'Sparkly Dark Gold', '#463415'),
-    _c('', 'Sparkly Green', '#14373C'),
-    _c('', 'Sparkly Magenta', '#662246'),
-    _c('', 'Sparkly Cyan', '#03334C'),
-    _c('', 'Sparkly Red', '#743835'),
-    _c('', 'Sparkly Black', '#33322F'),
-    _c('', 'Sparkly Silver', '#979798'),
-    _c('', 'Sparkly Purple', '#533258'),
+    _c('闪点深金', 'Sparkly Dark Gold', '#463415'),
+    _c('闪点绿', 'Sparkly Green', '#14373C'),
+    _c('闪点品红', 'Sparkly Magenta', '#662246'),
+    _c('闪点青', 'Sparkly Cyan', '#03334C'),
+    _c('闪点红', 'Sparkly Red', '#743835'),
+    _c('闪点黑', 'Sparkly Black', '#33322F'),
+    _c('闪点银', 'Sparkly Silver', '#979798'),
+    _c('闪点紫', 'Sparkly Purple', '#533258'),
+
+
 ]
 
 TINMORRY_PETG_夜光: list[dict] = [
-    _c('', 'Glow Light Orange', '#F5A684'),
-    _c('', 'Glow Light Blue', '#85DAD9'),
-    _c('', 'Glow Rose Red', '#FD7B91'),
-    _c('', 'Glow Yellow Green', '#B6E877'),
-    _c('', 'Glow Green', '#01D318'),
+    _c('夜光浅橙', 'Glow Light Orange', '#F5A684'),
+    _c('夜光浅蓝', 'Glow Light Blue', '#85DAD9'),
+    _c('夜光玫瑰红', 'Glow Rose Red', '#FD7B91'),
+    _c('夜光黄绿', 'Glow Yellow Green', '#B6E877'),
+    _c('夜光绿', 'Glow Green', '#01D318'),
+
+
 ]
 
 TINMORRY_PLA_星河: list[dict] = [
-    _c('', 'Galaxy Purple', '#66638B'),
-    _c('', 'Galaxy Green', '#777A72'),
-    _c('', 'Galaxy Blue', '#747D90'),
-    _c('', 'Galaxy Brown', '#966D5F'),
+    _c('星河紫', 'Galaxy Purple', '#66638B'),
+    _c('星河绿', 'Galaxy Green', '#777A72'),
+    _c('星河蓝', 'Galaxy Blue', '#747D90'),
+    _c('星河棕', 'Galaxy Brown', '#966D5F'),
+
+
 ]
 
 TINMORRY_TPU_95A: list[dict] = [
-    _c('', 'Light Grey', '#C7C6C2'),
-    _c('', 'Metal Space Grey', '#686868'),
-    _c('', 'Transparent grey', '#B4B4B4'),
-    _c('', 'Metallic Silver', '#E3A87E'),
-    _c('', 'Traffic Yellow', '#F5B900'),
-    _c('', 'Skin', '#B7A487'),
-    _c('', 'Telecom Grey', '#252525'),
-    _c('', 'Pale Pink', '#FCC3DA'),
-    _c('', 'Violet', '#632C66'),
-    _c('', 'Neon Blue', '#D5A878'),
-    _c('', 'Fluorescent Blue', '#B9906D'),
-    _c('', 'Fluorescent Purple', '#8550B8'),
-    _c('', 'Fluorescent Red', '#F10129'),
-    _c('', 'Fluorescent Rose Red', '#F22B89'),
-    _c('', 'Fire Safety Orange', '#FF7000'),
-    _c('', 'Fluorescent Green', '#57C610'),
-    _c('', 'Emerald Green', '#01A534'),
-    _c('', 'Fluorescent Yellow', '#E7C202'),
-    _c('', 'Red', '#F53B26'),
-    _c('', 'White', '#CAC6C3'),
-    _c('', 'Transparent Red', '#850911'),
-    _c('', 'Transparent Violet', '#141358'),
-    _c('', 'Transparent Emerald Green', '#5A5A58'),
-    _c('', 'Transparent Yellow', '#D3DA01'),
-    _c('', 'Transparent', '#E2E3DB'),
-    _c('', '1 KG， Transparent Green', '#85D700'),
-    _c('', 'Black', '#373532'),
-    _c('', 'Transparent Blue', '#024290'),
+    _c('浅灰色', 'Light Grey', '#C7C6C2'),
+    _c('金属太空灰', 'Metal Space Grey', '#686868'),
+    _c('透明灰', 'Transparent grey', '#B4B4B4'),
+    _c('金属银', 'Metallic Silver', '#E3A87E'),
+    _c('交通黄', 'Traffic Yellow', '#F5B900'),
+    _c('肤色', 'Skin', '#B7A487'),
+    _c('电信灰', 'Telecom Grey', '#252525'),
+    _c('淡粉色', 'Pale Pink', '#FCC3DA'),
+    _c('紫罗兰', 'Violet', '#632C66'),
+    _c('荧光蓝', 'Neon Blue', '#D5A878'),
+    _c('荧光蓝', 'Fluorescent Blue', '#B9906D'),
+    _c('荧光紫', 'Fluorescent Purple', '#8550B8'),
+    _c('荧光红', 'Fluorescent Red', '#F10129'),
+    _c('荧光玫瑰红', 'Fluorescent Rose Red', '#F22B89'),
+    _c('消防橙', 'Fire Safety Orange', '#FF7000'),
+    _c('荧光绿', 'Fluorescent Green', '#57C610'),
+    _c('祖母绿', 'Emerald Green', '#01A534'),
+    _c('荧光黄', 'Fluorescent Yellow', '#E7C202'),
+    _c('红色', 'Red', '#F53B26'),
+    _c('白色', 'White', '#CAC6C3'),
+    _c('透明红', 'Transparent Red', '#850911'),
+    _c('透明紫罗兰', 'Transparent Violet', '#141358'),
+    _c('透明祖母绿', 'Transparent Emerald Green', '#5A5A58'),
+    _c('透明黄', 'Transparent Yellow', '#D3DA01'),
+    _c('透明色', 'Transparent', '#E2E3DB'),
+    _c('透明绿（1KG 装）', '1 KG， Transparent Green', '#85D700'),
+    _c('黑色', 'Black', '#373532'),
+    _c('透明蓝', 'Transparent Blue', '#024290'),
+
+
 ]
 
 TINMORRY_PETG_金属: list[dict] = [
-    _c('', 'Metallic DarkRed', '#822625'),
-    _c('', 'Metallic Bronze', '#858580'),
-    _c('', 'Metallic Midnight Green', '#4A7A6E'),
-    _c('', 'Metallic Green', '#848B57'),
-    _c('', 'Metallic Blue', '#61778C'),
-    _c('', 'Metallic Rose Gold', '#8F8F8F'),
-    _c('', 'Metallic Purple', '#855371'),
-    _c('', 'Metallic Champagne Gold', '#907656'),
-    _c('', 'Metallic Space Grey', '#7B7B7B'),
-    _c('', 'Metallic Silver', '#8A8B8F'),
+    _c('金属深红', 'Metallic DarkRed', '#822625'),
+    _c('金属青铜', 'Metallic Bronze', '#858580'),
+    _c('金属午夜绿', 'Metallic Midnight Green', '#4A7A6E'),
+    _c('金属绿', 'Metallic Green', '#848B57'),
+    _c('金属蓝', 'Metallic Blue', '#61778C'),
+    _c('金属玫瑰金', 'Metallic Rose Gold', '#8F8F8F'),
+    _c('金属紫', 'Metallic Purple', '#855371'),
+    _c('金属香槟金', 'Metallic Champagne Gold', '#907656'),
+    _c('金属太空灰', 'Metallic Space Grey', '#7B7B7B'),
+    _c('金属银', 'Metallic Silver', '#8A8B8F'),
+
+
 ]
 
 TINMORRY_ABSPRO: list[dict] = [
-    _c('', 'Purple', '#7862CA'),
-    _c('', 'Black', '#3B3939'),
-    _c('', 'Cold White', '#C6C9D2'),
-    _c('', 'Warm Grey', '#C2B698'),
-    _c('', 'Cold Grey', '#737679'),
-    _c('', 'Cyan', '#75CAB7'),
-    _c('', 'Orange', '#FF6403'),
-    _c('', 'Red', '#84000E'),
-    _c('', 'Green', '#00A33D'),
-    _c('', 'Lake Blue', '#0097D3'),
-    _c('', 'Yellow', '#E3C600'),
+    _c('紫色', 'Purple', '#7862CA'),
+    _c('黑色', 'Black', '#3B3939'),
+    _c('冷白色', 'Cold White', '#C6C9D2'),
+    _c('暖灰色', 'Warm Grey', '#C2B698'),
+    _c('冷灰色', 'Cold Grey', '#737679'),
+    _c('青色', 'Cyan', '#75CAB7'),
+    _c('橙色', 'Orange', '#FF6403'),
+    _c('红色', 'Red', '#84000E'),
+    _c('绿色', 'Green', '#00A33D'),
+    _c('湖蓝色', 'Lake Blue', '#0097D3'),
+    _c('黄色', 'Yellow', '#E3C600'),
+
+
 ]
 
 TINMORRY_PLA_哑光: list[dict] = [
-    _c('', 'Matte Navy Blue', '#363636'),
-    _c('', 'Matte Olive Green', '#3B393A'),
-    _c('', 'Matte Pumpkin Yellow', '#F3A501'),
-    _c('', 'Matte Pomelo Orange', '#FE9870'),
-    _c('', 'Matte Spinach Green', '#018668'),
-    _c('', 'Matte Light Brown', '#CBA581'),
-    _c('', 'Black', '#34353A'),
-    _c('', 'Matte White', '#E8E6E7'),
-    _c('', 'Matte Grey', '#454442'),
-    _c('', 'Matte Brown', '#A66444'),
-    _c('', 'Matte Yellow', '#F3DA02'),
-    _c('', 'Matte Orange', '#F68601'),
-    _c('', 'Matte Light Blue', '#A6D3E6'),
-    _c('', 'Matte Pink', '#FEA8C5'),
-    _c('', 'Matte Light Green', '#C9E9A9'),
-    _c('', 'Matte Red', '#771923'),
-    _c('', 'Matte Purple', '#A19CD7'),
-    _c('', 'Matte Skin', '#D7C6B4'),
+    _c('哑光藏青蓝', 'Matte Navy Blue', '#363636'),
+    _c('哑光橄榄绿', 'Matte Olive Green', '#3B393A'),
+    _c('哑光南瓜黄', 'Matte Pumpkin Yellow', '#F3A501'),
+    _c('哑光柚橙', 'Matte Pomelo Orange', '#FE9870'),
+    _c('哑光菠菜绿', 'Matte Spinach Green', '#018668'),
+    _c('哑光浅棕', 'Matte Light Brown', '#CBA581'),
+    _c('黑色', 'Black', '#34353A'),
+    _c('哑光白', 'Matte White', '#E8E6E7'),
+    _c('哑光灰', 'Matte Grey', '#454442'),
+    _c('哑光棕', 'Matte Brown', '#A66444'),
+    _c('哑光黄', 'Matte Yellow', '#F3DA02'),
+    _c('哑光橙', 'Matte Orange', '#F68601'),
+    _c('哑光浅蓝', 'Matte Light Blue', '#A6D3E6'),
+    _c('哑光粉', 'Matte Pink', '#FEA8C5'),
+    _c('哑光浅绿', 'Matte Light Green', '#C9E9A9'),
+    _c('哑光红', 'Matte Red', '#771923'),
+    _c('哑光紫', 'Matte Purple', '#A19CD7'),
+    _c('哑光肤色', 'Matte Skin', '#D7C6B4'),
+
+
 ]
 
 TINMORRY_丝绸_PLA: list[dict] = [
-    _c('', 'Silk Blue', '#434345'),
-    _c('', 'Silk Rose Red', '#D34687'),
-    _c('', 'Silk Purple', '#7B58B6'),
-    _c('', 'Silk Green', '#08852F'),
-    _c('', 'Silk White', '#DADAD6'),
-    _c('', 'Silk Iron Black', '#343435'),
-    _c('', 'Silk Red', '#B62B49'),
-    _c('', 'Silk Copper', '#9F4733'),
-    _c('', 'Silk Gold', '#D99703'),
-    _c('', 'Silk Bronze', '#74714C'),
-    _c('', 'Silk Silver', '#A6B3BB'),
-    _c('', 'Light Gold', '#726A16'),
+    _c('丝绸蓝', 'Silk Blue', '#434345'),
+    _c('丝绸玫瑰红', 'Silk Rose Red', '#D34687'),
+    _c('丝绸紫', 'Silk Purple', '#7B58B6'),
+    _c('丝绸绿', 'Silk Green', '#08852F'),
+    _c('丝绸白', 'Silk White', '#DADAD6'),
+    _c('丝绸铁黑', 'Silk Iron Black', '#343435'),
+    _c('丝绸红', 'Silk Red', '#B62B49'),
+    _c('丝绸铜', 'Silk Copper', '#9F4733'),
+    _c('丝绸金', 'Silk Gold', '#D99703'),
+    _c('丝绸青铜', 'Silk Bronze', '#74714C'),
+    _c('丝绸银', 'Silk Silver', '#A6B3BB'),
+    _c('浅金', 'Light Gold', '#726A16'),
+
+
 ]
 
 TINMORRY_PETG_星河: list[dict] = [
-    _c('', 'Galaxy Fuchsia', '#6F718E'),
-    _c('', 'Galaxy Purple Gold', '#755E60'),
-    _c('', 'Galaxy Green Gold', '#27393C'),
-    _c('', 'Galaxy Jewel Blue', '#45427C'),
-    _c('', 'Galaxy Gemstone Green', '#546775'),
-    _c('', 'Chameleon Blue/Purple', '#455869'),
+    _c('星河紫红', 'Galaxy Fuchsia', '#6F718E'),
+    _c('星河紫金', 'Galaxy Purple Gold', '#755E60'),
+    _c('星河金绿', 'Galaxy Green Gold', '#27393C'),
+    _c('星河宝石蓝', 'Galaxy Jewel Blue', '#45427C'),
+    _c('星河宝石绿', 'Galaxy Gemstone Green', '#546775'),
+    _c('变色蓝紫', 'Chameleon Blue/Purple', '#455869'),
+
+
 ]
 
 TINMORRY_PETG_大理石: list[dict] = [
-    _c('', 'Marble Magic Pink', '#D3C7CB'),
-    _c('', 'Marble Granite', '#B2B5BA'),
-    _c('', 'Marble Magic Purple', '#D6C8D5'),
-    _c('', 'Marble Magic Green', '#BAC5BF'),
-    _c('', 'Marble Magic Blue', '#A5B5C2'),
-    _c('', 'Marble Magic Brown', '#D2C6C6'),
-    _c('', 'Marble Light Grey', '#82909A'),
-    _c('', '1 KG， Marble White', '#C7C8CA'),
-    _c('', 'Marble Light Brown', '#E4D1C0'),
+    _c('大理石幻彩粉', 'Marble Magic Pink', '#D3C7CB'),
+    _c('大理石花岗', 'Marble Granite', '#B2B5BA'),
+    _c('大理石幻彩紫', 'Marble Magic Purple', '#D6C8D5'),
+    _c('大理石幻彩绿', 'Marble Magic Green', '#BAC5BF'),
+    _c('大理石幻彩蓝', 'Marble Magic Blue', '#A5B5C2'),
+    _c('大理石幻彩棕', 'Marble Magic Brown', '#D2C6C6'),
+    _c('大理石浅灰', 'Marble Light Grey', '#82909A'),
+    _c('大理石白（1KG 装）', '1 KG， Marble White', '#C7C8CA'),
+    _c('大理石浅棕', 'Marble Light Brown', '#E4D1C0'),
+
+
 ]
 
 TINMORRY_ASA: list[dict] = [
-    _c('', 'Grey', '#717A7F'),
-    _c('', 'Olive Green', '#748647'),
-    _c('', 'Blue', '#002878'),
-    _c('', 'White', '#B7B6BC'),
-    _c('', 'Orange', '#FC6420'),
-    _c('', 'Purple', '#6432A7'),
-    _c('', 'Red', '#C72822'),
-    _c('', 'Black', '#27282A'),
+    _c('灰色', 'Grey', '#717A7F'),
+    _c('橄榄绿', 'Olive Green', '#748647'),
+    _c('蓝色', 'Blue', '#002878'),
+    _c('白色', 'White', '#B7B6BC'),
+    _c('橙色', 'Orange', '#FC6420'),
+    _c('紫色', 'Purple', '#6432A7'),
+    _c('红色', 'Red', '#C72822'),
+    _c('黑色', 'Black', '#27282A'),
+
+
 ]
 
 TINMORRY_PLA_金属: list[dict] = [
-    _c('', 'Metallic Space Grey', '#2F2C30'),
-    _c('', 'Metallic Brass', '#6D5026'),
-    _c('', 'Metallic Rose Gold', '#845A4E'),
-    _c('', 'Metallic Silver', '#8C8C8C'),
+    _c('金属太空灰', 'Metallic Space Grey', '#2F2C30'),
+    _c('金属黄铜', 'Metallic Brass', '#6D5026'),
+    _c('金属玫瑰金', 'Metallic Rose Gold', '#845A4E'),
+    _c('金属银', 'Metallic Silver', '#8C8C8C'),
+
+
 ]
 
 TINMORRY_PLA_夜光: list[dict] = [
-    _c('', 'Glow Green', '#C8A77E'),
+    _c('夜光绿', 'Glow Green', '#C8A77E'),
+
+
 ]
 
 # ---- iBOSS（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 IBOSS_ABS: list[dict] = [
-    _c('', 'Black', '#61676B'),
-    _c('', 'White', '#E2E4E4'),
+    _c('黑色', 'Black', '#61676B'),
+    _c('白色', 'White', '#E2E4E4'),
+
+
 ]
 
 IBOSS_PETG: list[dict] = [
-    _c('', 'Black', '#7C7E84'),
-    _c('', 'Dark Blue', '#C5D3F1'),
-    _c('', 'Pink', '#FCC4EE'),
-    _c('', 'Gold', '#F4A92F'),
-    _c('', 'Gray White', '#DCEAF5'),
-    _c('', 'Khaki Green', '#A9A25A'),
-    _c('', 'Transparent', '#E0E4E8'),
-    _c('', 'Yellow', '#FBD13D'),
+    _c('黑色', 'Black', '#7C7E84'),
+    _c('深蓝色', 'Dark Blue', '#C5D3F1'),
+    _c('粉色', 'Pink', '#FCC4EE'),
+    _c('金色', 'Gold', '#F4A92F'),
+    _c('灰白', 'Gray White', '#DCEAF5'),
+    _c('卡其绿', 'Khaki Green', '#A9A25A'),
+    _c('透明色', 'Transparent', '#E0E4E8'),
+    _c('黄色', 'Yellow', '#FBD13D'),
+
+
 ]
 
 IBOSS_PLA: list[dict] = [
-    _c('', 'Beige', '#F5F1CC'),
-    _c('', 'White Marble', '#E5EAED'),
-    _c('', 'Mint Green', '#CCF4FE'),
-    _c('', 'Transparent', '#FEB7F8'),
-    _c('', 'Transparent Violet', '#EEADEC'),
-    _c('', 'Water Pink', '#F0CBE0'),
-    _c('', 'Macaron Pink', '#FDA898'),
-    _c('', 'Marble Gray', '#CEDDE1'),
-    _c('', 'Apple Green', '#D6E542'),
-    _c('', 'Olive Green', '#637C5F'),
-    _c('', 'Terra Brown', '#483221'),
-    _c('', 'Royal Blue', '#C2B6AE'),
-    _c('', 'Light Purple', '#DAB8EA'),
-    _c('', 'Black', '#43464C'),
+    _c('米色', 'Beige', '#F5F1CC'),
+    _c('白大理石', 'White Marble', '#E5EAED'),
+    _c('薄荷绿', 'Mint Green', '#CCF4FE'),
+    _c('透明色', 'Transparent', '#FEB7F8'),
+    _c('透明紫罗兰', 'Transparent Violet', '#EEADEC'),
+    _c('水粉色', 'Water Pink', '#F0CBE0'),
+    _c('马卡龙粉', 'Macaron Pink', '#FDA898'),
+    _c('大理石灰', 'Marble Gray', '#CEDDE1'),
+    _c('苹果绿', 'Apple Green', '#D6E542'),
+    _c('橄榄绿', 'Olive Green', '#637C5F'),
+    _c('赭棕色', 'Terra Brown', '#483221'),
+    _c('宝蓝色', 'Royal Blue', '#C2B6AE'),
+    _c('浅紫', 'Light Purple', '#DAB8EA'),
+    _c('黑色', 'Black', '#43464C'),
+
+
 ]
 
 IBOSS_TPU: list[dict] = [
-    _c('', 'Blue', '#4ED2FA'),
-    _c('', 'Red', '#E63536'),
+    _c('蓝色', 'Blue', '#4ED2FA'),
+    _c('红色', 'Red', '#E63536'),
+
+
 ]
 
 IBOSS_PLA_夜光: list[dict] = [
-    _c('', 'Glow White', '#E1E0DE'),
-    _c('', 'Night Glow Blue-Green', '#65DAD5'),
-    _c('', 'Night Glow Green', '#5AEF4B'),
+    _c('夜光白', 'Glow White', '#E1E0DE'),
+    _c('夜光蓝绿色', 'Night Glow Blue-Green', '#65DAD5'),
+    _c('夜夜光绿', 'Night Glow Green', '#5AEF4B'),
+
+
 ]
 
 IBOSS_PLA_哑光: list[dict] = [
-    _c('', 'Ice Cream', '#E7E1E2'),
-    _c('', 'Green', '#F0B3B2'),
+    _c('冰淇淋色', 'Ice Cream', '#E7E1E2'),
+    _c('绿色', 'Green', '#F0B3B2'),
+
+
 ]
 
 IBOSS_丝绸_PLA: list[dict] = [
-    _c('', 'Silk Green', '#A3A3B0'),
-    _c('', 'Silk Purple', '#B793D0'),
-    _c('', 'Silk Gold', '#EAE5CC'),
-    _c('', 'Silk Red', '#B4E8F3'),
-    _c('', 'Silk Black', '#CBC9CE'),
-    _c('', 'Gemstone Green', '#EDD787'),
-    _c('', 'Gold', '#FCD480'),
-    _c('', 'Silk Orange', '#FE9342'),
-    _c('', 'Silk Blue', '#64A4FE'),
+    _c('丝绸绿', 'Silk Green', '#A3A3B0'),
+    _c('丝绸紫', 'Silk Purple', '#B793D0'),
+    _c('丝绸金', 'Silk Gold', '#EAE5CC'),
+    _c('丝绸红', 'Silk Red', '#B4E8F3'),
+    _c('丝绸黑', 'Silk Black', '#CBC9CE'),
+    _c('宝石绿', 'Gemstone Green', '#EDD787'),
+    _c('金色', 'Gold', '#FCD480'),
+    _c('丝绸橙', 'Silk Orange', '#FE9342'),
+    _c('丝绸蓝', 'Silk Blue', '#64A4FE'),
+
+
 ]
 
 IBOSS_PLA_闪粉: list[dict] = [
-    _c('', 'Flash Point Sky Blue', '#85BBEE'),
-    _c('', 'Purple', '#9584C2'),
-    _c('', 'Blue', '#C2B6AE'),
+    _c('闪点天蓝', 'Flash Point Sky Blue', '#85BBEE'),
+    _c('紫色', 'Purple', '#9584C2'),
+    _c('蓝色', 'Blue', '#C2B6AE'),
+
+
 ]
 
 IBOSS_PLA_木质: list[dict] = [
-    _c('', 'Sandal Wood', '#917458'),
+    _c('檀木色', 'Sandal Wood', '#917458'),
+
+
 ]
 
 # ---- R3D（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 R3D_PETG_GF: list[dict] = [
-    _c('', 'Transparent', '#D5D6C9'),
-    _c('', 'Dark Gray', '#535756'),
-    _c('', 'Black', '#252525'),
-    _c('', 'Cyan', '#4286C3'),
-    _c('', 'Ivory', '#D8D9D4'),
-    _c('', 'Rock Gray', '#595451'),
+    _c('透明色', 'Transparent', '#D5D6C9'),
+    _c('深灰色', 'Dark Gray', '#535756'),
+    _c('黑色', 'Black', '#252525'),
+    _c('青色', 'Cyan', '#4286C3'),
+    _c('象牙白', 'Ivory', '#D8D9D4'),
+    _c('岩石灰', 'Rock Gray', '#595451'),
+
+
 ]
 
 R3D_PETG_TRANSPARENT: list[dict] = [
-    _c('', 'Transparent', '#CACAC0'),
-    _c('', 'Transparent Light Powder', '#F7C4D3'),
-    _c('', 'Transparent Orange', '#D58240'),
-    _c('', 'Transparent Light Blue', '#77C7D2'),
-    _c('', 'Transparent Emerald Green', '#237860'),
+    _c('透明色', 'Transparent', '#CACAC0'),
+    _c('透明浅粉', 'Transparent Light Powder', '#F7C4D3'),
+    _c('透明橙', 'Transparent Orange', '#D58240'),
+    _c('透明浅蓝', 'Transparent Light Blue', '#77C7D2'),
+    _c('透明祖母绿', 'Transparent Emerald Green', '#237860'),
+
+
 ]
 
 R3D_PLA_WOOD: list[dict] = [
-    _c('', 'Dark Wood', '#444444'),
+    _c('深木色', 'Dark Wood', '#444444'),
+
+
 ]
 
 R3D_PLA_UV变色: list[dict] = [
-    _c('', 'White-Blue', '#E5E5E0'),
+    _c('蓝白色', 'White-Blue', '#E5E5E0'),
+
+
 ]
 
 R3D_PLA_温变: list[dict] = [
-    _c('', 'Purple to Pink', '#F58193'),
+    _c('紫粉渐变', 'Purple to Pink', '#F58193'),
+
+
 ]
 
 R3D_PLA_夜光: list[dict] = [
-    _c('', 'Glow Firefly Blue', '#C4C2B6'),
+    _c('萤火夜光蓝', 'Glow Firefly Blue', '#C4C2B6'),
+
+
 ]
 
 R3D_HS_PLA_PRO_MATTE: list[dict] = [
-    _c('', 'Matte Warm Gray', '#928B77'),
-    _c('', 'Matte Cold Gray', '#879392'),
-    _c('', 'Matte Navy Blue', '#162268'),
-    _c('', 'Matte Terracotta', '#A26A5E'),
+    _c('哑光暖灰', 'Matte Warm Gray', '#928B77'),
+    _c('哑光冷灰', 'Matte Cold Gray', '#879392'),
+    _c('哑光藏青蓝', 'Matte Navy Blue', '#162268'),
+    _c('哑光赤陶', 'Matte Terracotta', '#A26A5E'),
+
+
 ]
 
 R3D_HS_PLA_PRO: list[dict] = [
-    _c('', 'Black', '#222423'),
-    _c('', 'White', '#E8E9E4'),
+    _c('黑色', 'Black', '#222423'),
+    _c('白色', 'White', '#E8E9E4'),
+
+
 ]
 
 R3D_PLA_MARBLE: list[dict] = [
-    _c('', 'Marble', '#A8B2B4'),
-    _c('', 'Brick Red', '#953C22'),
+    _c('大理石色', 'Marble', '#A8B2B4'),
+    _c('砖红色', 'Brick Red', '#953C22'),
+
+
 ]
 
 R3D_PLA_MATTE: list[dict] = [
-    _c('', 'Matte Black', '#262626'),
-    _c('', 'Matte White', '#D2D3CB'),
-    _c('', 'Matte Grey', '#979892'),
-    _c('', 'Matte Carbon Black', '#2A2720'),
-    _c('', 'Matte Porcelain', '#D3D3C8'),
-    _c('', 'Matte Barbie Pink', '#B367A2'),
-    _c('', 'Matte Cobalt Blue', '#2368BA'),
-    _c('', 'Matte Aurora Skin', '#E2C4AA'),
-    _c('', 'Matte Skin', '#E5A37E'),
-    _c('', 'Matte Magenta', '#C31214'),
-    _c('', 'Matte Wine', '#64222B'),
-    _c('', 'Matte Sapphire Blue', '#1558BA'),
-    _c('', 'Matte Light Sky Blue', '#B4C4DD'),
-    _c('', 'Matte Dark Green', '#42483A'),
-    _c('', 'Matte Lvory', '#D8D7D3'),
-    _c('', 'Matte Glacier Blue', '#C6E5E7'),
-    _c('', 'Matte Brown', '#643618'),
-    _c('', 'Matte Fishbelly White', '#B3B8B2'),
-    _c('', 'Matte Yellow', '#E7D402'),
-    _c('', 'Matte Turquoise Blue', '#67EBE6'),
-    _c('', 'Matte White Oak', '#E1DDC2'),
-    _c('', 'Matte Orange', '#FEFEFE'),
-    _c('', 'Matte Apricot Pollen', '#F799B2'),
-    _c('', 'Matte Army Green', '#738657'),
-    _c('', 'Matte Chinese Red', '#E56956'),
-    _c('', 'Matte Oats', '#D4B890'),
-    _c('', 'Matte Purple', '#946BD6'),
+    _c('哑光黑', 'Matte Black', '#262626'),
+    _c('哑光白', 'Matte White', '#D2D3CB'),
+    _c('哑光灰', 'Matte Grey', '#979892'),
+    _c('哑光碳黑', 'Matte Carbon Black', '#2A2720'),
+    _c('哑光瓷', 'Matte Porcelain', '#D3D3C8'),
+    _c('哑光芭比粉', 'Matte Barbie Pink', '#B367A2'),
+    _c('哑光钴蓝', 'Matte Cobalt Blue', '#2368BA'),
+    _c('哑光极光肤', 'Matte Aurora Skin', '#E2C4AA'),
+    _c('哑光肤色', 'Matte Skin', '#E5A37E'),
+    _c('哑光品红', 'Matte Magenta', '#C31214'),
+    _c('哑光酒红', 'Matte Wine', '#64222B'),
+    _c('哑光蓝宝石蓝', 'Matte Sapphire Blue', '#1558BA'),
+    _c('哑光浅天蓝', 'Matte Light Sky Blue', '#B4C4DD'),
+    _c('哑光深绿', 'Matte Dark Green', '#42483A'),
+    _c('哑光象牙白', 'Matte Lvory', '#D8D7D3'),
+    _c('哑光冰川蓝', 'Matte Glacier Blue', '#C6E5E7'),
+    _c('哑光棕', 'Matte Brown', '#643618'),
+    _c('哑光鱼肚白', 'Matte Fishbelly White', '#B3B8B2'),
+    _c('哑光黄', 'Matte Yellow', '#E7D402'),
+    _c('哑光绿松石蓝', 'Matte Turquoise Blue', '#67EBE6'),
+    _c('哑光白橡木', 'Matte White Oak', '#E1DDC2'),
+    _c('哑光橙', 'Matte Orange', '#FEFEFE'),
+    _c('哑光杏花粉', 'Matte Apricot Pollen', '#F799B2'),
+    _c('哑光军绿', 'Matte Army Green', '#738657'),
+    _c('哑光中国红', 'Matte Chinese Red', '#E56956'),
+    _c('哑光燕麦', 'Matte Oats', '#D4B890'),
+    _c('哑光紫', 'Matte Purple', '#946BD6'),
+
+
 ]
 
 R3D_ASA: list[dict] = [
-    _c('', 'White', '#E2E2E2'),
-    _c('', 'Black', '#313131'),
-    _c('', 'Ash Gray', '#343233'),
-    _c('', 'Gray', '#646464'),
-    _c('', 'Army Green', '#788142'),
-    _c('', 'Latte', '#BEA36C'),
-    _c('', 'Dark Blue', '#3363C7'),
-    _c('', 'Fluorescent Blue', '#2B4DC8'),
-    _c('', 'Light Blue', '#50A5F8'),
-    _c('', 'Purple', '#B492EC'),
-    _c('', 'Red', '#FE4432'),
-    _c('', 'Fluorescent Red', '#F8505A'),
-    _c('', 'Orange', '#FE9331'),
-    _c('', 'Fluorescent Orange', '#FE6A30'),
-    _c('', 'Fluorescent Yellow', '#FEC458'),
-    _c('', 'Yellow', '#FEE132'),
-    _c('', 'Mint Green', '#4CD8B9'),
-    _c('', 'Fluorescent Green', '#64EA65'),
+    _c('白色', 'White', '#E2E2E2'),
+    _c('黑色', 'Black', '#313131'),
+    _c('灰黑色', 'Ash Gray', '#343233'),
+    _c('灰色', 'Gray', '#646464'),
+    _c('军绿色', 'Army Green', '#788142'),
+    _c('拿铁色', 'Latte', '#BEA36C'),
+    _c('深蓝色', 'Dark Blue', '#3363C7'),
+    _c('荧光蓝', 'Fluorescent Blue', '#2B4DC8'),
+    _c('浅蓝', 'Light Blue', '#50A5F8'),
+    _c('紫色', 'Purple', '#B492EC'),
+    _c('红色', 'Red', '#FE4432'),
+    _c('荧光红', 'Fluorescent Red', '#F8505A'),
+    _c('橙色', 'Orange', '#FE9331'),
+    _c('荧光橙', 'Fluorescent Orange', '#FE6A30'),
+    _c('荧光黄', 'Fluorescent Yellow', '#FEC458'),
+    _c('黄色', 'Yellow', '#FEE132'),
+    _c('薄荷绿', 'Mint Green', '#4CD8B9'),
+    _c('荧光绿', 'Fluorescent Green', '#64EA65'),
+
+
 ]
 
 R3D_HS_PETG: list[dict] = [
-    _c('', 'Black', '#232428'),
-    _c('', 'White', '#E9E7E3'),
+    _c('黑色', 'Black', '#232428'),
+    _c('白色', 'White', '#E9E7E3'),
+
+
 ]
 
 R3D_PETG_MATTE: list[dict] = [
-    _c('', 'Matte White', '#D2D4D3'),
-    _c('', 'Matte Gunmetal Gray', '#636466'),
-    _c('', 'Matte Khaki', '#A48860'),
-    _c('', 'Matte Yellow', '#E5DD32'),
-    _c('', 'Matte Dark Navy Blue', '#011848'),
-    _c('', 'Matte Glacier Blue', '#A8DDE5'),
+    _c('哑光白', 'Matte White', '#D2D4D3'),
+    _c('哑光枪灰灰', 'Matte Gunmetal Gray', '#636466'),
+    _c('哑光卡其', 'Matte Khaki', '#A48860'),
+    _c('哑光黄', 'Matte Yellow', '#E5DD32'),
+    _c('哑光深藏青蓝', 'Matte Dark Navy Blue', '#011848'),
+    _c('哑光冰川蓝', 'Matte Glacier Blue', '#A8DDE5'),
+
+
 ]
 
 R3D_PETG: list[dict] = [
-    _c('', 'Black', '#232227'),
-    _c('', 'White', '#E4DCC3'),
-    _c('', 'Warm Gray', '#928775'),
-    _c('', 'Off White', '#C8C8C6'),
-    _c('', 'Tangerine', '#F97C01'),
-    _c('', 'Coffee', '#523829'),
-    _c('', 'Bambu Green', '#46D35A'),
-    _c('', 'Yellow', '#F8B401'),
-    _c('', 'Purple', '#6742A6'),
-    _c('', 'Faux Wood', '#E5B59A'),
-    _c('', 'Light Blue', '#1593C9'),
-    _c('', 'Cream Pink', '#C9B2BA'),
-    _c('', 'Snowy Glow', '#D4B6A1'),
-    _c('', 'Latte', '#836548'),
-    _c('', 'Pink', '#D799A6'),
-    _c('', 'Lead Ash', '#949494'),
-    _c('', 'White Oak', '#E4DCC3'),
-    _c('', 'Blackish Green', '#47522A'),
-    _c('', 'Dark Blue', '#1925A2'),
-    _c('', 'Klein Blue', '#161963'),
+    _c('黑色', 'Black', '#232227'),
+    _c('白色', 'White', '#E4DCC3'),
+    _c('暖灰色', 'Warm Gray', '#928775'),
+    _c('米白色', 'Off White', '#C8C8C6'),
+    _c('橘橙色', 'Tangerine', '#F97C01'),
+    _c('咖啡色', 'Coffee', '#523829'),
+    _c('拓竹绿', 'Bambu Green', '#46D35A'),
+    _c('黄色', 'Yellow', '#F8B401'),
+    _c('紫色', 'Purple', '#6742A6'),
+    _c('仿木色', 'Faux Wood', '#E5B59A'),
+    _c('浅蓝', 'Light Blue', '#1593C9'),
+    _c('奶粉色', 'Cream Pink', '#C9B2BA'),
+    _c('落雪夜光', 'Snowy Glow', '#D4B6A1'),
+    _c('拿铁色', 'Latte', '#836548'),
+    _c('粉色', 'Pink', '#D799A6'),
+    _c('铅灰色', 'Lead Ash', '#949494'),
+    _c('白橡木', 'White Oak', '#E4DCC3'),
+    _c('墨绿色', 'Blackish Green', '#47522A'),
+    _c('深蓝色', 'Dark Blue', '#1925A2'),
+    _c('克莱因蓝', 'Klein Blue', '#161963'),
+
+
 ]
 
 R3D_PETG_MARBLE: list[dict] = [
-    _c('', 'Marble Granite', '#A5B5B4'),
-    _c('', 'Cement Ash', '#949496'),
-    _c('', 'Brick Red', '#93261D'),
-    _c('', 'Marble', '#A7B2B7'),
+    _c('大理石花岗', 'Marble Granite', '#A5B5B4'),
+    _c('水泥灰', 'Cement Ash', '#949496'),
+    _c('砖红色', 'Brick Red', '#93261D'),
+    _c('大理石色', 'Marble', '#A7B2B7'),
+
+
 ]
 
 R3D_HS_PLA_PRO_SILK: list[dict] = [
-    _c('', 'Silk White', '#C9C9C9'),
-    _c('', 'Silk Black', '#343338'),
-    _c('', 'Silk Copper', '#A85430'),
-    _c('', 'Silk Orange', '#D55301'),
-    _c('', 'Silk Bronze', '#485126'),
-    _c('', 'Silk Grass Green', '#D9DAD5'),
-    _c('', 'Silk Pink Purple', '#C29DC8'),
-    _c('', 'Silk Light Pink', '#DADBD5'),
+    _c('丝绸白', 'Silk White', '#C9C9C9'),
+    _c('丝绸黑', 'Silk Black', '#343338'),
+    _c('丝绸铜', 'Silk Copper', '#A85430'),
+    _c('丝绸橙', 'Silk Orange', '#D55301'),
+    _c('丝绸青铜', 'Silk Bronze', '#485126'),
+    _c('丝绸草绿', 'Silk Grass Green', '#D9DAD5'),
+    _c('丝绸粉紫', 'Silk Pink Purple', '#C29DC8'),
+    _c('丝绸浅粉', 'Silk Light Pink', '#DADBD5'),
+
+
 ]
 
 R3D_PLA_TRANSLUCENT: list[dict] = [
-    _c('', 'Transparent', '#545655'),
-    _c('', 'Translucent Red', '#E74B24'),
-    _c('', 'Translucent Blue', '#4487D6'),
+    _c('透明色', 'Transparent', '#545655'),
+    _c('半透红', 'Translucent Red', '#E74B24'),
+    _c('半透蓝', 'Translucent Blue', '#4487D6'),
+
+
 ]
 
 R3D_PLA_PRO: list[dict] = [
-    _c('', 'Jade White', '#D4D5C5'),
-    _c('', 'Light Apricot', '#E3D6C6'),
-    _c('', 'Gray', '#C2C6C7'),
-    _c('', 'Light Gray', '#D2D8D8'),
-    _c('', 'Red', '#950303'),
-    _c('', 'Yellow', '#F3E125'),
-    _c('', 'Turquoise Green', '#38CAB7'),
-    _c('', 'Cobalt Blue', '#1651B1'),
-    _c('', 'Dark Blue', '#1442A7'),
-    _c('', 'Purple', '#9773D6'),
-    _c('', 'Magenta', '#A62156'),
-    _c('', 'Cocoa Brown', '#56422A'),
-    _c('', 'Brown', '#764325'),
+    _c('玉石白', 'Jade White', '#D4D5C5'),
+    _c('浅杏', 'Light Apricot', '#E3D6C6'),
+    _c('灰色', 'Gray', '#C2C6C7'),
+    _c('浅灰', 'Light Gray', '#D2D8D8'),
+    _c('红色', 'Red', '#950303'),
+    _c('黄色', 'Yellow', '#F3E125'),
+    _c('绿松石绿', 'Turquoise Green', '#38CAB7'),
+    _c('钴蓝色', 'Cobalt Blue', '#1651B1'),
+    _c('深蓝色', 'Dark Blue', '#1442A7'),
+    _c('紫色', 'Purple', '#9773D6'),
+    _c('品红', 'Magenta', '#A62156'),
+    _c('可可棕', 'Cocoa Brown', '#56422A'),
+    _c('棕色', 'Brown', '#764325'),
+
+
 ]
 
 R3D_PLA_SILK: list[dict] = [
-    _c('', 'Silk Gold', '#B67206'),
-    _c('', 'Silk Auratus', '#D6A236'),
-    _c('', 'Silk Champagne', '#C8A772'),
-    _c('', 'Silk Red', '#530105'),
-    _c('', 'Silk Sakura Pink', '#C7A4C2'),
-    _c('', 'Silk Black', '#181818'),
-    _c('', 'Silk White Silver', '#96A0AA'),
-    _c('', 'Silk White', '#C9C9C9'),
+    _c('丝绸金', 'Silk Gold', '#B67206'),
+    _c('丝绸金黄', 'Silk Auratus', '#D6A236'),
+    _c('丝绸香槟', 'Silk Champagne', '#C8A772'),
+    _c('丝绸红', 'Silk Red', '#530105'),
+    _c('丝绸樱花粉', 'Silk Sakura Pink', '#C7A4C2'),
+    _c('丝绸黑', 'Silk Black', '#181818'),
+    _c('丝绸白银', 'Silk White Silver', '#96A0AA'),
+    _c('丝绸白', 'Silk White', '#C9C9C9'),
+
+
 ]
 
 # ---- 爱丽兹 Allizz（官网 Color Options 色卡，商品图提色，近似值）----
 
 ALLIZZ_ABS: list[dict] = [
-    _c('', 'Cold White', '#E2E2E2'),
-    _c('', 'Purple', '#4C2D7E'),
-    _c('', 'Light blue', '#AFE5D5'),
-    _c('', 'Beige', '#E4DBA8'),
-    _c('', 'fuchsia', '#AE359A'),
-    _c('', 'silver', '#858585'),
-    _c('', 'Sky blue', '#6EAFE2'),
-    _c('', 'saffron yellow', '#F1C958'),
-    _c('', 'grass green', '#6F9551'),
-    _c('', 'oranger', '#E99C69'),
-    _c('', 'Navy Blue', '#2E3255'),
-    _c('', 'red', '#E54B46'),
-    _c('', 'yellow', '#F3D603'),
-    _c('', 'green', '#38C64B'),
-    _c('', 'blue', '#4969CB'),
-    _c('', 'ABS white', '#EBEBEB'),
-    _c('', 'ABS black', '#303030'),
+    _c('冷白色', 'Cold White', '#E2E2E2'),
+    _c('紫色', 'Purple', '#4C2D7E'),
+    _c('浅蓝', 'Light blue', '#AFE5D5'),
+    _c('米色', 'Beige', '#E4DBA8'),
+    _c('紫红', 'fuchsia', '#AE359A'),
+    _c('银色', 'silver', '#858585'),
+    _c('天蓝', 'Sky blue', '#6EAFE2'),
+    _c('藏红花黄', 'saffron yellow', '#F1C958'),
+    _c('草绿色', 'grass green', '#6F9551'),
+    _c('浅橙', 'oranger', '#E99C69'),
+    _c('藏青色', 'Navy Blue', '#2E3255'),
+    _c('红色', 'red', '#E54B46'),
+    _c('黄色', 'yellow', '#F3D603'),
+    _c('绿色', 'green', '#38C64B'),
+    _c('蓝色', 'blue', '#4969CB'),
+    _c('白色', 'ABS white', '#EBEBEB'),
+    _c('黑色', 'ABS black', '#303030'),
+
+
 ]
 
 ALLIZZ_ASA: list[dict] = [
-    _c('', 'Black', '#151719'),
-    _c('', 'Blue', '#4160D7'),
-    _c('', 'Gray', '#636566'),
-    _c('', 'Green', '#019283'),
-    _c('', 'Red', '#E02F30'),
-    _c('', 'White', '#D9D8D9'),
+    _c('黑色', 'Black', '#151719'),
+    _c('蓝色', 'Blue', '#4160D7'),
+    _c('灰色', 'Gray', '#636566'),
+    _c('绿色', 'Green', '#019283'),
+    _c('红色', 'Red', '#E02F30'),
+    _c('白色', 'White', '#D9D8D9'),
+
+
 ]
 
 ALLIZZ_PETG_HF: list[dict] = [
-    _c('', 'Green', '#126032'),
-    _c('', 'Magenta', '#B23167'),
-    _c('', 'Violet', '#5A3C79'),
-    _c('', 'Cherry Blossom Pink', '#B99894'),
-    _c('', 'Skin Color', '#B6A997'),
-    _c('', 'Lemon Green', '#57AE4B'),
-    _c('', 'Orange', '#CA4F08'),
-    _c('', 'Light Gray', '#818074'),
-    _c('', 'White', '#E2E2E2'),
-    _c('', 'Yellow', '#D5BA30'),
-    _c('', 'Cyan', '#046EA5'),
-    _c('', 'Lake Blue', '#255F99'),
-    _c('', 'Bright Red', '#C10807'),
-    _c('', 'Cinnabar Red', '#960F12'),
-    _c('', 'Beige', '#BEAA7F'),
-    _c('', 'Black Nickel', '#393939'),
-    _c('', 'Copper', '#7D614B'),
-    _c('', 'Olive Green', '#606829'),
-    _c('', 'Klein Blue', '#072E6A'),
-    _c('', 'Red Wine', '#5F261E'),
-    _c('', 'Coffee Color', '#5E3020'),
-    _c('', 'Dark Gray', '#4F4F4F'),
-    _c('', 'Amber Gold', '#A99421'),
-    _c('', 'Red Copper', '#8F583F'),
-    _c('', 'Marble PETG', '#CCCCCC'),
+    _c('绿色', 'Green', '#126032'),
+    _c('品红', 'Magenta', '#B23167'),
+    _c('紫罗兰', 'Violet', '#5A3C79'),
+    _c('樱花粉', 'Cherry Blossom Pink', '#B99894'),
+    _c('肤色', 'Skin Color', '#B6A997'),
+    _c('柠檬绿', 'Lemon Green', '#57AE4B'),
+    _c('橙色', 'Orange', '#CA4F08'),
+    _c('浅灰', 'Light Gray', '#818074'),
+    _c('白色', 'White', '#E2E2E2'),
+    _c('黄色', 'Yellow', '#D5BA30'),
+    _c('青色', 'Cyan', '#046EA5'),
+    _c('湖蓝色', 'Lake Blue', '#255F99'),
+    _c('亮红色', 'Bright Red', '#C10807'),
+    _c('朱砂红', 'Cinnabar Red', '#960F12'),
+    _c('米色', 'Beige', '#BEAA7F'),
+    _c('黑镍色', 'Black Nickel', '#393939'),
+    _c('铜', 'Copper', '#7D614B'),
+    _c('橄榄绿', 'Olive Green', '#606829'),
+    _c('克莱因蓝', 'Klein Blue', '#072E6A'),
+    _c('酒红色', 'Red Wine', '#5F261E'),
+    _c('咖啡色', 'Coffee Color', '#5E3020'),
+    _c('深灰色', 'Dark Gray', '#4F4F4F'),
+    _c('琥珀金', 'Amber Gold', '#A99421'),
+    _c('红铜色', 'Red Copper', '#8F583F'),
+    _c('大理石PETG', 'Marble PETG', '#CCCCCC'),
+
+
 ]
 
 ALLIZZ_PETG_TRANSLUCENT: list[dict] = [
-    _c('', 'Clear', '#E1E6EB'),
-    _c('', 'Translucent Black', '#3D3A38'),
-    _c('', 'Translucent Red', '#EB8A83'),
-    _c('', 'Translucent Orange', '#E4A954'),
-    _c('', 'Translucent Yellow', '#E2E370'),
-    _c('', 'Translucent Green', '#61EF6B'),
-    _c('', 'Translucent Cyan', '#43D0E8'),
-    _c('', 'Translucent Blue', '#42A1E7'),
-    _c('', 'Translucent Purple', '#A964EB'),
+    _c('透明色', 'Clear', '#E1E6EB'),
+    _c('半透黑', 'Translucent Black', '#3D3A38'),
+    _c('半透红', 'Translucent Red', '#EB8A83'),
+    _c('半透橙', 'Translucent Orange', '#E4A954'),
+    _c('半透黄', 'Translucent Yellow', '#E2E370'),
+    _c('半透绿', 'Translucent Green', '#61EF6B'),
+    _c('半透青', 'Translucent Cyan', '#43D0E8'),
+    _c('半透蓝', 'Translucent Blue', '#42A1E7'),
+    _c('半透紫', 'Translucent Purple', '#A964EB'),
+
+
 ]
 
 ALLIZZ_PLA_MATTE: list[dict] = [
-    _c('', 'White', '#E2E2E2'),
-    _c('', 'Ice Blue', '#86C6D9'),
-    _c('', 'orange', '#D1814A'),
-    _c('', 'charcoal', '#070707'),
-    _c('', 'Desert Yellow', '#B59E6A'),
-    _c('', 'Crimson', '#931B26'),
-    _c('', 'Deep Blue', '#14264C'),
-    _c('', 'Dark green', '#575C38'),
-    _c('', 'brown', '#826252'),
-    _c('', 'Purple', '#5A3C79'),
-    _c('', 'Dark Brown', '#674235'),
+    _c('白色', 'White', '#E2E2E2'),
+    _c('冰蓝色', 'Ice Blue', '#86C6D9'),
+    _c('橙色', 'orange', '#D1814A'),
+    _c('炭黑色', 'charcoal', '#070707'),
+    _c('沙漠黄', 'Desert Yellow', '#B59E6A'),
+    _c('绯红', 'Crimson', '#931B26'),
+    _c('深蓝色', 'Deep Blue', '#14264C'),
+    _c('深绿色', 'Dark green', '#575C38'),
+    _c('棕色', 'brown', '#826252'),
+    _c('紫色', 'Purple', '#5A3C79'),
+    _c('深棕', 'Dark Brown', '#674235'),
+
+
 ]
 
 ALLIZZ_PLA_SILK: list[dict] = [
-    _c('', 'Silk Shiny Silver', '#8E8C8D'),
-    _c('', 'Silk Silver', '#807F85'),
-    _c('', 'Silk Shiny Gold', '#E99601'),
-    _c('', 'Silk white', '#D3D3D3'),
-    _c('', 'Silk Luxury Gold', '#FEA910'),
-    _c('', 'Silk Yellow', '#E3B403'),
-    _c('', 'Silk Orange', '#DA5D0D'),
-    _c('', 'Silk Pink', '#DE6C6D'),
-    _c('', 'Silk Red', '#E41D0E'),
-    _c('', 'Silk Purple', '#9035A6'),
-    _c('', 'Silk Blueviolet', '#522C74'),
-    _c('', 'Silk Blue', '#1D3062'),
-    _c('', 'Silk Magic Green', '#387E29'),
-    _c('', 'Silk Milk Green', '#69BC5E'),
-    _c('', 'Silk Black', '#030303'),
+    _c('丝绸亮银', 'Silk Shiny Silver', '#8E8C8D'),
+    _c('丝绸银', 'Silk Silver', '#807F85'),
+    _c('丝绸亮金', 'Silk Shiny Gold', '#E99601'),
+    _c('丝绸白', 'Silk white', '#D3D3D3'),
+    _c('丝绸奢华金', 'Silk Luxury Gold', '#FEA910'),
+    _c('丝绸黄', 'Silk Yellow', '#E3B403'),
+    _c('丝绸橙', 'Silk Orange', '#DA5D0D'),
+    _c('丝绸粉', 'Silk Pink', '#DE6C6D'),
+    _c('丝绸红', 'Silk Red', '#E41D0E'),
+    _c('丝绸紫', 'Silk Purple', '#9035A6'),
+    _c('丝绸蓝紫', 'Silk Blueviolet', '#522C74'),
+    _c('丝绸蓝', 'Silk Blue', '#1D3062'),
+    _c('丝绸幻彩绿', 'Silk Magic Green', '#387E29'),
+    _c('丝绸奶绿', 'Silk Milk Green', '#69BC5E'),
+    _c('丝绸黑', 'Silk Black', '#030303'),
+
+
 ]
 
 ALLIZZ_TPU95A: list[dict] = [
-    _c('', 'red', '#D04E44'),
-    _c('', 'grey', '#999999'),
-    _c('', 'blue', '#4499D0'),
-    _c('', 'yellow', '#E5E12D'),
-    _c('', 'white', '#E8E8E8'),
-    _c('', 'black', '#494949'),
+    _c('红色', 'red', '#D04E44'),
+    _c('灰色', 'grey', '#999999'),
+    _c('蓝色', 'blue', '#4499D0'),
+    _c('黄色', 'yellow', '#E5E12D'),
+    _c('白色', 'white', '#E8E8E8'),
+    _c('黑色', 'black', '#494949'),
+
+
 ]
 
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
@@ -1973,7 +2098,6 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PETG HF": BAMBU_PETG_HF,
     },
     "大简": {
-        "PETG": DASU_PETG,
         "PETG HF": DASU_PETG_HF,
     },
     "兰博": LANBO_SERIES,

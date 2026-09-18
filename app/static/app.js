@@ -1956,8 +1956,8 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
   const presetBrands = S.catalog.preset_brands || [];
   const brandOptions = brands.map((b) =>
     `<option value="${esc(b)}" ${b === value.brand ? "selected" : ""}>${esc(b)}${presetBrands.includes(b) ? "" : "（自定义）"}</option>`).join("");
-  const materialOptions = S.catalog.materials.map((m) =>
-    `<option value="${esc(m)}" ${m === value.material ? "selected" : ""}>${esc(m)}</option>`).join("");
+  const materialOptions = [...new Set(S.catalog.materials || [])].map((m) =>
+    `<option value="${esc(m)}">${esc(m)}</option>`).join("");
   // 料盘不在候选里（历史自定义品牌）时默认落到「自定义」那一项
   const customSelected = value.brand && !brands.includes(value.brand) ? " selected" : "";
   const finish = value.finish || "普通";
@@ -1977,7 +1977,12 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
                placeholder="例如：某某耗材（保存后会自动进品牌下拉）" /></label>
     </div>
     <div class="field-row">
-      <label class="field"><span>材料</span><select id="f_material" onchange="renderColorPresets()">${materialOptions}</select></label>
+      <label class="field"><span>材料</span>
+        <input id="f_material" list="materialList" value="${esc(value.material || "")}"
+               autocomplete="off" onchange="renderColorPresets()"
+               placeholder="点开选，或直接输入" />
+        <datalist id="materialList">${materialOptions}</datalist>
+      </label>
       <label class="field"><span>外观</span>
         <input id="f_finish" list="finishList" data-combo-tone="finish" value="${esc(finish)}"
                placeholder="如：丝绸 / 哑光 / 亮面" />
@@ -2735,6 +2740,7 @@ function openSlotDialog(printerId, amsId, trayId) {
       <button class="sm primary" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
         ${ICO.scan}相机扫码
       </button>
+      <button class="sm" onclick="closeModal();switchView('spools')">${ICO.spool || ""}去料材列表</button>
     </div>
     <div class="slot-actions">
       <button class="sm" onclick="quickCreateSpoolFromSlot(${printerId},${amsId},${trayId})">按槽位信息建料盘</button>
