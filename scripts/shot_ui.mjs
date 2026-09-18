@@ -696,6 +696,89 @@ async function main() {
   check("筛选后出现「看全部」按钮", filtered.clearHidden === false);
   check("点「看全部」能还原", restored.label === "", JSON.stringify(restored));
 
+  /* ── 汇总页：品牌分布卡（用户截图里右边那张「品牌分布」） ──
+     三件事都要真量：① 卡片和概览卡并排（不是掉到下面一行）；
+     ② 品牌名单上的盘数加起来 = 在库盘数；③ 点品牌名跳过去、列表里真的是这个品牌。
+     第 ③ 条是「假断言陷阱」的重灾区 —— 只看「跳过去了」不够，
+     要看筛选项真的等于那个品牌，且列表非空。 */
+  const brandDist = await cdp.evaluate(sessionId, `(() => {
+    const host = document.getElementById("brandDist");
+    const rows = [...document.querySelectorAll("#brandDist .bd-row")];
+    const spools = (window.panelDebug.state.summarySpools || []);
+    // 每行文本形如「Polymaker 42 33% 每盘均价 ¥88.00」，从 .bd-count 里取盘数
+    const counts = rows.map((r) => {
+      const t = (r.querySelector(".bd-count") || {}).innerText || "";
+      const m = t.match(/(\\d+)/); return m ? Number(m[1]) : 0;
+    });
+    // 并排：两张卡顶边差 ≤2px 且品牌卡在概览卡右边
+    const ovCard = document.querySelector(".overview-row > .card");
+    const bdCard = document.querySelectorAll(".overview-row > .card")[1];
+    let side = null;
+    if (ovCard && bdCard) {
+      const a = ovCard.getBoundingClientRect(), b = bdCard.getBoundingClientRect();
+      side = { sameRow: Math.abs(a.top - b.top) <= 2, toRight: b.left >= a.right - 2 };
+    }
+    const byBrand = {};
+    spools.forEach((s) => { const k = s.brand || "未填写"; byBrand[k] = (byBrand[k] || 0) + 1; });
+    return {
+      hasHost: !!host, rowCount: rows.length,
+      distinctBrands: Object.keys(byBrand).length,
+      sumCounts: counts.reduce((a, b) => a + b, 0),
+      totalSpools: spools.length,
+      side,
+      // 「不留空」：每行的价格位上要么是均价、要么明说未登记，不许是空的
+      blanks: rows.filter((r) => {
+        const t = (r.querySelector(".bd-sub") || {}).innerText || "";
+        return !t.trim();
+      }).length,
+      firstRowText: rows[0] ? rows[0].innerText.replace(/\\s+/g, " ").trim() : "",
+      firstName: rows[0] ? (rows[0].dataset.value || "") : "",
+      counter: (document.getElementById("brandDistCount") || {}).innerText || "",
+    };
+  })()`);
+  console.log("品牌分布：", JSON.stringify(brandDist).slice(0, 460));
+  check("品牌分布卡画出来了（有行）", brandDist.rowCount >= 1, String(brandDist.rowCount));
+  check("品牌行数 = 汇总里出现的品牌数",
+    brandDist.rowCount === brandDist.distinctBrands,
+    `${brandDist.rowCount} vs ${brandDist.distinctBrands}`);
+  check("各品牌盘数之和 = 在库料盘数",
+    brandDist.sumCounts === brandDist.totalSpools,
+    `${brandDist.sumCounts} vs ${brandDist.totalSpools}`);
+  check("品牌分布卡每行都有价格说明（不留空）",
+    brandDist.blanks === 0, `空 ${brandDist.blanks} 行`);
+  check("品牌卡与概览卡并排（顶边齐、在右侧）",
+    !!brandDist.side && brandDist.side.sameRow && brandDist.side.toRight,
+    JSON.stringify(brandDist.side));
+  check("品牌卡右上角写了品牌数与总盘数",
+    /\d+\s*个品牌/.test(brandDist.counter) && /共\s*\d+\s*盘/.test(brandDist.counter),
+    JSON.stringify(brandDist.counter));
+
+  // 点第一个品牌 -> 跳到料盘库存、筛选器真的等于这个品牌、列表非空
+  const brandJump = await cdp.evaluate(sessionId, `(() => {
+    const row = document.querySelector("#brandDist .bd-row");
+    const wanted = row.dataset.value;
+    row.click();
+    const sel = document.getElementById("spoolBrand");
+    return {
+      wanted,
+      view: (window.panelDebug.state.view || ""),
+      selectValue: sel ? sel.value : null,
+      rows: document.querySelectorAll("#spoolTable tbody tr").length,
+      // 权威值来自渲染用的那份数据，不是 DOM 数数
+      shown: (window.panelDebug.state.spools || []).filter((s) => !s.archived).length,
+    };
+  })()`);
+  await sleep(350);
+  await cdp.shot(sessionId, path.join(OUT, "03c-summary-brand-jump.png"));
+  console.log("点品牌钻取：", JSON.stringify(brandJump));
+  check("点品牌名跳到了料盘库存页", brandJump.view === "spools", JSON.stringify(brandJump));
+  check("列表真的按这个品牌筛了（不是跳过去空着）",
+    brandJump.selectValue === brandJump.wanted && brandJump.shown >= 1
+    && brandJump.rows >= 1, JSON.stringify(brandJump));
+  // 回到汇总页，后面几条断言还要用它的 DOM
+  await cdp.evaluate(sessionId, `switchView("summary")`);
+  await sleep(300);
+
   /* ── 汇总页：均价卡 + 点名字钻到料盘库存 ──
      沙箱自测证明了「HTML 对」，这里证明「浏览器里点得动、跳得过去、跳过去不是空列表」。 */
   const avgCards = await cdp.evaluate(sessionId, `(() => {
@@ -1216,7 +1299,10 @@ async function main() {
       const h = document.getElementById("finishHint");
       return h ? { shown: !h.classList.contains("hidden"), text: (h.textContent || "").trim() } : null;
     };
-    set("f_brand", "魔创");
+    // ⚠️ 必须挑一个「色卡里真的有哑光系列」的品牌 —— 魔创 PLA 只有 PLA+ 一个系列，
+    //    在那儿找哑光色卡必然找不到、chip 恒为 null，四条断言永远是红的（假红）。
+    //    全库只有 Polymaker 的「Panchroma 哑光 PLA」和彩多屋的「哑光 PLA」带哑光。
+    set("f_brand", "Polymaker");
     set("f_material", "PLA");
     set("f_color_name", "天蓝");
     set("f_finish", "普通");
@@ -1271,7 +1357,7 @@ async function main() {
   })()`);
   const finishSave = { ...finishPart1, ...finishPart2 };
   console.log("新增料盘（外观存没存）：", JSON.stringify(finishSave).slice(0, 460));
-  check("魔创 PLA 里能找到「哑光」色卡",
+  check("Polymaker PLA 里能找到「哑光」色卡",
     !!finishSave.chipSeries && finishSave.chipSeries.indexOf("哑光") >= 0,
     String(finishSave.chipSeries));
   check("外观还是「普通」时点哑光色卡里的颜色，会带成哑光",
@@ -1377,6 +1463,51 @@ async function main() {
   check("刷新后还停在汇总页（不被弹回仪表盘）", afterReload.view === "summary", JSON.stringify(afterReload));
   check("刷新后 DOM 上激活的也是汇总页", afterReload.active === "view-summary", JSON.stringify(afterReload));
   check("刷新后导航高亮跟着落在汇总页", afterReload.navActive === "summary", JSON.stringify(afterReload));
+
+  /* ── 刷新时地址栏里**没有 hash** 也要停在原视图 ──
+   * 上面那条只覆盖了「hash 里有 #view=summary」的理想路径。用户实际按 F5 时，
+   * 地址栏很可能是干净的（书签进的、手打网址进的、或者浏览器把 hash 吞了），
+   * 那条路径下 hash 为空 → applyHashRoute(initial) 会直接 switchView("dashboard")。
+   * 所以这里补一条：**先切到打印记录，再清空 hash，然后刷新** ——
+   * 必须靠本地存储里的「上次所在视图」落回去，而不是靠地址栏。 */
+  await cdp.evaluate(sessionId, `closeModal(); switchView("jobs")`);
+  await sleep(700);
+  const jobsBefore = await cdp.evaluate(sessionId, `({
+    view: (window.panelDebug.state || {}).view || "",
+    hash: location.hash,
+  })`);
+  check("切到打印记录后视图已生效", jobsBefore.view === "jobs", JSON.stringify(jobsBefore));
+
+  // 模拟「地址栏没有 hash」：清掉 hash 再刷新
+  await cdp.evaluate(sessionId, `history.replaceState(null, "", location.pathname + location.search)`);
+  await sleep(200);
+  const cleanHash = await cdp.evaluate(sessionId, `location.hash`);
+  check("已把 hash 清干净（复现用户按 F5 时地址栏干净的情形）",
+    cleanHash === "", JSON.stringify(cleanHash));
+
+  await cdp.send("Page.reload", { ignoreCache: false }, sessionId);
+  let afterClean = {};
+  for (let i = 0; i < 24; i++) {
+    await sleep(500);
+    afterClean = await cdp.evaluate(sessionId, `(() => {
+      const st = (window.panelDebug || {}).state || {};
+      return {
+        ready: !!st.status && !!document.querySelector(".view.active"),
+        view: st.view || "",
+        hash: location.hash,
+        active: ((document.querySelector(".view.active") || {}).id) || "",
+      };
+    })()`).catch(() => ({}));
+    if (afterClean.ready) break;
+  }
+  console.log("hash 为空时刷新后：", JSON.stringify(afterClean));
+  check("hash 为空刷新后应用也重新起来了", afterClean.ready === true, JSON.stringify(afterClean));
+  check("地址栏没有 hash 时刷新，仍然停在原视图（不回仪表盘）",
+    afterClean.view === "jobs", JSON.stringify(afterClean));
+  check("hash 为空刷新后 DOM 上激活的也是原视图",
+    afterClean.active === "view-jobs", JSON.stringify(afterClean));
+  check("回落到原视图后把 hash 补回去（地址栏与界面重新一致）",
+    afterClean.hash === "#view=jobs", JSON.stringify(afterClean));
 
   /* ── 手机端 ── */
   await cdp.evaluate(sessionId, `closeModal(); switchView("dashboard")`);

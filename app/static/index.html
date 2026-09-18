@@ -235,14 +235,26 @@
 
     <div class="grid-stats" id="summaryStats"></div>
 
-    <div class="card">
-      <div class="card-head">
-        <h2>库存数据概览</h2>
-        <span class="spacer"></span>
-        <span class="count" id="overviewFilter"></span>
-        <button class="btn sm ghost hidden" id="overviewClear" onclick="clearSummaryFilter()">看全部</button>
+    <!-- 概览与品牌分布并排：左边看材料构成与使用状态，右边看品牌排行。
+         两栏都是「一眼扫完」的信息，并排比上下堆更省滚动。 -->
+    <div class="overview-row">
+      <div class="card">
+        <div class="card-head">
+          <h2>库存数据概览</h2>
+          <span class="spacer"></span>
+          <span class="count" id="overviewFilter"></span>
+          <button class="btn sm ghost hidden" id="overviewClear" onclick="clearSummaryFilter()">看全部</button>
+        </div>
+        <div id="summaryOverview"></div>
       </div>
-      <div id="summaryOverview"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>品牌分布</h2>
+          <span class="count" id="brandDistCount"></span>
+        </div>
+        <div id="brandDist"></div>
+      </div>
     </div>
 
     <div class="section-head">

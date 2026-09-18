@@ -183,14 +183,16 @@ def main() -> int:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     # 两种形态都要抓：
     #   https://raw.githubusercontent.com/<o>/<r>/<ref>/<path>
-    #   https://cdn.jsdelivr.net/gh/<o>/<r>@<ref>/<path>
+    #   https://gcore.jsdelivr.net/gh/<o>/<r>@<ref>/<path>
+    # ⚠️ CDN 域名必须是 gcore 节点。默认的 cdn.jsdelivr.net 对 /gh/ 会 301 到
+    # raw.githubusercontent.com —— 而 raw 正是「国内常被污染」的那条，绕一圈还是打不开。
     raw_urls = re.findall(
         r"raw\.githubusercontent\.com/mjy378283319/bambu-spool/[^/\s]+/([^\s`)\"']+)", readme)
     cdn_urls = re.findall(
-        r"cdn\.jsdelivr\.net/gh/mjy378283319/bambu-spool@[^/\s]+/([^\s`)\"']+)", readme)
+        r"gcore\.jsdelivr\.net/gh/mjy378283319/bambu-spool@[^/\s]+/([^\s`)\"']+)", readme)
     icon_urls = raw_urls + cdn_urls
     check("README 至少给出一个图标直链", len(icon_urls) >= 1, str(icon_urls))
-    check("raw 与 jsDelivr 两种直链都给了（用户网络可能只通一条）",
+    check("raw 与 gcore-jsDelivr 两种直链都给了（用户网络可能只通一条）",
           len(raw_urls) >= 1 and len(cdn_urls) >= 1,
           f"raw={len(raw_urls)} cdn={len(cdn_urls)}")
     for rel in icon_urls:
@@ -198,8 +200,10 @@ def main() -> int:
         target = ROOT / rel
         check(f"直链指向的文件存在：{rel}",
               target.is_file(), f"{target.stat().st_size} B" if target.is_file() else "缺失")
-    check("首选直链是 jsDelivr CDN（raw 域名国内常被污染）",
-          "cdn.jsdelivr.net/gh/mjy378283319/bambu-spool" in readme)
+    check("首选直链是 gcore.jsdelivr CDN（cdn 节点会 301 到被污染的 raw）",
+          "gcore.jsdelivr.net/gh/mjy378283319/bambu-spool" in readme)
+    check("没有残留 cdn.jsdelivr.net 直链（国内打不开）",
+          "cdn.jsdelivr.net/gh/mjy378283319/bambu-spool" not in readme)
 
     section("六、Dockerfile / .dockerignore 会把图标带进镜像")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

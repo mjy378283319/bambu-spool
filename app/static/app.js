@@ -279,6 +279,28 @@ function openModal(title, bodyHtml, actionsHtml, wide = false) {
  *  `#view=<新视图>` 的链接会被当成无效 hash 而掉回仪表盘。 */
 const VIEW_NAMES = ["dashboard", "spools", "summary", "jobs", "settings"];
 
+/** 上次所在视图的本地存储键。
+ *
+ *  为什么光有 hash 不够（用户报的「每次刷新都回到仪表盘」）：
+ *  hash 只覆盖「地址栏里确实带着 #view=xxx」这一种情形。实际按 F5 时
+ *  地址栏常常是**干净的** —— 从书签进的、手打网址进的、浏览器把 hash 吞了、
+ *  或者用了会清掉 hash 的跳转。那时 applyHashRoute(initial) 落到 else 分支
+ *  直接 switchView("dashboard")，界面就被拽回仪表盘了。
+ *  所以除了 hash，再往 localStorage 里记一份兜底。 */
+const VIEW_STORE_KEY = "bambu.lastView";
+
+function rememberView(name) {
+  try { localStorage.setItem(VIEW_STORE_KEY, name); } catch (e) { /* 隐私模式等，忽略 */ }
+}
+
+/** 读回上次所在视图；不在白名单里（老版本残留 / 手改过）就当没有。 */
+function lastRememberedView() {
+  try {
+    const v = localStorage.getItem(VIEW_STORE_KEY);
+    return VIEW_NAMES.includes(v) ? v : "";
+  } catch (e) { return ""; }
+}
+
 /** 把当前视图记进地址栏，刷新后能回到原页面。
  *
  *  用 replaceState 而不是 location.hash =：后者会触发 hashchange，
@@ -290,6 +312,9 @@ const VIEW_NAMES = ["dashboard", "spools", "summary", "jobs", "settings"];
  *  那盘料上（弹窗关掉时由 closeModal 换成 `#view=<当前视图>`）。
  */
 function syncHashView(name, force) {
+  // 记本地兜底要在「深链不覆盖」判断**之前**：扫码进来停在料盘详情时，
+  // 用户按 F5 期望的是回到料盘库存页，而不是被深链判空后掉回仪表盘。
+  rememberView(name);
   const hash = location.hash.slice(1);
   const isDeepLink = hash.startsWith("spool=") || hash.startsWith("bind=");
   if (isDeepLink && !force) return;
@@ -2344,6 +2369,7 @@ function renderJobs() {
       <th style="width:96px;text-align:right">耗材费</th>
       <th style="width:84px">状态</th>
       <th style="width:104px">数据来源</th>
+      <th style="width:168px">操作</th>
     </tr></thead>
     <tbody>${slice.map((job) => `
       <tr class="clickable" onclick="openJobDetail(${job.id})">
@@ -2358,8 +2384,47 @@ function renderJobs() {
         <td data-label="状态">${jobStatusTag(job.status, job.pending)}</td>
         <td class="small muted" data-label="数据来源">${job.source === "cloud_task" ? "云端任务记录"
           : job.source === "manual" ? "手动录入" : "无数据"}</td>
+        <td class="cell-actions" data-label="操作">
+          <div class="row-actions main">${jobRowActions(job)}</div>
+        </td>
       </tr>`).join("")}</tbody></table>`;
   renderTableFoot("jobFooter", "", S.jobs.length, page, size, "job");
+}
+
+/** 列表行内的「跳转耗材 / 更改料盘」。
+ *
+ *  以前这两个动作只在任务详情弹窗里，想纠正绑错的料盘得先点开任务、
+ *  再在弹窗里找那一行 —— 列表上直接给一份，少一层点击。
+ *
+ *  一份任务可能占多个槽位（多色打印），所以「查看料盘」在多个料盘时
+ *  先进详情让用户挑，只有一个时才直接跳 —— 不这么分的话，点了之后
+ *  跳到哪一盘是随机的，用户会觉得「点错了」。
+ *  两个按钮都要 stopPropagation：行本身有 onclick 打开详情，
+ *  不拦的话会一边跳转一边把详情弹窗顶上来。 */
+function jobRowActions(job) {
+  const list = (job.filaments || []).filter((f) => Number(f.spool_id) > 0);
+  const usageList = (job.filaments || []).filter((f) => Number(f.usage_id) > 0);
+  const n = list.length;
+  if (!n && !usageList.length) {
+    return `<span class="tiny muted" title="这次任务没有绑定料盘，也没有扣重流水">—</span>`;
+  }
+  const single = n === 1 ? Number(list[0].spool_id) : 0;
+  const spoolBtn = n
+    ? `<button class="sm" onclick="event.stopPropagation();${single
+        ? `jumpToSpoolFromJob(${single})`
+        : `openJobDetail(${job.id})`}"
+         title="${single ? "打开这盘料的详情" : `这次任务绑了 ${n} 盘料，点开详情挑一盘`}">
+         ${ICO.spool} 耗材${n > 1 ? ` (${n})` : ""}</button>`
+    : `<button class="sm" disabled title="这次任务没有绑定料盘">${ICO.spool} 耗材</button>`;
+  // 改扣需要扣重流水；多盘时同样先进详情挑（那里每行一个「更改料盘」）
+  const rebindBtn = usageList.length === 1
+    ? `<button class="sm" onclick="event.stopPropagation();openRebindUsage(${Number(usageList[0].usage_id)}, ${Number(usageList[0].spool_id) || 0})"
+         title="把这次用量改扣到另一盘料">${ICO.link} 绑定</button>`
+    : usageList.length > 1
+      ? `<button class="sm" onclick="event.stopPropagation();openJobDetail(${job.id})"
+           title="这次任务有 ${usageList.length} 条扣重流水，点开详情逐条改">${ICO.link} 绑定 (${usageList.length})</button>`
+      : `<button class="sm" disabled title="这次用量没有扣重流水，改不了">${ICO.link} 绑定</button>`;
+  return spoolBtn + rebindBtn;
 }
 
 function jobGoPage(page) {
@@ -2767,6 +2832,63 @@ function renderSummaryOverview() {
     </div>`;
 }
 
+/* ── 品牌分布（按盘数排序，点品牌名钻取） ─────────────────
+ *  和「库存数据概览」并排站，一起构成汇总页的第一屏。
+ *  每行给三件事：盘数、占比条、这些盘的平均单价 —— 均价拿不到就明说「未登记价格」，
+ *  不留空白（用户明确要求：不要留空）。 */
+const BRAND_BAR_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886"];
+
+function renderBrandDist() {
+  const host = document.getElementById("brandDist");
+  if (!host) return;
+  const all = S.summarySpools || [];
+  const filter = S.summaryFilter;
+  const spools = filter ? all.filter((s) => (s.material || "未填写") === filter) : all;
+  const counter = document.getElementById("brandDistCount");
+
+  if (!spools.length) {
+    if (counter) counter.textContent = "";
+    host.innerHTML = `<div class="empty-state">还没有在库料盘。</div>`;
+    return;
+  }
+
+  const byBrand = new Map();
+  spools.forEach((s) => {
+    const name = s.brand || "未填写";
+    if (!byBrand.has(name)) byBrand.set(name, []);
+    byBrand.get(name).push(s);
+  });
+  const rows = [...byBrand.entries()]
+    .map(([name, list]) => {
+      const prices = list.map((s) => s.price).filter((p) => p != null && p !== "" && Number(p) > 0);
+      const avg = prices.length ? prices.reduce((a, b) => a + Number(b), 0) / prices.length : null;
+      return { name, count: list.length, avg, priced: prices.length };
+    })
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh"));
+
+  const total = spools.length;
+  const max = rows[0] ? rows[0].count : 1;
+  if (counter) counter.textContent = `${rows.length} 个品牌 · 共 ${total} 盘`;
+
+  host.innerHTML = rows.map((r, i) => {
+    const pct = (r.count / total) * 100;
+    const color = i < BRAND_BAR_COLORS.length ? BRAND_BAR_COLORS[i] : "#98a2b3";
+    const priceText = r.avg == null
+      ? `<span class="bd-noprice">${r.count} 盘均未登记价格</span>`
+      : `每盘均价 <b>¥${r.avg.toFixed(2)}</b>${
+          r.priced < r.count ? `<span class="bd-tiny">（${r.priced}/${r.count} 盘有价）</span>` : ""}`;
+    return `<button class="bd-row" data-value="${esc(r.name)}"
+        onclick="jumpToSpoolsByField('brand', this.dataset.value)"
+        title="到料盘库存里看「${esc(r.name)}」这 ${r.count} 盘">
+      <span class="bd-name">${esc(r.name)}</span>
+      <span class="bd-count"><b>${r.count}</b><span class="bd-tiny">${pct.toFixed(0)}%</span></span>
+      <span class="bd-track"><span class="bd-fill"
+        style="width:${Math.max(2, (r.count / max) * 100)}%;background:${color}"></span></span>
+      <span class="bd-sub">${priceText}</span>
+    </button>`;
+  }).join("");
+}
+
 /* ── 价格区间分布 ──────────────────────────────────────── */
 function renderPriceDist() {
   const host = document.getElementById("priceDist");
@@ -2959,6 +3081,7 @@ function renderSummary() {
 
   // 概览图与价格分布：数据来自在库料盘清单（本地算），点筛选是即时的
   renderSummaryOverview();
+  renderBrandDist();
   renderPriceDist();
 }
 
@@ -3904,7 +4027,12 @@ async function applyHashRoute(options) {
       return;
     }
   }
-  if (opts.initial) switchView("dashboard");
+  if (opts.initial) {
+    // 地址栏没有 hash（按 F5、从书签进、手打网址进都长这样）时，
+    // 落到上次所在的视图，而不是无脑回仪表盘 —— 这就是用户报的那个
+    // 「每次刷新都回到仪表盘」。没记录过才用仪表盘（首次安装的默认页）。
+    switchView(lastRememberedView() || "dashboard");
+  }
 }
 
 /** 登录成功后进入应用：拉取数据并建立实时连接。 */
@@ -3968,11 +4096,15 @@ window.panelDebug = {
   summaryMaterials, donutChart, allSlotEntries, slotKey,
   // 下拉里的料盘候选：余量缺失别显示成 0 g、归档的除非正绑着否则不进候选
   spoolOptionHtml, bindCandidates,
-  // 视图路由：刷新要能回到原页面，靠的就是把视图名写进 hash
-  VIEW_NAMES, syncHashView,
+  // 视图路由：刷新要能回到原页面，靠的就是把视图名写进 hash + localStorage 兜底
+  // （地址栏没 hash 时，只有 localStorage 那份能救回来）
+  VIEW_NAMES, syncHashView, VIEW_STORE_KEY, lastRememberedView, rememberView,
+  applyHashRoute,
   // 汇总页钻取与均价：分组口径（norm）必须与后端 _group_summary 一致，
   // 均价的分母必须是「登记过价的盘数」，错了就是跳过去空列表 / 均价被拉低
   SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable,
+  // 品牌分布卡与打印记录行内操作（跳转料盘 / 更改料盘）
+  renderBrandDist, BRAND_BAR_COLORS, jobRowActions,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

@@ -54,16 +54,25 @@ check("没有相对路径的图片（相对路径会被解析到常被污染的 
 
 # 图片 src 必须是 https 且走 jsDelivr。raw.githubusercontent.com 只在「容器图标」那节
 # 作为备选写在代码块里，不该出现在 markdown 图片语法里。
+#
+# ⚠️ 域名必须是 **gcore**.jsdelivr.net。默认的 cdn.jsdelivr.net 对 `/gh/` 路径会 301 到
+# raw.githubusercontent.com，国内 DNS 污染下那一步就断了 —— 现象是「README 图片全打不开」，
+# 而 curl 看 cdn 那条只显示 301，很容易误判成「链接写错了」。
+# gcore 节点直接回源，实测 200 / image/png。别改回 cdn。
+CDN_HOST = "gcore.jsdelivr.net"
 check("图片全是 https 绝对地址", all(u.startswith("https://") for u in images))
-cdn = [u for u in images if u.startswith(f"https://cdn.jsdelivr.net/gh/{REPO}@")]
-check("图片全部走 jsDelivr CDN", len(cdn) == len(images), f"{len(cdn)}/{len(images)}")
+cdn = [u for u in images if u.startswith(f"https://{CDN_HOST}/gh/{REPO}@")]
+check(f"图片全部走 {CDN_HOST} CDN", len(cdn) == len(images), f"{len(cdn)}/{len(images)}")
+old_cdn = [u for u in images if u.startswith("https://cdn.jsdelivr.net/")]
+check("没有用会 301 到 raw 域名的 cdn.jsdelivr.net（国内打不开）",
+      not old_cdn, str(old_cdn))
 raw_src = [u for u in images if "raw.githubusercontent.com" in u]
 check("图片 src 里没有 raw.githubusercontent.com", not raw_src, str(raw_src))
 
 # 反解出仓库路径，逐个确认文件真的存在——链接写错和文件不存在是一回事
 missing = []
 for url in images:
-    m = re.search(r"cdn\.jsdelivr\.net/gh/" + re.escape(REPO) + r"@[^/]+/([^?\s]+)", url)
+    m = re.search(re.escape(CDN_HOST) + r"/gh/" + re.escape(REPO) + r"@[^/]+/([^?\s]+)", url)
     rel = m.group(1) if m else None
     if not rel or not os.path.isfile(os.path.join(ROOT, rel)):
         missing.append(rel or url)
@@ -173,10 +182,10 @@ check("tests/ 下每个测试文件都在 README 里出现过", not unlisted, st
 # ── 六、别再胀回去 ────────────────────────────────────────────────
 print("\n[6] 篇幅")
 lines = md.splitlines()
-# 精简前是 671 行 / 21.7k 字符，里面大半是「为什么这么做」的铺陈。
-# 这两条上界就是防它再胀回去——把旧版拷回来必然红。
-check("README 不超过 480 行", len(lines) <= 480, f"{len(lines)} 行")
-check("README 不超过 17000 字符", len(md) <= 17000, f"{len(md)} 字符")
+# 历史上是 671 行 / 21.7k 字符，大半是「为什么这么做」的铺陈，2026-09-16 精简到
+# 约 400 行 / 15k 字符。这两条上界就是防它再胀回去——把旧版拷回来必然红。
+check("README 不超过 440 行", len(lines) <= 440, f"{len(lines)} 行")
+check("README 不超过 16000 字符", len(md) <= 16000, f"{len(md)} 字符")
 check("没有 CRLF 换行（.gitattributes 要求 eol=lf）", "\r\n" not in md)
 
 print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")

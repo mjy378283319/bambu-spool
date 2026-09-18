@@ -151,8 +151,9 @@ const {
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
   summaryMaterials, donutChart, allSlotEntries,
   spoolOptionHtml, bindCandidates,
-  VIEW_NAMES, syncHashView,
-  SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable,
+  VIEW_NAMES, syncHashView, VIEW_STORE_KEY, lastRememberedView, rememberView, applyHashRoute,
+  SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable, renderBrandDist,
+  jobRowActions,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -739,8 +740,29 @@ check("写地址用 replaceState 而不是 location.hash =（后者触发 hashch
 check("applyHashRoute 认识 #view=<name>", /hash\.startsWith\("view="\)/.test(appSrc));
 check("#view= 的名字要过白名单（不能拿任意字符串去 switchView）",
   /if \(VIEW_NAMES\.includes\(name\)\) \{ switchView\(name\); return; \}/.test(appSrc));
-check("启动时 hash 为空仍落到仪表盘（首次打开的默认页不变）",
-  /if \(opts\.initial\) switchView\("dashboard"\);/.test(appSrc));
+// ⚠️ 用**运行时**行为断言，不要去匹配源码里的多行块（上一版的正则就是这么假红的）。
+// 用户报的 bug 是「每次刷新都回仪表盘」：地址栏干净时（按 F5 就是这样），
+// 应该回上次那个视图；从没记录过才落仪表盘。
+sandbox.location.hash = "";
+localStorageStub.clear();
+sandbox.switchView("dashboard");
+sandbox.location.reload = () => {};
+await sandbox.applyHashRoute({ initial: true });
+check("首次打开（localStorage 也没有记录）落仪表盘",
+  state.view === "dashboard", JSON.stringify(state.view));
+
+sandbox.location.hash = "";
+sandbox.switchView("jobs");
+await sandbox.applyHashRoute({ initial: true });
+check("hash 为空但记过视图时，启动落回那个视图（不是仪表盘）",
+  state.view === "jobs", JSON.stringify(state.view));
+
+sandbox.location.hash = "";
+localStorageStub.clear();
+await sandbox.applyHashRoute({ initial: true });
+check("记录被清掉后启动又回到仪表盘（兜底仍在）",
+  state.view === "dashboard", JSON.stringify(state.view));
+sandbox.switchView("dashboard");
 check("关掉深链弹窗会把 hash 换成 #view=（否则随手刷新又把它弹回来）",
   /function closeModal\(\)[\s\S]{0,400}?syncHashView\(S\.view \|\| "dashboard", true\)/.test(appSrc));
 
@@ -929,6 +951,135 @@ check("没有扣重流水时不弹改绑窗（弹了也改不动）",
   sandbox.document.getElementById("modalHost").innerHTML.slice(0, 120));
 sandbox.closeModal();
 state.spools = [];
+
+// ── 18. 打印记录列表行内的「耗材 / 绑定」两个键 ──────────────────
+// 用户要的是「列表里直接点」，不是「先进详情再点」。最容易错的是：
+// ① 一个任务绑了多盘时会以为是死键；② 没有流水时按钮还能点（点了弹不出东西）。
+console.log("");
+console.log("── 打印记录列表行内操作 ──");
+
+const oneSpoolJob = {
+  id: 7,
+  filaments: [{ spool_id: 12, usage_id: 31, spool_name: "A 盘" }],
+};
+const html1 = jobRowActions(oneSpoolJob);
+check("只绑一盘时给「跳转料盘」直接跳那一盘",
+  /jumpToSpoolFromJob\(12\)/.test(html1), html1);
+check("只绑一盘时也给了「更改料盘」",
+  /openRebindUsage\(31,\s*12\)/.test(html1), html1);
+check("两个键都在，不是只剩一个", (html1.match(/<button/g) || []).length === 2, html1);
+
+const multiJob = {
+  id: 8,
+  filaments: [
+    { spool_id: 12, usage_id: 31, spool_name: "A 盘" },
+    { spool_id: 13, usage_id: 32, spool_name: "B 盘" },
+  ],
+};
+const html2 = jobRowActions(multiJob);
+check("绑了多盘时按钮改成「打开详情挑一盘」（不许闷掉）",
+  /openJobDetail\(8\)/.test(html2), html2);
+check("多盘时按钮上带盘数提示", /耗材\s*\(2\)|耗材 \(2\)/.test(html2), html2);
+check("多盘时「绑定」也带流水条数", /绑定 \(2\)/.test(html2), html2);
+
+// 绑了料但**没有扣重流水**（历史数据 / 手动绑定）：跳料盘能用，改扣不能用。
+// 这才是「一个键禁用、另一个可用」的真实场景 —— 上一版我拿 spool_id=0 去试，
+// 那种明细会直接落到「整格占位」分支，测的是另一条路。
+const noUsageJob = { id: 11, filaments: [{ spool_id: 12, usage_id: 0, spool_name: "A 盘" }] };
+const html5 = jobRowActions(noUsageJob);
+check("有绑定没流水时：跳料盘仍可用（料盘是存在的）",
+  /jumpToSpoolFromJob\(12\)/.test(html5), html5);
+check("有绑定没流水时：改扣按钮是禁用态",
+  /<button class="sm" disabled[^>]*>(?:(?!<\/button>)[\s\S])*绑定/.test(html5), html5);
+
+const noFilJob = { id: 10, filaments: [] };
+const html4 = jobRowActions(noFilJob);
+check("没有明细时整格显示占位符，不是空白",
+  html4.trim().length > 0 && !/<button/.test(html4), JSON.stringify(html4));
+// 点行内按钮不该顺带把行本身的事件也触发了（否则会连着进详情）
+check("行内按钮都 stopPropagation（不然点一下会连进详情）",
+  (html1.match(/stopPropagation/g) || []).length >= 2, html1);
+
+// ── 19. 品牌分布卡 ──────────────────────────────────────────────
+// 用户截图里的「品牌分布」。三条底线：盘数要对、不能有空格子、点得动。
+console.log("");
+console.log("── 汇总页品牌分布 ──");
+
+const bdHost = sandbox.document.getElementById("brandDist");
+state.summarySpools = [
+  { brand: "Polymaker", material: "PLA", price: 100 },
+  { brand: "Polymaker", material: "PLA", price: 120 },
+  { brand: "Polymaker", material: "PLA", price: 80 },   // 三盘，稳居第一
+  { brand: "拓竹", material: "PLA", price: 90 },
+  { brand: "拓竹", material: "PETG", price: null },     // 没登记价
+  { brand: "大简", material: "PETG", price: 0 },        // 0 也不算有价
+];
+renderBrandDist();
+const bdHtml = bdHost.innerHTML;
+check("品牌按盘数排序（多的在前）",
+  bdHtml.indexOf("Polymaker") < bdHtml.indexOf("拓竹")
+  && bdHtml.indexOf("拓竹") < bdHtml.indexOf("大简"), bdHtml.slice(0, 200));
+check("三个品牌都画出来了",
+  bdHtml.includes("Polymaker") && bdHtml.includes("拓竹") && bdHtml.includes("大简"), bdHtml.slice(0, 200));
+check("点品牌行调 jumpToSpoolsByField('brand', …)",
+  /jumpToSpoolsByField\('brand'/.test(bdHtml), bdHtml.slice(0, 300));
+check("品牌名走 data-value（不是拼进 onclick 字符串里）",
+  /data-value="Polymaker"/.test(bdHtml), bdHtml.slice(0, 300));
+
+// 均价：Polymaker 三盘 100/120/80 -> 100；分母只算登记过的盘
+const bdText = bdHtml.replace(/<[^>]+>/g, " ");
+check("均价按「登记过价的盘」算（(100+120+80)/3 = 100）",
+  /100\.00/.test(bdText), bdText.slice(0, 400));
+check("一盘都没登记价的品牌明说未登记，不留空",
+  /未登记价格/.test(bdText), bdText.slice(0, 400));
+// 「不留空」是用户的明确要求：每个 bd-sub 都得有字
+const subs = bdHtml.match(/<span class="bd-sub">[\s\S]*?<\/span>/g) || [];
+check("每一行的价格说明位置都有内容",
+  subs.length === 3 && subs.every((s) => s.replace(/<[^>]+>/g, "").trim().length > 0),
+  JSON.stringify(subs));
+
+// 筛选到某材料时，品牌分布要跟着只剩那一种材料
+state.summaryFilter = "PETG";
+renderBrandDist();
+const bdFiltered = bdHost.innerHTML;
+check("筛选材料后品牌分布只剩该材料涉及的品牌",
+  !bdFiltered.includes("Polymaker") && bdFiltered.includes("拓竹") && bdFiltered.includes("大简"),
+  bdFiltered.slice(0, 200));
+state.summaryFilter = "";
+state.summarySpools = [];
+renderBrandDist();
+check("没有料盘时品牌分布给空态而不是空白",
+  /empty-state/.test(bdHost.innerHTML), bdHost.innerHTML.slice(0, 160));
+
+const counter = sandbox.document.getElementById("brandDistCount");
+state.summarySpools = [
+  { brand: "A", price: 1 }, { brand: "A", price: 1 }, { brand: "B", price: 1 },
+];
+renderBrandDist();
+check("右上角计数写了品牌数与总盘数",
+  /2\s*个品牌/.test(counter.textContent) && /共\s*3\s*盘/.test(counter.textContent),
+  JSON.stringify(counter.textContent));
+state.summarySpools = [];
+
+// ── 20. 刷新后留在原页面（localStorage 兜底） ────────────────────
+console.log("");
+console.log("── 刷新后停在原视图 ──");
+localStorageStub.clear();
+check("没记录过时 lastRememberedView() 返回空串（交给 dashboard 兜底）",
+  lastRememberedView() === "", JSON.stringify(lastRememberedView()));
+rememberView("jobs");
+check("记住之后读得回来", lastRememberedView() === "jobs", JSON.stringify(lastRememberedView()));
+// 手写的脏值（老版本、或用户自己改过）不许放行，否则 refresh 会掉进一个不存在的视图
+localStorageStub.setItem(VIEW_STORE_KEY, "not-a-view");
+check("存了非法视图名时当作没存（不会跳到空白页）",
+  lastRememberedView() === "", JSON.stringify(lastRememberedView()));
+check("VIEW_STORE_KEY 是稳定的（改了会丢老用户的记录）",
+  VIEW_STORE_KEY === "bambu.lastView", VIEW_STORE_KEY);
+// 深链（#spool= / #bind=）不该把 localStorage 记录冲掉：切视图时就要记下
+localStorageStub.clear();
+syncHashView("summary");
+check("切视图会把视图名写进 localStorage",
+  lastRememberedView() === "summary", JSON.stringify(lastRememberedView()));
 
 // ── 打印成果图（cover） ─────────────────────────────────────────
 // 这一段专门盯「下拉空着也能通过」那类假断言：断言不能只看「有 img」，
