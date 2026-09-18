@@ -414,6 +414,16 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     const st = LABEL.ble;
     if (st.char && st.device && st.device.gatt.connected) return st;
 
+    // 之前连过的设备先尝试静默复连（不弹选择框）。打印机重启过、或连接被
+    // 手机汉码 App 占走后复连会失败，这时清掉状态、退回正常的设备选择流程。
+    if (st.device) {
+      try {
+        return await bleSetup(st.device);
+      } catch (err) {
+        bleDisconnect();
+      }
+    }
+
     const opts = showAll
       ? { acceptAllDevices: true, optionalServices: BLE_SERVICES }
       : {
@@ -427,7 +437,18 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         };
 
     const device = await navigator.bluetooth.requestDevice(opts);
-    const server = await device.gatt.connect();
+    try {
+      return await bleSetup(device);
+    } catch (err) {
+      bleDisconnect();
+      throw err;
+    }
+  }
+
+  /** 连上 GATT、枚举服务/特征、挑写通道并挂断连监听。 */
+  async function bleSetup(device) {
+    const st = LABEL.ble;
+    const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
     const services = await server.getPrimaryServices();
 
     const seen = [];
@@ -461,17 +482,30 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     }
     if (!writeChar) writeChar = allWrites[0] || null;
 
+    if (!writeChar) {
+      throw new Error("连上了 " + (device.name || "设备") + "，但没找到可写特征。请到「诊断」里看服务列表并反馈。");
+    }
+
     st.device = device;
     st.server = server;
     st.char = writeChar;
     st.notify = notifyChar;
-    st.chunk = writeChar && writeChar.properties.writeWithoutResponse ? 182 : 64;
+    st.chunk = writeChar.properties.writeWithoutResponse ? 182 : 64;
     st.services = seen;
     st.writes = allWrites.map((c) => c.uuid);
     st.notifyUuid = notifyChar ? notifyChar.uuid : "";
 
-    if (!writeChar) {
-      throw new Error("连上了 " + (device.name || "设备") + "，但没找到可写特征。请到「诊断」里看服务列表并反馈。");
+    // 打印机那头掉线（关机/走远/被抢连）要立刻清状态：不清的话界面还挂着
+    // 「已连接」，后续写入全发进黑洞 —— 「上次连上过、之后怎么都打不出，
+    // 重启电脑才好」就是这种僵尸连接。
+    if (typeof device.addEventListener === "function") {
+      device.addEventListener("gattserverdisconnected", () => {
+        if (LABEL.ble.device === device) {
+          bleDisconnect();
+          renderBlePanel();
+          toast("打印机蓝牙已断开，点「连接打印机」重连", "err");
+        }
+      });
     }
     return st;
   }
@@ -479,7 +513,11 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
   async function bleWriteAll(bytes, onProgress) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
-    const useNoResp = !!st.char.properties.writeWithoutResponse;
+    // 优先「带应答写入」（GATT Write）：每个包都有链路层确认，通道堵了会立刻
+    // 报错，能触发下面的减包重发；之前的「无应答写入」没有流控，Windows 蓝牙栈
+    // 发送缓冲一满就静默丢包 —— 界面显示已全部发出、打印机却缺斤少两甚至一张
+    // 都没收全，正是「发送成功却打不出」的元凶。只有特征不支持应答写入时才退回。
+    const useNoResp = !st.char.properties.write;
     let size = st.chunk;
     let sent = 0;
     const parts = [];
@@ -490,7 +528,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         if (useNoResp) await st.char.writeValueWithoutResponse(chunk);
         else await st.char.writeValue(chunk);
       } catch (err) {
-        // 多半是单包超了链路 MTU，减半重试
+        // 多半是单包超过链路 MTU（或打印缓冲满），减半重试
         if (size > 24) {
           size = Math.max(24, Math.floor(size / 2));
           st.chunk = size;
@@ -507,23 +545,33 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     return parts;
   }
 
-  async function bleSendRaw(bytes, label) {
+  /** 订阅通知抓回执：执行 action，结束后再等 settle 毫秒收尾报。
+   *  返回收到的十六进制报文数组；设备没有通知特征时返回空数组。 */
+  async function bleCaptureReceipts(action, settle) {
     const st = LABEL.ble;
-    if (!st.char) throw new Error("蓝牙未连接");
     const notices = [];
+    let handler = null;
     if (st.notify) {
-      st.notify.addEventListener("characteristicvaluechanged", function onEvt(evt) {
-        notices.push(bytesToHex(new Uint8Array(evt.target.value.buffer)));
-        st.notify.removeEventListener("characteristicvaluechanged", onEvt);
-      });
+      handler = (evt) => notices.push(bytesToHex(new Uint8Array(evt.target.value.buffer)));
+      st.notify.addEventListener("characteristicvaluechanged", handler);
       try {
         await st.notify.startNotifications();
       } catch (err) {
-        notices.push("（订阅通知失败：" + err.message + "）");
+        /* 已订阅过等情况，忽略 */
       }
     }
-    await bleWriteAll(bytes);
-    if (st.notify) await sleep(900);
+    await action();
+    if (st.notify) await sleep(settle == null ? 900 : settle);
+    if (st.notify && handler) {
+      try { st.notify.stopNotifications(); } catch (err) { /* 就算了吧 */ }
+      st.notify.removeEventListener("characteristicvaluechanged", handler);
+    }
+    return notices;
+  }
+
+  async function bleSendRaw(bytes, label) {
+    if (!LABEL.ble.char) throw new Error("蓝牙未连接");
+    const notices = await bleCaptureReceipts(() => bleWriteAll(bytes));
     LABEL.probeLog.unshift({
       at: new Date().toLocaleTimeString("zh-CN"),
       what: label || "原始指令",
@@ -619,13 +667,25 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       const raster = packRaster(canvas, cfg.density);
       const job = buildEscPosJob(raster, cfg);
       const started = Date.now();
-      const notes = await bleWriteAll(job, (sent, total) => {
-        labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-      });
+      // 打印也订阅通知抓回执：打印机收到/拒收数据多半会说一声，
+      // 「发送了却没打」时回执（或没有回执）就是第一手线索。
+      const notes = await bleCaptureReceipts(() =>
+        bleWriteAll(job, (sent, total) => {
+          labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
+        })
+      );
       const secs = ((Date.now() - started) / 1000).toFixed(1);
+      const mode = LABEL.ble.char && LABEL.ble.char.properties.write ? "应答写入" : "无应答写入";
+      LABEL.probeLog.unshift({
+        at: new Date().toLocaleTimeString("zh-CN"),
+        what: "打印作业（" + mode + "）",
+        sent: job.length + " 字节 · 分包 " + LABEL.ble.chunk,
+        recv: notes.length ? notes.join(" | ") : "无回执",
+      });
+      LABEL.probeLog = LABEL.probeLog.slice(0, 8);
       labelProgress(
-        "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节" +
-        (notes.length ? "；" + notes.join("；") : "")
+        "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节（" + mode + "）" +
+        (notes.length ? "；回执 " + notes.join(" | ") : "；无回执")
       );
       toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
       renderBlePanel();
@@ -757,7 +817,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "</div>" +
       (connected
         ? '<div class="small muted" style="margin-top:6px">写特征 <code>' + esc(st.char.uuid) +
-          "</code> · 分包 " + st.chunk + " 字节 · 服务 " + st.services.length + " 个</div>"
+          "</code> · " + (st.char.properties.write ? "应答写入" : "无应答写入") +
+          " · 分包 " + st.chunk + " 字节 · 服务 " + st.services.length + " 个</div>"
         : "") +
       '<div class="label-ble-tests">' +
         '<button class="sm" onclick="labelBleProbe()">查询状态（不耗纸）</button>' +
@@ -849,9 +910,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "多张打印的走纸默认「按间隙定位」：每张位图后发 <code>FF（0x0C）</code>，机器按间隙学习结果" +
       "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
       "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
-      "要是打不出内容，先点「查询状态」看有没有回执：有回执说明链路通，可调浓度或换尺寸重试；" +
-      "完全没回执则是指令集不匹配，「收发记录」里能看到实际发出的字节，" +
-      "也可以在那里用「原始指令」手工试协议。</p>";
+      "写入默认走「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完。" +
+      "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
+      "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
+      "② 打印机开关机一次再连（清掉它那头僵死的旧连接，比重启电脑快）；" +
+      "③ 点「查询状态」看「收发记录」：有回执说明链路通，可调浓度或换尺寸重试；" +
+      "完全没回执则是指令集不匹配，可以用「原始指令」手工试协议。</p>";
 
     openModal(
       "标签打印",
