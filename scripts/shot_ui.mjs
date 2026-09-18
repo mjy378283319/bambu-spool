@@ -1409,6 +1409,123 @@ async function main() {
     `克隆 ${clone.remaining} vs 满盘 ${clone.src.initial}`);
   await cdp.evaluate(sessionId, `closeModal()`);
 
+  /* ── 转移消耗：目标料盘改成「能打字搜索」（用户原话「要能输入，打关键字就出来」） ──
+     在真浏览器里量的是**布局**：候选列表必须自己滚、不能把按钮顶出弹窗；
+     以及选中值到底落在哪 —— 这是「把 select 换成搜索框」最容易断的那根线。 */
+  const movePick = await cdp.evaluate(sessionId, `(async () => {
+    const P = window.panelDebug;
+    const jobs = (P.state.jobs || []);
+    let found = null;
+    for (const j of jobs) {
+      for (const f of (j.filaments || [])) {
+        if (f.usage_id && f.spool_id) { found = { job: j.id, usage: f.usage_id, spool: f.spool_id }; break; }
+      }
+      if (found) break;
+    }
+    if (!found) return { skipped: "mock 里没有带扣重流水的任务" };
+    P.state.moveTargetId = null;
+    openMoveDialog(found.usage, found.spool, -7.1);
+    const list = document.getElementById("moveTargetList");
+    const search = document.getElementById("moveTargetSearch");
+    const modal = document.querySelector("#modalHost .modal");
+    const items = () => [...document.querySelectorAll("#moveTargetList .pick-item")];
+    const before = items().length;
+
+    // 打字过滤：拿第一个候选的名字里挑一个词来搜自己
+    const firstName = items().length ? items()[0].innerText.trim() : "";
+    const kw = (firstName.match(/[A-Za-z]+/) || [""])[0] || firstName.slice(0, 2);
+    search.value = kw;
+    onMoveTargetInput();
+    const after = items().length;
+
+    // 点第一个候选 → 选中值必须落到 state 上
+    let picked = null;
+    if (items().length) {
+      const id = Number(items()[0].dataset.id);
+      items()[0].click();
+      picked = { id, state: P.state.moveTargetId, input: search.value };
+    }
+
+    // 布局：候选列表自己滚，弹窗底部的按钮还在视口里
+    const btnRow = [...document.querySelectorAll("#modalHost button")]
+      .filter((b) => /取消|确认转移/.test(b.textContent || ""));
+    const lastBtn = btnRow[btnRow.length - 1];
+    const lb = lastBtn ? lastBtn.getBoundingClientRect() : null;
+    return {
+      opened: true, usage: found.usage, before, after, kw, picked,
+      listScrolls: list ? list.scrollHeight > list.clientHeight + 1 : null,
+      listMaxH: list ? getComputedStyle(list).maxHeight : "",
+      btnBelowFold: lb ? lb.bottom > window.innerHeight : null,
+      modalBelowFold: modal ? modal.getBoundingClientRect().bottom > window.innerHeight + 2 : null,
+      pickedLine: (document.getElementById("moveTargetPicked") || {}).innerText || "",
+    };
+  })()`);
+  console.log("转移消耗目标料盘：", JSON.stringify(movePick).slice(0, 400));
+  if (!movePick.skipped) {
+    check("「目标料盘」是个可以打字的输入框（用户要的就是这个）",
+      movePick.opened === true, JSON.stringify(movePick));
+    check("打开时候选全列出来", movePick.before > 0, `候选=${movePick.before}`);
+    check("打字后候选被收窄（不再等同于全部）",
+      movePick.after < movePick.before, `打「${movePick.kw}」: ${movePick.before} → ${movePick.after}`);
+    check("点选后选中值落到 state.moveTargetId（不是只改了输入框文字）",
+      movePick.picked && movePick.picked.state === movePick.picked.id,
+      JSON.stringify(movePick.picked));
+    check("点选后输入框回填成料盘名", movePick.picked && movePick.picked.input.length > 0,
+      JSON.stringify(movePick.picked));
+    check("候选列表有自己的滚动条（几百盘时不会把弹窗撑破）",
+      movePick.listMaxH && movePick.listMaxH !== "none", `max-height=${movePick.listMaxH}`);
+    check("「取消 / 确认转移」两个按钮不被顶出视口",
+      movePick.btnBelowFold === false && movePick.modalBelowFold === false,
+      `btnBelowFold=${movePick.btnBelowFold} modalBelowFold=${movePick.modalBelowFold}`);
+    await cdp.shot(sessionId, path.join(OUT, "07e-move-target-search.png"));
+  } else {
+    console.log(`  （跳过转移弹窗断言：${movePick.skipped}）`);
+  }
+  await cdp.evaluate(sessionId, `closeModal()`);
+
+  /* ── 后退键真的能退（用户报「鼠标侧键和浏览器返回都用不了」） ──
+     pushState / popstate 这类东西在单测里只能验「调用了什么」，
+     真浏览器里才量得到「按一下后退，界面有没有动」。这里实际操作 history。 */
+  const backNav = await cdp.evaluate(sessionId, `(async () => {
+    const P = window.panelDebug;
+    switchView("dashboard");
+    await new Promise((r) => setTimeout(r, 250));
+    switchView("spools");
+    await new Promise((r) => setTimeout(r, 250));
+    const atSpools = P.state.view;
+    const len = history.length;
+    history.back();
+    await new Promise((r) => setTimeout(r, 700));
+    const afterBack = P.state.view;
+    history.forward();
+    await new Promise((r) => setTimeout(r, 700));
+    const afterFwd = P.state.view;
+    // 弹窗也要能退：开一个弹窗 → 后退 → 应当先关掉弹窗
+    switchView("dashboard");
+    await new Promise((r) => setTimeout(r, 250));
+    openModal("后退测试", "<p>内容</p>");
+    await new Promise((r) => setTimeout(r, 300));
+    const modalOpen = !!document.querySelector("#modalHost .modal");
+    history.back();
+    await new Promise((r) => setTimeout(r, 700));
+    return {
+      atSpools, afterBack, afterFwd, len,
+      modalOpen, modalAfterBack: !!document.querySelector("#modalHost .modal"),
+      viewAfterModalBack: P.state.view,
+    };
+  })()`);
+  console.log("后退键：", JSON.stringify(backNav));
+  check("应用的历史记录真的在增长（replaceState 时代是一条都不建的）",
+    backNav.len >= 2, `history.length=${backNav.len}`);
+  check("后退键能把视图退回去（spools → 上一个视图）",
+    backNav.atSpools === "spools" && backNav.afterBack !== "spools",
+    JSON.stringify(backNav));
+  check("前进键能把视图再推回来", backNav.afterFwd === "spools", JSON.stringify(backNav));
+  check("后退键能关掉弹窗（用户直觉：先退弹窗，再退页面）",
+    backNav.modalOpen === true && backNav.modalAfterBack === false, JSON.stringify(backNav));
+  check("关弹窗那一次后退不会顺带把视图也退了",
+    backNav.viewAfterModalBack === "dashboard", JSON.stringify(backNav));
+
   /* ── 新增料盘：外观到底存进去没有（2026-09-16 用户反馈） ──
      用户说的是「选了哑光、选完色卡、保存后还是普通」。真凶是 saveSpool() 的 payload
      从来没带 finish（表单上有输入框、后端也一直在收，中间少了一根线）。

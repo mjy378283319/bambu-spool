@@ -931,6 +931,30 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 }
 .slot-qr { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
 
+/* ── 可搜索的料盘选择器（转移消耗弹窗） ──
+   料盘一多，纯 <select> 就得在一长条里上下翻。改成输入框过滤 + 列表点选。
+   列表给固定最大高度并自己滚：弹窗本身不滚，候选几百条时会把
+   「取消 / 确认转移」两个按钮顶到屏幕外。 */
+.pick-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-2); padding: 4px;
+}
+.pick-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+  font-size: 14px; font-family: inherit;
+}
+.pick-item:hover { background: var(--surface); border-color: var(--border); }
+.pick-item.on { background: var(--accent-soft); border-color: var(--accent); }
+.pick-item .swatch { width: 16px; height: 16px; flex: 0 0 auto; }
+.pick-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-item .small { flex: 0 0 auto; }
+/* 没选中时把这句提示染成警示色，别让它看起来像普通说明 */
+#moveTargetPicked.warn { color: var(--red); }
+
 /* ── 打印机状态：两列等高，最后一格撑满，整块不留空白 ──
    .printer-layout 上面定义时是 align-items:start，这里改成 stretch：
    两列谁高谁定行高，另外一列得自己把多出来的高度吃掉，否则空白只是

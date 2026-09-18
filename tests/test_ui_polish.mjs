@@ -93,15 +93,39 @@ const sandbox = {
     mediaDevices: { getUserMedia: async () => { throw new Error("no camera in test"); } },
   },
   location: { hash: "", href: "http://localhost/", pathname: "/", search: "", reload() {} },
-  // 视图路由靠 history.replaceState 改地址：它只换地址不派发 hashchange，
-  // 否则「改 hash → applyHashRoute → switchView → 再改 hash」会自激成死循环
-  history: {
-    replaceState(_state, _title, url) {
-      const i = String(url).indexOf("#");
+  // 视图路由与弹窗都靠 history 改地址。
+  //
+  // ⚠️ 2026-09-18 修正：这里原来只实现了 replaceState，pushState 是个空函数 ——
+  // 于是「后退键能不能用」这类断言根本无从验起（历史栈永远是空的）。
+  // 现在做一个**真的历史栈**：pushState 入栈、back() 出栈，两者都改 location.hash。
+  // 注意浏览器语义：pushState/replaceState **不派发 hashchange**（这正是防自激的关键），
+  // back() 才派发 popstate。所以这里也不触发监听器，让测试自己去调。
+  history: (() => {
+    const stack = [];
+    const setHash = (url) => {
+      const i = String(url || "").indexOf("#");
       sandbox.location.hash = i >= 0 ? String(url).slice(i) : "";
-    },
-    pushState() {},
-  },
+    };
+    return {
+      get _stack() { return stack.slice(); },
+      _reset() { stack.length = 0; },
+      replaceState(_state, _title, url) {
+        if (stack.length) stack[stack.length - 1] = sandbox.location.hash;
+        else stack.push(sandbox.location.hash);
+        setHash(url);
+        stack[stack.length - 1] = sandbox.location.hash;
+      },
+      pushState(_state, _title, url) {
+        setHash(url);
+        stack.push(sandbox.location.hash);
+      },
+      back() {
+        if (stack.length < 2) return;      // 只有一条记录，后退无处可去
+        stack.pop();
+        sandbox.location.hash = stack[stack.length - 1];
+      },
+    };
+  })(),
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
@@ -745,10 +769,13 @@ sandbox.switchView("dashboard");
 check("switchView 之后地址栏记下了当前视图（刷新就靠它回来）",
   sandbox.location.hash === "#view=dashboard", sandbox.location.hash || "(空)");
 sandbox.location.hash = "";
-check("写地址用 replaceState 而不是 location.hash =（后者触发 hashchange 会自激成死循环）",
-  /history\.replaceState\(null, "", "#view=" \+ name\)/.test(appSrc)
+// ⚠️ 2026-09-18 改了：原来钉的是「用 replaceState」——那条断言把
+// 「后退键完全不可用」这个 bug 一起钉死了（replaceState 一个历史条目都不建）。
+// 现在要求 pushState（真建条目）+ 不许用 location.hash 赋值（那会触发 hashchange 自激）。
+check("写地址用 pushState 真建历史条目（用户报的后退键不能用就是这个）",
+  /history\.pushState\(null, "", "#view=" \+ name\)/.test(appSrc)
   && !/location\.hash\s*=\s*["'`]#view/.test(appSrc),
-  "视图路由不该用 location.hash 赋值");
+  "视图路由必须用 pushState 且不许用 location.hash 赋值");
 check("applyHashRoute 认识 #view=<name>", /hash\.startsWith\("view="\)/.test(appSrc));
 check("#view= 的名字要过白名单（不能拿任意字符串去 switchView）",
   /if \(VIEW_NAMES\.includes\(name\)\) \{ switchView\(name\); return; \}/.test(appSrc));
@@ -775,8 +802,13 @@ await sandbox.applyHashRoute({ initial: true });
 check("记录被清掉后启动又回到仪表盘（兜底仍在）",
   state.view === "dashboard", JSON.stringify(state.view));
 sandbox.switchView("dashboard");
+// 深链弹窗关掉后要把地址换回 #view=（否则随手刷新又弹回来）。
+// 现在 closeModal 走的是 history.replaceState（不是 syncHashView）——
+// 用 replaceState 是刻意的：这条记录本来就代表「那个深链」，
+// 关掉弹窗应当**原地改写**它，而不是再压一条新的（否则后退会退进死循环）。
 check("关掉深链弹窗会把 hash 换成 #view=（否则随手刷新又把它弹回来）",
-  /function closeModal\(\)[\s\S]{0,400}?syncHashView\(S\.view \|\| "dashboard", true\)/.test(appSrc));
+  /function closeModal\([\s\S]{0,600}?history\.replaceState\(null, "", "#view=" \+ \(S\.view \|\| "dashboard"\)\)/
+    .test(appSrc));
 
 sandbox.location.hash = "";
 syncHashView("summary");
@@ -791,6 +823,57 @@ syncHashView("spools", true);
 check("强制写入时深链换成 #view=spools（关弹窗那条路径）",
   sandbox.location.hash === "#view=spools", sandbox.location.hash);
 sandbox.location.hash = "";
+
+// ── 15b. 后退 / 前进键（用户报「鼠标侧键和浏览器后退都用不了」）───────────
+console.log("== 后退键：视图切换与弹窗开关都要能退回去 ==");
+
+// 真验一次历史栈：切两个视图，然后 back()，看能不能退回来。
+// 只断言「源码里调了 pushState」是不够的 —— 那样拦不住「push 了但 popstate
+// 没接上」，用户按后退仍然毫无反应（正是这次的 bug）。
+sandbox.history._reset();
+sandbox.location.hash = "";
+sandbox.document.getElementById("modalHost").innerHTML = "";
+sandbox.switchView("dashboard");
+sandbox.switchView("spools");
+check("切视图后历史栈里有多条记录（后退才有地方可退）",
+  sandbox.history._stack.length >= 2, JSON.stringify(sandbox.history._stack));
+
+check("挂了 popstate 监听（没挂的话后退键按下去界面不动）",
+  (windowListeners.get("popstate") || []).length === 1,
+  `popstate 监听数=${(windowListeners.get("popstate") || []).length}`);
+
+// back() 之后手动派发 popstate（沙箱不自动派发，浏览器会自动）
+sandbox.history.back();
+for (const fn of windowListeners.get("popstate") || []) await fn({});
+await new Promise((r) => setTimeout(r, 10));
+check("后退一次回到上一个视图",
+  state.view === "dashboard" && sandbox.location.hash === "#view=dashboard",
+  `view=${state.view} hash=${sandbox.location.hash}`);
+
+// 弹窗也要能退：开弹窗 → 后退 → 弹窗关掉
+sandbox.history._reset();
+sandbox.location.hash = "";
+sandbox.switchView("dashboard");
+sandbox.openModal("测试弹窗", "<p>内容</p>");
+check("开弹窗会压一条 #modal 历史",
+  sandbox.history._stack.includes("#modal"), JSON.stringify(sandbox.history._stack));
+sandbox.history.back();
+for (const fn of windowListeners.get("popstate") || []) await fn({});
+await new Promise((r) => setTimeout(r, 10));
+check("后退键能把弹窗关掉（用户的直觉：先退弹窗，再退页面）",
+  sandbox.document.getElementById("modalHost").innerHTML === "",
+  sandbox.document.getElementById("modalHost").innerHTML.slice(0, 80));
+check("关弹窗这一次后退不会连视图一起退掉（一次后退只做一件事）",
+  state.view === "dashboard", state.view);
+
+// applyHashRoute 遇到 #modal 不能把视图切走 —— 它只是个「弹窗开着」的标记
+sandbox.location.hash = "#modal";
+sandbox.switchView("spools");
+await sandbox.applyHashRoute();
+check("applyHashRoute 遇到 #modal 不切视图（它不是落点，只是标记）",
+  state.view === "spools", state.view);
+sandbox.location.hash = "";
+sandbox.switchView("dashboard");
 
 // ── 16. 汇总页钻取 + 均价卡 ─────────────────────────────────────
 console.log("== 耗材汇总：点名字钻到库存、每盘均价 ==");
@@ -1053,6 +1136,161 @@ sandbox.closeModal();
 state.printers_full = [];
 state.bindingMap = {};
 state.spools = [];
+
+// ── 17c. 「转到另一盘料」的目标料盘：能打字搜索 ──────────────────
+// 用户原话「这个目标料盘要能输入，直接打关键字就能出来相关的料盘」。
+// 原来是个纯 <select>，料盘一多只能上下翻。
+// 这里最容易漏的线：选中值从 input.value 挪到了 S.moveTargetId ——
+// 一旦 doMoveUsage 还去读 input.value（人打的是搜索词！），转移就会
+// 把 spool_id 发成 NaN / 错盘。所以**必须**验「选中 → 发出去的 id 是哪个」。
+console.log("");
+console.log("── 转移消耗：可搜索的目标料盘 ──");
+
+state.spools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", color_hex: "#9ca3af", remaining_weight: 720 },
+  { id: 4, name: "拓竹 PETG 透明 透明蓝", brand: "拓竹", material: "PETG", finish: "透明", color_name: "透明蓝", color_hex: "#7dd3fc", remaining_weight: 880 },
+  { id: 9, name: "已归档的盘", brand: "魔创", material: "PLA", finish: "普通", color_name: "黑", color_hex: "#000", remaining_weight: 100, archived: true },
+];
+
+// 过滤口径：品牌 / 材料 / 外观 / 颜色 / 名字 / 编号都要能搜到
+check("搜品牌能命中（「魔创」）",
+  sandbox.spoolMatches(state.spools[0], "魔创") === true);
+check("搜材料能命中（「PETG」同时命中 PETG 与 PETG-HT）",
+  sandbox.spoolMatches(state.spools[1], "PETG") === true
+  && sandbox.spoolMatches(state.spools[3], "PETG") === true);
+check("搜外观能命中（「哑光」）",
+  sandbox.spoolMatches(state.spools[2], "哑光") === true);
+check("搜颜色能命中（「透明」）",
+  sandbox.spoolMatches(state.spools[3], "透明") === true);
+check("搜编号能命中（「3」匹配到 id=3）",
+  sandbox.spoolMatches(state.spools[2], "3") === true);
+check("多个关键字是 AND（「魔创 天蓝」命中，「魔创 透明」不命中）",
+  sandbox.spoolMatches(state.spools[0], "魔创 天蓝") === true
+  && sandbox.spoolMatches(state.spools[0], "魔创 透明") === false);
+check("大小写不敏感（「polymaker」能搜到 Polymaker）",
+  sandbox.spoolMatches(state.spools[2], "polymaker") === true);
+check("空关键字全部命中（默认就是「不筛」）",
+  sandbox.spoolMatches(state.spools[0], "") === true
+  && sandbox.spoolMatches(state.spools[0], "   ") === true);
+check("搜不到东西时返回 false（交给界面出「没有匹配」提示）",
+  sandbox.spoolMatches(state.spools[0], "这个牌子根本不存在") === false);
+
+// 打开弹窗：默认选中第一个候选（不能是「没选」——点了确认才发现没选就太晚了）
+// ⚠️ 这个 fetch 桩**必须 resolve**。写成 `new Promise(() => {})`（永不落地）的话，
+// doMoveUsage 里的 `await api(...)` 永远挂在那儿，顶层 `await sandbox.doMoveUsage(31)`
+// 也永远不返回 → Node 直接以「unsettled top-level await」退出码 13 收场，
+// 而且**已跑过的断言照样打印**，grep 一下看着像全绿（这个坑踩过一次，记在这儿）。
+let moveCalls = [];
+sandbox.fetch = async (url, opts) => {
+  if (String(url).includes("/api/usages/") && String(url).includes("/move")) {
+    moveCalls.push({ url: String(url), body: JSON.parse((opts || {}).body || "{}") });
+  }
+  return { ok: true, status: 200, json: async () => ({}) };
+};
+sandbox.openMoveDialog(31, 1, -7.1);
+const moveList = sandbox.document.getElementById("moveTargetList").innerHTML;
+const movePicker = sandbox.document.getElementById("moveTargetPicked").innerHTML;
+check("弹窗里候选默认全列出来（不预筛，点开就像个普通下拉）",
+  (moveList.match(/pick-item/g) || []).length === 4, `候选数=${(moveList.match(/pick-item/g) || []).length}`);
+check("归档的料盘不进候选（不能把消耗转到已归档的盘上）",
+  !/已归档的盘/.test(moveList), moveList.slice(0, 200));
+check("打开时默认选中第一盘并在提示里写明选了谁",
+  state.moveTargetId === 1 && /魔创 PLA 天蓝色/.test(movePicker),
+  `id=${state.moveTargetId} picked=${movePicker}`);
+check("输入框初始是空的（不能把选中项当搜索词填进去，那样会把别的候选滤掉）",
+  (sandbox.document.getElementById("moveTargetSearch").value || "") === "",
+  sandbox.document.getElementById("moveTargetSearch").value);
+
+// 打字过滤：这一条直接对着用户的原话「打关键字就能出来相关的料盘」
+sandbox.document.getElementById("moveTargetSearch").value = "PETG";
+sandbox.onMoveTargetInput();
+const filtered = sandbox.document.getElementById("moveTargetList").innerHTML;
+check("打「PETG」后只剩 PETG 相关的两盘",
+  (filtered.match(/pick-item/g) || []).length === 2,
+  `过滤后=${(filtered.match(/pick-item/g) || []).length}`);
+check("打「PETG」后不相关的盘（魔创 PLA）被滤掉", !/魔创 PLA/.test(filtered));
+
+sandbox.document.getElementById("moveTargetSearch").value = "不存在的关键字";
+sandbox.onMoveTargetInput();
+check("搜不到时给出「没有匹配」的提示而不是空白框",
+  /没有匹配/.test(sandbox.document.getElementById("moveTargetList").innerHTML));
+
+// 点选：选中值必须落到 S.moveTargetId，而且输入框回填成名字
+sandbox.pickMoveTarget(3);
+check("点选后 S.moveTargetId 跟着变",
+  state.moveTargetId === 3, `id=${state.moveTargetId}`);
+check("点选后输入框回填成料盘名（人看得懂自己选了什么）",
+  sandbox.document.getElementById("moveTargetSearch").value === "Polymaker PLA 哑光 哑光灰",
+  sandbox.document.getElementById("moveTargetSearch").value);
+check("点选后提示行写的是新选中的那盘",
+  /Polymaker PLA 哑光 哑光灰/.test(sandbox.document.getElementById("moveTargetPicked").innerHTML));
+check("点选后列表重新列全（否则回填的名字会自己变成筛选词）",
+  (sandbox.document.getElementById("moveTargetList").innerHTML.match(/pick-item/g) || []).length === 4);
+
+// 最关键的线：确认转移时发出去的 spool_id 必须是**选中的那盘**，
+// 不是输入框里的文字（那是搜索词，parseInt 出来是 NaN）
+moveCalls = [];
+await sandbox.doMoveUsage(31);
+await new Promise((r) => setTimeout(r, 10));
+const sent = moveCalls.filter((c) => c.body && c.body.spool_id != null);
+check("确认转移时发的是选中料盘的 id（不是输入框里的文字）",
+  sent.length === 1 && sent[0].body.spool_id === 3, JSON.stringify(moveCalls));
+
+// 没选中时不许发请求（要提示，不能让用户对着没反应的按钮发呆）
+state.moveTargetId = null;
+moveCalls = [];
+await sandbox.doMoveUsage(31);
+check("没选中料盘时不发请求（只提示）",
+  moveCalls.filter((c) => c.body && c.body.spool_id != null).length === 0,
+  JSON.stringify(moveCalls));
+
+sandbox.fetch = origFetch;
+sandbox.closeModal();
+sandbox.document.getElementById("modalHost").innerHTML = "";
+state.spools = [];
+
+// ── 17d. 库存页关键字框与转移弹窗共用一份口径 ────────────────────
+// 这两处各写过一套过滤：库存页是整串 substring，还漏了「外观 / 编号」；
+// 转移弹窗按词 AND。结果就是同一个词在一个地方搜得到、换个地方搜不到。
+// 现在两边都走 spoolMatches / spoolSearchText，断言直接钉住「同一份实现」。
+console.log("");
+console.log("── 库存页关键字框与转移弹窗同一口径 ──");
+
+const kwSpools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", location: "A 盘 A1", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", location: "", note: "打印机器人外壳用", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", location: "AMS B2", color_hex: "#9ca3af", remaining_weight: 720 },
+];
+check("库存页能按外观搜（「哑光」）—— 老实现漏了 finish",
+  kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "哑光")).length === 1);
+check("库存页能按编号搜（「3」）—— 老实现漏了 id",
+  kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "3")).length === 1);
+check("库存页能按位置搜（「B2」）—— 提示语一直写着「位置」，老实现是有的，别删回去",
+  kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "B2")).length === 1);
+check("库存页能按备注搜（「机器人」）",
+  kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "机器人")).length === 1);
+check("多词按 AND 收窄（「魔创 天蓝」命中，「魔创 工程黑」不命中）",
+  kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "魔创 天蓝")).length === 1
+  && kwSpools.filter((s) => sandbox.spoolFilteredByKeyword(s, "魔创 工程黑")).length === 0);
+check("同一个词在两处结果一致（这正是「各写一套」会坏掉的地方）",
+  kwSpools.every((s) => sandbox.spoolFilteredByKeyword(s, "PETG") === sandbox.spoolMatches(s, "PETG")));
+
+// 库存页整条链路（标签页 + 关键字）也要能跑通：塞数据进 state、把关键字填进框
+state.spools = kwSpools.slice();
+state.spoolTab = "all";
+sandbox.document.getElementById("spoolSearch").value = "哑光 灰";
+const kwList = sandbox.filteredSpools();
+check("filteredSpools 认多词（「哑光 灰」只留 Polymaker 那盘）",
+  kwList.length === 1 && kwList[0].id === 3,
+  kwList.map((s) => s.id).join(","));
+sandbox.document.getElementById("spoolSearch").value = "";
+check("关键字清空后全部回来", sandbox.filteredSpools().length === 3);
+
+sandbox.document.getElementById("modalHost").innerHTML = "";
+state.spools = [];
+
 
 // ── 18. 打印记录列表行内的「耗材 / 绑定」两个键 ──────────────────
 // 用户要的是「列表里直接点」，不是「先进详情再点」。最容易错的是：

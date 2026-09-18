@@ -23,6 +23,10 @@ const S = {
   jobPageSize: 10,
   // 耗材汇总页：概览环形图上选中的材料（null = 看全部）
   summaryFilter: null,
+  // 「把消耗转到另一盘料」弹窗里选中的目标料盘 id。
+  // 那个弹窗现在是「输入框过滤 + 列表点选」，选中值不能放在 input.value 里
+  // （input 装的是人打的搜索词），所以单独存一份。
+  moveTargetId: null,
 };
 
 /* ── 图标（内联 SVG，随文字颜色走） ───────────────────── */
@@ -254,13 +258,30 @@ function fmtDuration(seconds) {
   return `${m} 分钟`;
 }
 
-function closeModal() {
-  document.getElementById("modalHost").innerHTML = "";
+/** 关弹窗。
+ *
+ *  2026-09-18：弹窗现在进历史 —— 打开时 pushState 一条 `#modal`，
+ *  后退键先关弹窗（这是所有人的直觉），再退才换视图。
+ *
+ *  historyBack=true 表示「这一次关是后退键引起的」，此时不能再调 history.back()
+ *  —— 那会连带把上一个视图记录也退掉，等于一次后退退两步。
+ */
+function closeModal(historyBack) {
+  const host = document.getElementById("modalHost");
+  const hadModal = !!host.innerHTML;
+  host.innerHTML = "";
+  const hash = location.hash.slice(1);
   // 深链（#spool= / #bind=）开出来的弹窗关掉后，地址里还留着那段深链，
   // 不换成 #view= 的话随手一刷新又把它弹回来了。
-  const hash = location.hash.slice(1);
   if (hash.startsWith("spool=") || hash.startsWith("bind=")) {
-    syncHashView(S.view || "dashboard", true);
+    try { history.replaceState(null, "", "#view=" + (S.view || "dashboard")); }
+    catch (e) { /* 忽略 */ }
+    return;
+  }
+  // 普通弹窗：把那条 `#modal` 记录退掉，地址栏回到当前视图。
+  // 已经在 popstate 里被退掉（historyBack）或本来就没有弹窗记录时不用动。
+  if (hadModal && !historyBack && hash === "modal") {
+    try { history.back(); } catch (e) { /* 忽略 */ }
   }
 }
 
@@ -274,6 +295,14 @@ function openModal(title, bodyHtml, actionsHtml, wide = false) {
         <div class="actions">${actionsHtml || '<button onclick="closeModal()">关闭</button>'}</div>
       </div>
     </div>`;
+  // 弹窗进历史：后退键先关弹窗（用户直觉），再退才换视图。
+  // 深链（#spool= / #bind=）那次不 push —— 那条记录本身就是「打开这个弹窗」，
+  // 再 push 一条 #modal 的话，后退会先退到 #spool= 又把它重新打开，看着像没关掉。
+  const hash = location.hash.slice(1);
+  const isDeepLink = hash.startsWith("spool=") || hash.startsWith("bind=");
+  if (!isDeepLink && hash !== "modal") {
+    try { history.pushState(null, "", "#modal"); } catch (e) { /* 忽略 */ }
+  }
 }
 
 /* ── 路由 ─────────────────────────────────────────────── */
@@ -305,10 +334,14 @@ function lastRememberedView() {
 
 /** 把当前视图记进地址栏，刷新后能回到原页面。
  *
- *  用 replaceState 而不是 location.hash =：后者会触发 hashchange，
- *  于是「改 hash → applyHashRoute → switchView → 再改 hash」自成死循环；
- *  replaceState 只换地址不派发事件，也不往前进/后退历史里塞记录，
- *  免得用户点一下后退在五个标签之间来回跳。
+ *  ⚠️ 2026-09-18 改：原来用 replaceState，理由是「别往历史里塞记录，免得点后退
+ *  在五个标签之间来回跳」。那个判断是错的 —— 用户报「鼠标侧键后退和浏览器后退
+ *  都用不了」：replaceState **一个历史条目都不建**，后退键自然无处可去，
+ *  点下去直接跳出应用（或毫无反应）。现在改成 pushState 真建条目。
+ *
+ *  防死循环靠 pushState 本身不派发 hashchange（和 replaceState 一样），
+ *  所以「改 hash → applyHashRoute → switchView → 再改 hash」这条链不会自激；
+ *  后退由 popstate 接（见 bindGlobalEvents）。
  *
  *  `#spool=` / `#bind=` 这类深链**不覆盖**：扫码进来的那次刷新还应该落在
  *  那盘料上（弹窗关掉时由 closeModal 换成 `#view=<当前视图>`）。
@@ -321,8 +354,11 @@ function syncHashView(name, force) {
   const isDeepLink = hash.startsWith("spool=") || hash.startsWith("bind=");
   if (isDeepLink && !force) return;
   if (hash === "view=" + name) return;
+  // 弹窗开着的时候不要建历史条目：开关弹窗自己会 push（见 openModal / closeModal），
+  // 否则「开弹窗」一次 push 两条，后退要按两下才关得掉。
+  if (document.getElementById("modalHost").innerHTML) return;
   try {
-    history.replaceState(null, "", "#view=" + name);
+    history.pushState(null, "", "#view=" + name);
   } catch (e) { /* 某些嵌入环境禁改地址，忽略即可 */ }
 }
 
@@ -1284,9 +1320,10 @@ function filteredSpools() {
     if (!isNaN(minPrice) && (s.price || 0) < minPrice) return false;
     if (!isNaN(maxPrice) && (s.price || 0) > maxPrice) return false;
     if (kw) {
-      const hay = [s.name, s.brand, s.material, s.color_name, s.location, s.note]
-        .join(" ").toLowerCase();
-      if (!hay.includes(kw)) return false;
+      // 走 spoolMatches：位置/备注也在关键词里（提示语写了「位置」），多词 AND，
+      // 并且与转移弹窗的搜索口径**共用一份实现** —— 两处各写一套必然出现
+      // 「这里搜得到、那里搜不到」。
+      if (!spoolFilteredByKeyword(s, kw)) return false;
     }
     return true;
   });
@@ -1985,20 +2022,112 @@ function usageSourceLabel(source) {
   return map[source] || source;
 }
 
+/** 可搜索的料盘选择器。
+ *
+ *  原来是纯 <select>：料盘一多就得在一长条里上下翻，用户反馈「要能输入、打关键字就出来」。
+ *  这里改成「输入框过滤 + 列表点选」，和原生 select 的差别是要自己维护选中值 ——
+ *  所以选中项存在 S.moveTargetId 里（不是 input.value，那是给人搜的字），
+ *  doMoveUsage 读的也是它。
+ *
+ *  过滤走 spoolSearchText()：品牌/材料/外观/颜色/名字/编号全都拼进去，
+ *  所以搜「魔创」「PETG」「哑光」「12」都能命中；多个关键字用空格分隔、逐个 AND 匹配。
+ *  默认全部展开（不预筛），点开就像个普通下拉，输入才收窄。
+ */
+function spoolSearchText(s) {
+  return [s.brand, s.material, s.finish, s.color_name, s.name, s.id, s.location, s.note]
+    .filter((v) => v != null && v !== "").join(" ").toLowerCase();
+}
+
+/** 关键字过滤：空格分隔的每个词都要出现（AND），不区分大小写。 */
+function spoolMatches(s, query) {
+  const words = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = spoolSearchText(s);
+  return words.every((w) => hay.includes(w));
+}
+
+/** 库存页「关键字」框的一行过滤（标签页 / 品牌 / 材料 / 外观 / 价格区间之外的补充条件）。
+ *
+ *  口径与转移弹窗的 spoolMatches 一致，所以把位置和备注也拼进了 spoolSearchText —— 库存页
+ *  原来的提示语就写着「料盘名称 / 品牌 / 颜色 / 位置」，多词也按 AND 收窄
+ *  （原来是 substring.includes 整串：搜「魔创 天蓝」在两处结果不一样，同一个词换个地方搜不出来）。
+ *  保留 `s.name` 等字段名不变，方便别处（品牌分布等）继续复用。 */
+function spoolFilteredByKeyword(s, kw) {
+  return spoolMatches(s, kw);
+}
+
+/** 渲染「目标料盘」候选列表。query 为空时列全部。 */
+function renderMoveTargets(query) {
+  const box = document.getElementById("moveTargetList");
+  if (!box) return;
+  const all = (S.spools || []).filter((s) => !s.archived);
+  const hits = all.filter((s) => spoolMatches(s, query));
+  // 转移的前提是源盘和目标盘不是同一盘，这里不排除任何盘（源盘也可以被选回来），
+  // 但把当前选中的那盘标出来，免得用户以为没选上。
+  box.innerHTML = hits.length
+    ? hits.map((s) => `
+        <button type="button" class="pick-item${s.id === S.moveTargetId ? " on" : ""}"
+                onclick="pickMoveTarget(${s.id})" data-id="${s.id}">
+          <span class="swatch" style="background:${esc(s.color_hex || "#888")}"></span>
+          <span class="pick-name">${esc(s.name)}</span>
+          <span class="small muted">余 ${Number(s.remaining_weight || 0).toFixed(0)} g</span>
+        </button>`).join("")
+    : `<p class="hint" style="padding:10px 12px;margin:0">没有匹配的料盘 —— 换个词试试（品牌、材料、颜色、编号都能搜）。</p>`;
+}
+
+function onMoveTargetInput() {
+  const el = document.getElementById("moveTargetSearch");
+  renderMoveTargets(el ? el.value : "");
+}
+
+function pickMoveTarget(spoolId) {
+  S.moveTargetId = spoolId;
+  const spool = spoolById(spoolId);
+  const el = document.getElementById("moveTargetSearch");
+  // 选中后把名字填回输入框（人看得懂自己在选什么），但过滤列表按「全部」重画，
+  // 否则输入框里的名字本身会变成筛选词、把别的候选全滤掉。
+  if (el) el.value = spool ? spool.name : String(spoolId);
+  renderMoveTargets("");
+  // ⚠️ 这句不能漏：提示行写的是「已选中：xxx」，不跟着刷的话点完还是上一次那盘，
+  // 用户会以为没选上（自测里就是这么红的）。
+  refreshMoveTargetPicked();
+}
+
 function openMoveDialog(usageId, spoolId, weight) {
-  const options = (S.spools || []).filter((s) => !s.archived)
-    .map((s) => spoolOptionHtml(s)).join("");
+  const all = (S.spools || []).filter((s) => !s.archived);
+  // 默认选第一个候选（和原来的 <select> 行为一致：不选就是一个有效默认值，
+  // 而不是让用户点了「确认转移」才发现没选东西）。
+  S.moveTargetId = all.length ? all[0].id : null;
   const current = spoolById(spoolId);
   openModal("把这条消耗转到另一盘料", `
     <p class="hint">将从「${esc(current ? current.name : "")}」返还 ${Math.abs(weight).toFixed(1)} g，
        并从下面选中的料盘扣减同样的重量。</p>
-    <label class="field"><span>目标料盘</span><select id="moveTarget">${options}</select></label>
+    <label class="field"><span>目标料盘</span>
+      <input id="moveTargetSearch" placeholder="输入关键字筛选：品牌 / 材料 / 颜色 / 编号"
+             autocomplete="off" oninput="onMoveTargetInput()" />
+    </label>
+    <div class="pick-list" id="moveTargetList"></div>
+    <p class="hint" id="moveTargetPicked"></p>
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="doMoveUsage(${usageId})">确认转移</button>`);
+  renderMoveTargets("");
+  refreshMoveTargetPicked();
+}
+
+/** 把「当前选中哪盘」写出来。光看列表的 on 高亮不够 —— 输入框里那人自己打的字
+ *  可能和选中项对不上（比如打完字直接点确认、没点候选），必须显式告知选了谁。 */
+function refreshMoveTargetPicked() {
+  const el = document.getElementById("moveTargetPicked");
+  if (!el) return;
+  const spool = S.moveTargetId != null ? spoolById(S.moveTargetId) : null;
+  if (!spool) { el.textContent = "还没有选中料盘。"; el.classList.add("warn"); return; }
+  el.classList.remove("warn");
+  el.innerHTML = `已选中：<b>${esc(spool.name)}</b>（余 ${Number(spool.remaining_weight || 0).toFixed(0)} g）`;
 }
 
 async function doMoveUsage(usageId) {
-  const spoolId = parseInt(document.getElementById("moveTarget").value, 10);
+  const spoolId = S.moveTargetId;
+  if (spoolId == null) { toast("请先选中一盘目标料盘", "err"); return; }
   try {
     await api(`/api/usages/${usageId}/move`, { method: "POST", body: JSON.stringify({ spool_id: spoolId }) });
     toast("已转移并同步余量", "ok");
@@ -3960,6 +4089,37 @@ document.addEventListener("paste", (ev) => {
  */
 window.addEventListener("hashchange", () => { applyHashRoute(); });
 
+/* 后退 / 前进键（含鼠标侧键、Alt+←）走 popstate。
+ *
+ * 2026-09-18：用户报「鼠标后退键和浏览器后退都用不了」。
+ * 根因是视图切换原先用 replaceState，**一个历史条目都没建**，后退无处可去。
+ * 现在视图与弹窗都 pushState，这里负责「退回去之后把界面变回去」。
+ *
+ * 三种落点要分开处理：
+ *   1) 退到 `#modal` —— 上一次操作是开弹窗。popstate 已经把地址换成 #modal 了，
+ *      这里只需把弹窗再打开（不 push，否则又把刚退掉的记录塞回来）。
+ *      注意：多数情况是「关弹窗」（退到 #view=xxx），由下面的分支处理。
+ *   2) 退到 `#view=xxx` —— 换视图。**必须先关掉当前弹窗**，否则弹窗会浮在
+ *      新视图上面，看着像后退没生效。
+ *   3) 退到空 hash / `#spool=` / `#bind=` —— 交给 applyHashRoute 兜。
+ *
+ * applyHashRoute 自己会调 switchView，而 switchView → syncHashView 里有
+ * 「hash 已经等于目标」和「弹窗开着就不 push」两道闸，所以不会二次入栈。
+ */
+window.addEventListener("popstate", () => {
+  const hash = location.hash.slice(1);
+  if (hash === "modal") return;          // 前进回到「弹窗开着」那一刻：弹窗本来就还在
+  // 退到别的落点时，浮在上面的弹窗得收掉（historyBack=true：别再退一步）
+  if (document.getElementById("modalHost").innerHTML) closeModal(true);
+  if (hash.startsWith("view=") || VIEW_NAMES.includes(hash)) {
+    applyHashRoute();
+    return;
+  }
+  // 空 hash / 深链：applyHashRoute 的 initial=false 分支对空 hash 什么都不做，
+  // 这在「后退」场景正合适 —— 首次打开时的默认页已由 pushState 建过条目了。
+  applyHashRoute();
+});
+
 function connectSocket() {
   if (S.socket) { try { S.socket.close(); } catch (e) { /* 忽略 */ } }
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -4052,6 +4212,10 @@ function addEvent(event) {
 async function applyHashRoute(options) {
   const opts = options || {};
   const hash = location.hash.slice(1);
+  // `#modal` 不是「落点」，它只标记「此刻弹窗开着」。
+  // 走到这里说明是这个 hash 被当路由解析了（比如从历史里前进回来），
+  // 弹窗本身另外有开关逻辑，这里什么都不做——别把视图切走。
+  if (hash === "modal") return;
   // 两种写法都认：`#view=summary`（当前形式）和老的裸名 `#spools`。
   if (hash.startsWith("view=")) {
     const name = hash.slice(5);
@@ -4112,6 +4276,20 @@ async function enterApp() {
   }
   connectSocket();
   await applyHashRoute({ initial: true });
+  // 给「第一个视图」也建一条历史记录。
+  //
+  // 为什么必须在启动时补：直接打开站点时地址栏是干净的（没有 hash），
+  // 浏览器的历史里只有这一条。用户从仪表盘切到「料盘库存」时 syncHashView
+  // 会 push 一条 —— 这时按后退是能回到仪表盘的。但如果用户**一上来就按后退**
+  // （或者停在初始视图不动就按），历史里只有一条，按下就是离开本站/毫无反应。
+  // 补这一条之后，初始视图也有了可退回的落点，后退键在任何时刻都「有东西可退」。
+  //
+  // 用 replaceState 而不是 pushState：不想凭空多一条「空 hash」的历史让用户
+  // 按两下才回到上一次真实操作。
+  if (!location.hash) {
+    try { history.replaceState(null, "", "#view=" + (S.view || "dashboard")); }
+    catch (e) { /* 某些嵌入环境禁改地址，忽略 */ }
+  }
   return true;
 }
 
@@ -4161,6 +4339,12 @@ window.panelDebug = {
   renderBrandDist, BRAND_BAR_COLORS, jobRowActions,
   // 槽位绑定：下拉候选、槽位弹窗的解绑入口（解绑要重开同一个槽位弹窗，别跳到料盘页）
   fillBindSpoolSelect, unbindSlotSpool,
+  // 「转到另一盘料」的可搜索选择器：过滤口径（spoolMatches）与选中值（S.moveTargetId）
+  // 都要能单独测 —— 选中值从 input.value 挪到 state 里，是最容易漏线的地方
+  openMoveDialog, spoolSearchText, spoolMatches, renderMoveTargets,
+  onMoveTargetInput, pickMoveTarget, refreshMoveTargetPicked, doMoveUsage,
+  // 库存页关键字框：与转移弹窗共用同一份过滤口径，别各写一套
+  spoolFilteredByKeyword, filteredSpools,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

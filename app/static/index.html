@@ -183,7 +183,9 @@
       </div>
       <div class="filter-grid">
         <label class="fld wide"><span>关键字</span>
-          <input id="spoolSearch" placeholder="料盘名称 / 品牌 / 颜色 / 位置" oninput="renderSpools()" /></label>
+          <!-- 多个词用空格分隔，按 AND 收窄（「魔创 天蓝」）。口径与「转移消耗」弹窗的
+               目标料盘搜索共用 spoolMatches，两处搜同一个词结果必须一致。 -->
+          <input id="spoolSearch" placeholder="名称 / 品牌 / 材料 / 外观 / 颜色 / 位置 / 编号" oninput="renderSpools()" /></label>
         <label class="fld"><span>品牌</span>
           <select id="spoolBrand" onchange="renderSpools()"><option value="">全部品牌</option></select></label>
         <label class="fld"><span>材料</span>
