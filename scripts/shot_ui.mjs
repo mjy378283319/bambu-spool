@@ -606,8 +606,18 @@ async function main() {
   await sleep(600);
   const summary = await cdp.evaluate(sessionId, `(() => {
     const rows = (id) => (document.querySelectorAll("#" + id + " tbody tr") || []).length;
+    // 「按品牌」每行的盘数直接从单元格里读（形如「4 盘」），别在断言里写死数字 ——
+    // 演示数据一变（比如这轮把 seed 的品牌改成规范名「拓竹」）就会误报，
+    // 而误报的方向是「看着像功能坏了」，排查成本全花在假问题上。
+    const counts = [...document.querySelectorAll("#brandSummary tbody tr")]
+      .map((tr) => {
+        const m = (tr.innerText || "").match(/\\d+\\s*盘/);
+        return m ? Number(m[0].replace(/\\D/g, "")) : 0;
+      });
     return {
       brand: rows("brandSummary"), material: rows("materialSummary"), finish: rows("finishSummary"),
+      counts, sumShown: counts.reduce((a, b) => a + b, 0),
+      totalSpools: (window.panelDebug.state.summarySpools || []).length,
       brandText: (document.getElementById("brandSummary") || {}).innerText || "",
       statText: (document.getElementById("summaryStats") || {}).innerText || "",
     };
@@ -616,8 +626,10 @@ async function main() {
   check("按品牌汇总有数据行", summary.brand > 0, JSON.stringify(summary));
   check("按材料汇总有数据行", summary.material > 0, JSON.stringify(summary));
   check("按外观汇总有数据行", summary.finish > 0, JSON.stringify(summary));
-  check("汇总数字对得上（9 盘）", summary.brandText.includes("9 盘") || summary.brandText.includes("3 盘"),
-        summary.brandText.slice(0, 200));
+  // 权威值取自渲染用的那份数据（summarySpools），不是 DOM 里数出来的
+  check("按品牌汇总的盘数之和 = 在库料盘数",
+        summary.sumShown === summary.totalSpools,
+        `${summary.sumShown} vs ${summary.totalSpools}`);
   // 自定义品牌是「候选」，没录过料盘就不该出现在**库存**汇总里（这里是库存视角）。
   // 它该出现的地方是设置页的品牌标签和新建料盘的下拉，下面单独查。
   check("没录过料盘的自定义品牌不混进库存汇总",
@@ -1115,7 +1127,7 @@ async function main() {
   check("料盘详情里有「使用历史」（确认打开的是料盘页不是别的）",
     jumped.skipped === true || spoolModal.hasHistory === true, spoolModal.title);
 
-  // 真点一次「更改料盘」：要弹出带下拉的改绑窗，且下拉里有料盘可选
+  // 真点一次「更改料盘」：要弹出可搜索的改绑窗，且候选列表里有料盘
   await cdp.evaluate(sessionId, `openJobDetail(${JSON.stringify(jobButtons.jobId)})`);
   await sleep(900);
   const rebind = await cdp.evaluate(sessionId, `(() => {
@@ -1126,23 +1138,60 @@ async function main() {
     return {};
   })()`);
   await sleep(800);
+  // ⚠️ 2026-09-18 改：这个弹窗不再用原生 <select>（用户反馈「还是无法直接输入」），
+  // 所以这里量的是输入框 + 候选按钮，不是 `select.options.length`。
+  // 教训：**别只断言「弹窗里有某按钮」** —— 下拉空着也能过；要量候选项数。
   const rebindModal = await cdp.evaluate(sessionId, `(() => {
-    const sel = document.getElementById("rebindSpool");
+    const search = document.getElementById("rebindSpoolSearch");
+    const list = document.getElementById("rebindSpoolList");
+    const picked = document.getElementById("rebindSpoolPicked");
     return {
       title: ((document.querySelector("#modalHost .modal h3") || {}).innerText || "").trim(),
-      hasSelect: !!sel,
-      opts: sel ? sel.options.length : 0,
-      selected: sel ? (sel.options[sel.selectedIndex] || {}).textContent || "" : "",
+      hasInput: !!search,
+      isSearchable: search ? search.tagName === "INPUT" : false,
+      hasNativeSelect: !!document.getElementById("rebindSpool"),
+      items: list ? list.querySelectorAll(".pick-item").length : 0,
+      picked: picked ? picked.innerText.trim() : "",
     };
   })()`);
   console.log("更改料盘：", JSON.stringify(rebind), "→", JSON.stringify(rebindModal));
   check("点「更改料盘」弹出改绑窗",
     rebind.skipped === true || rebindModal.title === "更改料盘", rebindModal.title);
-  check("改绑窗里的下拉有料盘可选（空下拉 = 点了没反应）",
-    rebind.skipped === true || (rebindModal.hasSelect && rebindModal.opts >= 2),
+  check("改绑窗里的目标料盘是个可打字的输入框（用户要的「能直接输入」）",
+    rebind.skipped === true || (rebindModal.hasInput && rebindModal.isSearchable),
     JSON.stringify(rebindModal));
-  check("下拉默认选中当前那盘",
-    rebind.skipped === true || rebindModal.selected.length > 0, JSON.stringify(rebindModal));
+  check("改绑窗里已经没有原生下拉了（同一个毛病不能留两套实现）",
+    rebind.skipped === true || rebindModal.hasNativeSelect === false, JSON.stringify(rebindModal));
+  check("候选列表里有料盘可选（空列表 = 点了没反应）",
+    rebind.skipped === true || rebindModal.items >= 2, JSON.stringify(rebindModal));
+  check("打开时就写明了当前扣的是哪盘",
+    rebind.skipped === true || rebindModal.picked.includes("已选中"), JSON.stringify(rebindModal));
+
+  // 打字过滤：候选项数必须真的变少（只断言「输入框存在」拦不住没接上 oninput）
+  const rebindFiltered = await cdp.evaluate(sessionId, `(() => {
+    const search = document.getElementById("rebindSpoolSearch");
+    const list = document.getElementById("rebindSpoolList");
+    const before = list.querySelectorAll(".pick-item").length;
+    search.value = "zzz根本没有这个词";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    const afterNone = list.querySelectorAll(".pick-item").length;
+    const hint = list.innerText;
+    search.value = "";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    const afterReset = list.querySelectorAll(".pick-item").length;
+    return { before, afterNone, afterReset, hint: hint.slice(0, 80) };
+  })()`);
+  console.log("更改料盘过滤：", JSON.stringify(rebindFiltered));
+  check("打关键字能真的把候选收窄（oninput 接上了）",
+    rebind.skipped === true || (rebindFiltered.afterNone === 0 && rebindFiltered.before >= 2),
+    JSON.stringify(rebindFiltered));
+  check("搜不到时给的是提示文案而不是空白",
+    rebind.skipped === true || rebindFiltered.hint.includes("没有匹配"),
+    JSON.stringify(rebindFiltered));
+  check("清空关键字后候选全部回来",
+    rebind.skipped === true || rebindFiltered.afterReset === rebindFiltered.before,
+    JSON.stringify(rebindFiltered));
+  await cdp.shot(sessionId, path.join(OUT, "07f-rebind-target-search.png"));
   await cdp.evaluate(sessionId, `closeModal()`);
   await sleep(300);
 
@@ -1621,6 +1670,145 @@ async function main() {
     await cdp.evaluate(sessionId,
       `fetch("/api/spools/" + ${JSON.stringify(finishSave.saved.id)}, { method: "DELETE" })`);
   }
+
+  /* ── 库存页筛选下拉只列「库存里真有的值」（2026-09-18 用户反馈） ──
+     用户原话「在这三个选项中，只显示已经在库存的料盘，没有的不要显示相关信息」。
+     这里量的是**真浏览器里的 select.options** —— JS 单测那边只能解析 innerHTML
+     字符串，量不到「浏览器实际渲染出几个选项」。两边都要有。 */
+  await cdp.evaluate(sessionId, `switchView("spools")`);
+  await sleep(900);
+  const filterOpts = await cdp.evaluate(sessionId, `(() => {
+    const opts = (id) => {
+      const sel = document.getElementById(id);
+      return sel ? Array.from(sel.options).map((o) => o.value).filter((v) => v !== "") : null;
+    };
+    const cat = window.panelDebug.state.catalog || {};
+    return {
+      brand: opts("spoolBrand"),
+      material: opts("spoolMaterial"),
+      finish: opts("spoolFinish"),
+      catalogBrands: (cat.brands || []).length,
+      catalogMaterials: (cat.materials || []).length,
+      catalogFinishes: (cat.finishes || []).length,
+    };
+  })()`);
+  console.log("筛选下拉：", JSON.stringify(filterOpts).slice(0, 400));
+  const allFilters = ["brand", "material", "finish"].every(
+    (k) => Array.isArray(filterOpts[k]));
+  check("三个筛选下拉都拿得到（别是页面上没有那几个 id）", allFilters, JSON.stringify(filterOpts));
+  check("品牌筛选只列库存里有的（比目录里的全量少一大截）",
+    filterOpts.brand.length < filterOpts.catalogBrands,
+    `下拉 ${filterOpts.brand.length} / 目录 ${filterOpts.catalogBrands}`);
+  check("材料筛选只列库存里有的（比目录里的全量少）",
+    filterOpts.material.length < filterOpts.catalogMaterials,
+    `下拉 ${filterOpts.material.length} / 目录 ${filterOpts.catalogMaterials}`);
+  check("外观筛选只列库存里有的（比目录里的全量 15 种少）",
+    filterOpts.finish.length < filterOpts.catalogFinishes,
+    `下拉 ${filterOpts.finish.length} / 目录 ${filterOpts.catalogFinishes}`);
+
+  // 光「选项少」不够 —— 每一项都必须真能筛出料盘（选项存在但筛不出 = 摆设）
+  const filterUsable = await cdp.evaluate(sessionId, `(() => {
+    const sel = document.getElementById("spoolBrand");
+    const probe = (v) => {
+      sel.value = v;
+      return { value: v, hits: filteredSpools().length };
+    };
+    const tried = sel ? Array.from(sel.options).filter((o) => o.value).map((o) => probe(o.value)) : [];
+    sel.value = "";
+    filteredSpools();
+    return tried;
+  })()`);
+  console.log("品牌筛选项逐项试筛：", JSON.stringify(filterUsable));
+  check("品牌下拉里每一项都能筛出至少一盘料（没有空手而归的选项）",
+    filterUsable.length > 0 && filterUsable.every((r) => r.hits > 0),
+    JSON.stringify(filterUsable));
+  await cdp.shot(sessionId, path.join(OUT, "07g-stock-filter-options.png"));
+
+  /* ── 原生 datalist「点一下就能选」（2026-09-18 用户反馈） ──
+     用户原话「这个下拉菜单每次都要先删除才能选择，最好点击就能选择」。
+     根因是 datalist 的候选按输入框当前值做**子串过滤**：外观预填着「普通」，
+     点开只剩「普通」一条。修法是聚焦时先把值挪走 → 候选全量展开 → 离开还原。
+     ⚠️ 这里必须**真的点一下**（派发 mousedown），不能只断言「挂了监听器」——
+     写了函数不等于接上了，这条路上已经栽过一次。 */
+  const combo = await cdp.evaluate(sessionId, `(() => {
+    openSpoolDialog(null);
+    const input = document.getElementById("f_finish");
+    const before = input.value;
+    // 真的派发 mousedown（用 focus 的话 Chromium 的行为和用户点击不一样）
+    input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    const afterDown = input.value;
+    const ph = input.getAttribute("placeholder") || "";
+    // 什么都没选就切走 → 原值必须回来
+    input.dispatchEvent(new Event("blur", { bubbles: true }));
+    const afterBlur = input.value;
+    const phAfter = input.getAttribute("placeholder") || "";
+    return { before, afterDown, ph, afterBlur, phAfter };
+  })()`);
+  console.log("点一下就能选（外观框）：", JSON.stringify(combo));
+  check("外观框预填着一个值（不然这个测试没意义）",
+    combo.before.length > 0, JSON.stringify(combo));
+  check("点一下就把值挪走，候选能全量展开（用户要的「点击就能选择」）",
+    combo.afterDown === "" && combo.ph.indexOf("当前：") === 0,
+    JSON.stringify(combo));
+  check("原值退到 placeholder 上还看得见（不然像东西被弄丢了）",
+    combo.ph.includes(combo.before), JSON.stringify(combo));
+  check("什么都没选就切走 → 原值放回来（不能把用户原来的值弄丢）",
+    combo.afterBlur === combo.before, JSON.stringify(combo));
+  check("还原后 placeholder 也恢复（不留「当前：」这种临时文案）",
+    !combo.phAfter.includes("当前："), JSON.stringify(combo));
+
+  // 真的选了东西 → 切走不许把选中的盖回去（这正是「点了没反应」的老毛病）
+  const comboPick = await cdp.evaluate(sessionId, `(() => {
+    const input = document.getElementById("f_finish");
+    const opts = Array.from(document.querySelectorAll("#finishList option")).map((o) => o.value);
+    const other = opts.find((v) => v && v !== input.value) || "";
+    input.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    input.value = other;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("blur", { bubbles: true }));
+    return { picked: other, afterBlur: input.value, options: opts.length };
+  })()`);
+  console.log("点选后切走：", JSON.stringify(comboPick));
+  check("外观候选不是空的（datalist 真的挂了选项）", comboPick.options >= 5,
+    JSON.stringify(comboPick));
+  check("选了一条再切走，选中的值得以保留（没有被还原成旧值）",
+    comboPick.afterBlur === comboPick.picked, JSON.stringify(comboPick));
+
+  /* ── 选品牌自动带出实测皮重（2026-09-18 用户报的一批上秤值） ──
+     实测：大简 239 / Polymaker 150 / 拓竹 239 / 魔创 220 / 兰博 160 /
+     Kexcelled 239 / 爱酷乐 239。选完品牌还要自己记数字太没必要；
+     但**绝不能把用户手填的皮重冲掉**，所以这里两个方向都要验。 */
+  const tare = await cdp.evaluate(sessionId, `(() => {
+    const sel = document.getElementById("f_brand");
+    const w = () => document.getElementById("f_spool_weight");
+    const pick = (brand) => {
+      sel.value = brand;
+      onBrandChoice();
+      return parseFloat(w().value);
+    };
+    const out = {};
+    // 全新表单：默认 250，选品牌后应被实测值替掉
+    out.defaultStart = parseFloat(w().value);
+    for (const b of ["大简", "Polymaker", "拓竹", "魔创", "兰博", "Kexcelled", "爱酷乐"]) {
+      w().value = "250"; w().dataset.autoTare = "";
+      out[b] = pick(b);
+    }
+    // 用户手填过 → 不许动
+    w().value = "777"; w().dataset.autoTare = "";
+    onTareInput();
+    out.kept = pick("大简");
+    return out;
+  })()`);
+  console.log("选品牌带皮重：", JSON.stringify(tare));
+  const wantTare = { "大简": 239, Polymaker: 150, "拓竹": 239, "魔创": 220,
+                     "兰博": 160, Kexcelled: 239, "爱酷乐": 239 };
+  const badTare = Object.entries(wantTare).filter(([b, v]) => Number(tare[b]) !== v);
+  check("选品牌自动带出实测皮重（七个都对）",
+    badTare.length === 0, JSON.stringify({ bad: badTare, got: tare }));
+  check("用户手填的皮重不会被带出来的值冲掉",
+    Number(tare.kept) === 777, JSON.stringify(tare));
+  await cdp.evaluate(sessionId, `closeModal()`);
+  await sleep(300);
 
   /* ── 扫码深链：应用开着时改 hash 也要跳转 ──
    * 手机上的真实用法是「应用开着 → 系统相机扫二维码 → 浏览器只换 hash」。

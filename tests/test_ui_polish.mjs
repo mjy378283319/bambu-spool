@@ -185,6 +185,22 @@ if (!scanner) {
   process.exit(1);
 }
 
+// 新加的自测钩子必须真的在 panelDebug 里 —— 少了它就是 `undefined is not a function`，
+// 报错信息会指向测试文件而不是「忘了导出」，查起来要绕一圈。
+for (const name of [
+  "openRebindUsage", "submitRebindUsage", "renderSpoolPicker", "renderRebindTargets",
+  "onRebindTargetInput", "pickRebindTarget", "refreshRebindTargetPicked",
+  "spoolPickerHtml", "fillPickerAfterPick",
+  "syncFilterOptions", "loadCatalog",
+  "armComboInputs", "armComboInput", "comboFocus", "comboInput", "comboBlur",
+  "applyBrandTare", "onTareInput",
+]) {
+  if (typeof dbg[name] !== "function") {
+    console.error(`panelDebug 缺少导出：${name}（app.js 末尾的 window.panelDebug 里补上）`);
+    process.exit(1);
+  }
+}
+
 // ── 1. 颜色名 -> 外观预填 ───────────────────────────────────────
 console.log("== 外观预填（颜色名里带工艺词就自动填上） ==");
 
@@ -1035,21 +1051,35 @@ state.spools = [
 ];
 // 运行时断言：真的开一次弹窗，读 modalHost 里渲染出来的 HTML。
 // 只断言「源码里有 openRebindUsage」拦不住「下拉是空的」—— 那正是用户看到的「点了没反应」。
+//
+// ⚠️ 2026-09-18 改：这个弹窗从纯 <select> 换成了可搜索的输入框 + 候选列表
+// （用户反馈「还是无法直接输入」）。所以这里不再找 `<option>`，改成找候选按钮；
+// 「默认选中当前那盘」也换成了读 `S.rebindUsage.targetId` + 提示行文案。
 await sandbox.openRebindUsage(11, 1);
 const rebindHtml = sandbox.document.getElementById("modalHost").innerHTML;
-check("「更改料盘」弹窗里有料盘下拉", /id="rebindSpool"/.test(rebindHtml), rebindHtml.slice(0, 200));
+const rebindListHtml = () => sandbox.document.getElementById("rebindSpoolList").innerHTML;
+check("「更改料盘」弹窗里是可搜索的输入框（不再是纯下拉）",
+  /id="rebindSpoolSearch"/.test(rebindHtml) && !/id="rebindSpool"/.test(rebindHtml),
+  rebindHtml.slice(0, 300));
 check("下拉默认选中当前那盘（打开就能看出改的是哪条）",
-  /<option value="1"[^>]*selected/.test(rebindHtml), (rebindHtml.match(/<option[^>]*>/g) || []).join(" "));
-check("候选里有其它在库料盘", /value="2"/.test(rebindHtml));
+  state.rebindUsage.targetId === 1
+  && /A 盘/.test(sandbox.document.getElementById("rebindSpoolPicked").innerHTML),
+  `targetId=${state.rebindUsage && state.rebindUsage.targetId}`);
+check("候选里有其它在库料盘",
+  /data-id="2"/.test(rebindListHtml()), rebindListHtml().slice(0, 300));
 check("归档的料盘不进候选（改扣到归档盘上没意义）",
-  !/value="3"/.test(rebindHtml), (rebindHtml.match(/<option[^>]*>[^<]*/g) || []).join(" "));
+  !/data-id="3"/.test(rebindListHtml()), rebindListHtml().slice(0, 300));
 check("弹窗里说明了会「先退回再扣到新盘」", /退回/.test(rebindHtml));
-// 当前盘是归档盘时例外：必须留在候选里，否则打开看到空下拉会以为绑定丢了
+check("候选里默认全列（点开就像个普通下拉，不用先打字）",
+  (rebindListHtml().match(/pick-item/g) || []).length === 2,
+  `候选数=${(rebindListHtml().match(/pick-item/g) || []).length}`);
+// 当前盘是归档盘时例外：必须留在候选里，否则打开看到空列表会以为绑定丢了
 await sandbox.openRebindUsage(11, 3);
-const rebindArchived = sandbox.document.getElementById("modalHost").innerHTML;
 check("当前那盘即使已归档也要留在候选里",
-  /value="3"/.test(rebindArchived) && /<option value="3"[^>]*selected/.test(rebindArchived),
-  (rebindArchived.match(/<option[^>]*>/g) || []).join(" "));
+  /data-id="3"/.test(rebindListHtml())
+  && state.rebindUsage.targetId === 3
+  && /C 盘（已归档）/.test(sandbox.document.getElementById("rebindSpoolPicked").innerHTML),
+  rebindListHtml().slice(0, 300));
 // 没有流水（usage_id = 0）时不该弹窗 —— 弹了也改不动
 sandbox.document.getElementById("modalHost").innerHTML = "SENTINEL";
 await sandbox.openRebindUsage(0, 1);
@@ -1291,6 +1321,386 @@ check("关键字清空后全部回来", sandbox.filteredSpools().length === 3);
 sandbox.document.getElementById("modalHost").innerHTML = "";
 state.spools = [];
 
+
+// ── 17e. 「更改料盘」也要能打字搜索 ──────────────────────────────
+// 用户原话「还是无法直接输入」。上一轮只把「转移消耗」那个弹窗改成了可搜索，
+// 这个弹窗还是个纯 <select>，用户以为改过了、一试还是没有 —— 所以两条路
+// **必须共用同一套组件**，而不是各写一份。这里的断言就是钉「共用」这件事：
+// 同一个 renderSpoolPicker、同一个过滤口径、同一个空结果文案。
+console.log("");
+console.log("── 更改料盘：可搜索的目标料盘 ──");
+
+state.spools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", color_hex: "#9ca3af", remaining_weight: 720 },
+  { id: 9, name: "已归档的盘", brand: "魔创", material: "PLA", finish: "普通", color_name: "黑", color_hex: "#000", remaining_weight: 100, archived: true },
+];
+
+await sandbox.openRebindUsage(31, 2);
+const rbList = sandbox.document.getElementById("rebindSpoolList").innerHTML;
+check("「更改料盘」里是输入框 + 候选列表（不再是纯下拉）",
+  typeof sandbox.document.getElementById("rebindSpoolSearch") === "object"
+  && /pick-item/.test(rbList));
+check("候选默认全列（不预筛）", (rbList.match(/pick-item/g) || []).length === 3,
+  `候选数=${(rbList.match(/pick-item/g) || []).length}`);
+check("归档的料盘不进候选", !/已归档的盘/.test(rbList));
+check("默认选中「原来那盘」（一眼能看出当前扣的是哪盘）",
+  state.rebindUsage && state.rebindUsage.targetId === 2
+  && /大简 PETG-HT 工程黑/.test(sandbox.document.getElementById("rebindSpoolPicked").innerHTML),
+  `targetId=${state.rebindUsage && state.rebindUsage.targetId}`);
+check("输入框初始为空（选中项不能当搜索词填进去）",
+  (sandbox.document.getElementById("rebindSpoolSearch").value || "") === "");
+
+// 打字过滤
+sandbox.document.getElementById("rebindSpoolSearch").value = "哑光";
+sandbox.onRebindTargetInput();
+const rbFiltered = sandbox.document.getElementById("rebindSpoolList").innerHTML;
+check("打「哑光」后只剩那一盘", (rbFiltered.match(/pick-item/g) || []).length === 1
+  && /Polymaker/.test(rbFiltered), rbFiltered.slice(0, 200));
+
+sandbox.document.getElementById("rebindSpoolSearch").value = "zzz查不到";
+sandbox.onRebindTargetInput();
+check("搜不到时给提示（与转移弹窗同一句文案）",
+  /没有匹配/.test(sandbox.document.getElementById("rebindSpoolList").innerHTML));
+
+// 点选
+sandbox.pickRebindTarget(3);
+check("点选后 S.rebindUsage.targetId 跟着变",
+  state.rebindUsage.targetId === 3, `targetId=${state.rebindUsage.targetId}`);
+check("点选后输入框回填成料盘名",
+  sandbox.document.getElementById("rebindSpoolSearch").value === "Polymaker PLA 哑光 哑光灰",
+  sandbox.document.getElementById("rebindSpoolSearch").value);
+check("点选后列表重新列全", 
+  (sandbox.document.getElementById("rebindSpoolList").innerHTML.match(/pick-item/g) || []).length === 3);
+
+// 最关键的线：提交时发出去的 spool_id 必须是选中的那盘，不是输入框里的搜索词
+let rebindCalls = [];
+sandbox.fetch = async (url, opts) => {
+  if (String(url).includes("/api/usages/") && String(url).includes("/move")) {
+    rebindCalls.push({ url: String(url), body: JSON.parse((opts || {}).body || "{}") });
+  }
+  return { ok: true, status: 200, json: async () => ({}) };
+};
+sandbox.document.getElementById("rebindSpoolSearch").value = "哑光";
+await sandbox.submitRebindUsage();
+await new Promise((r) => setTimeout(r, 10));
+const rbSent = rebindCalls.filter((c) => c.body && c.body.spool_id != null);
+check("提交时发的是选中料盘的 id（不是输入框里的搜索词，parseInt 会得 NaN）",
+  rbSent.length === 1 && rbSent[0].body.spool_id === 3, JSON.stringify(rebindCalls));
+
+// 选回原来那盘 → 必须拦住（否则「确认更改」点下去什么都没发生，用户以为坏了）
+//
+// ⚠️ 提交成功后会 `S.rebindUsage = null` 并 `loadSpools()` —— 上面那个 fetch 桩
+// 不返回 `spools` 字段，于是 S.spools 被清成空数组，重开弹窗会走「还没有料盘可改扣」
+// 的早退分支。这是**桩的问题不是应用的问题**，所以这里补回数据再重开。
+rebindCalls = [];
+state.spools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", color_hex: "#9ca3af", remaining_weight: 720 },
+];
+await sandbox.openRebindUsage(31, 2);
+check("重开弹窗时 state 被重新填上（提交成功后是 null，不能接着改）",
+  state.rebindUsage !== null && state.rebindUsage.targetId === 2,
+  JSON.stringify(state.rebindUsage));
+state.rebindUsage.targetId = 2;              // 就是原来那盘
+await sandbox.submitRebindUsage();
+check("改成原来那盘时不发请求（提示「没变化」）",
+  rebindCalls.length === 0, JSON.stringify(rebindCalls));
+
+// 没选中 → 拦住
+rebindCalls = [];
+state.spools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", color_hex: "#9ca3af", remaining_weight: 720 },
+];
+await sandbox.openRebindUsage(31, 2);
+state.rebindUsage.targetId = 0;
+await sandbox.submitRebindUsage();
+check("没选料盘时不发请求", rebindCalls.length === 0, JSON.stringify(rebindCalls));
+
+// 提交成功之后 state 必须清掉：否则再点一次会重复发一遍同样的请求
+rebindCalls = [];
+state.spools = [
+  { id: 1, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通", color_name: "天蓝色", color_hex: "#3b82f6", remaining_weight: 0 },
+  { id: 2, name: "大简 PETG-HT 工程黑", brand: "大简", material: "PETG-HT", finish: "普通", color_name: "工程黑", color_hex: "#1f2937", remaining_weight: 560 },
+  { id: 3, name: "Polymaker PLA 哑光 哑光灰", brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "哑光灰", color_hex: "#9ca3af", remaining_weight: 720 },
+];
+await sandbox.openRebindUsage(31, 2);
+state.rebindUsage.targetId = 3;
+await sandbox.submitRebindUsage();
+await new Promise((r) => setTimeout(r, 10));
+check("恢复正常路径发得出去（上面几条拦住的是真该拦的）",
+  rebindCalls.filter((c) => c.body && c.body.spool_id === 3).length === 1,
+  JSON.stringify(rebindCalls));
+check("提交成功后 S.rebindUsage 被清空（防重复提交）",
+  state.rebindUsage === null, JSON.stringify(state.rebindUsage));
+
+sandbox.fetch = origFetch;
+sandbox.closeModal();
+sandbox.document.getElementById("modalHost").innerHTML = "";
+state.spools = [];
+
+
+// ── 17f. 筛选下拉只列「库存里真有的值」 ──────────────────────────
+// 用户原话「在这三个选项中，只显示已经在库存的料盘，没有的不要显示相关信息」。
+// 原来那里填的是**全量预设**（二十几个品牌 / 28 种材料 / 15 种外观），
+// 绝大多数一盘料都没有 —— 选中它们只会得到空列表，看着像「筛坏了」。
+//
+// 这里必须钉三件事，缺一条就会回归：
+//   ① 选项来自 S.spools，不是 S.catalog
+//   ② 取值走 SUMMARY_DRILL_FIELDS.*.norm()（filteredSpools 的比对口径），
+//      否则「未填写」和空串会变成两个互不相同的值，选中哪个都筛不出东西
+//   ③ loadCatalog 不许再回来覆写这三个下拉（它会用全量预设把结果盖掉）
+console.log("");
+console.log("── 库存页筛选下拉只列库存里真有的值 ──");
+
+state.spools = [
+  { id: 1, brand: "拓竹", material: "PETG", finish: "普通", color_name: "黑", color_hex: "#000", remaining_weight: 100 },
+  { id: 2, brand: "拓竹", material: "PLA", finish: "哑光", color_name: "白", color_hex: "#fff", remaining_weight: 200 },
+  { id: 3, brand: "Polymaker", material: "PLA", finish: "哑光", color_name: "灰", color_hex: "#888", remaining_weight: 300 },
+  { id: 4, brand: "", material: "", finish: "", color_name: "未知", color_hex: "#666", remaining_weight: 50 },
+];
+// 目录里放一堆库存里没有的品牌/材料/外观：正确的实现应当完全无视它们
+state.catalog = {
+  brands: ["拓竹", "Polymaker", "大简", "魔创", "兰博", "Kexcelled", "爱酷乐", "爱丽兹 Allizz",
+           "锐造", "JAYO", "天瑞", "iBOSS", "R3D", "彩多屋"],
+  materials: ["PLA", "PETG", "PETG-HT", "ABS", "ASA", "TPU", "PA", "PC", "PVA", "HIPS"],
+  finishes: ["普通", "亮面", "哑光", "磨砂", "丝绸", "珠光", "金属", "半透", "透明", "渐变",
+             "双色", "木纹", "碳纤", "夜光", "其他"],
+  colors: [],
+};
+sandbox.syncFilterOptions();
+
+// ⚠️ 别用 `el.options` 读结果：沙箱的 stubEl 把 `options` 当成普通数组，
+// 而 refillSelect 走的是 `sel.innerHTML = "..."` —— innerHTML 在桩里不解析，
+// 所以 `.options` 永远是**上一次 appendChild 留下的残渣**。
+// 第一次写这几条断言时就是这么红的（也有几条因此假绿过），所以改成解析 innerHTML。
+const optValues = (id) => {
+  const html = String(sandbox.document.getElementById(id).innerHTML || "");
+  return [...html.matchAll(/<option[^>]*value="([^"]*)"/g)].map((m) => m[1]);
+};
+const optCount = (id) => {
+  const html = String(sandbox.document.getElementById(id).innerHTML || "");
+  return (html.match(/<option/g) || []).length;
+};
+const brandOpts = optValues("spoolBrand");
+const matOpts = optValues("spoolMaterial");
+const finOpts = optValues("spoolFinish");
+check("三个下拉都真的被重填了（不是空 HTML）",
+  brandOpts.length > 0 && matOpts.length > 0 && finOpts.length > 0,
+  `brand=${brandOpts.length} material=${matOpts.length} finish=${finOpts.length}`);
+
+// ⚠️ 断言用**集合**比而不是排好序的字符串：这几个下拉的排序走
+// `localeCompare(..., "zh")`，而中文字的先后由 ICU 的拼音表决定 ——
+// 「普通」和「哑光」谁在前跟环境有关，钉死顺序会得到一条随时会红的假断言。
+const asSet = (arr) => [...new Set(arr.filter(Boolean))].sort().join(",");
+check("品牌下拉只列库存里有的（拓竹 / Polymaker / 未填写）",
+  asSet(brandOpts) === ["Polymaker", "拓竹", "未填写"].sort().join(","),
+  JSON.stringify(brandOpts));
+check("库存里没有的品牌一个都不出现（大简 / 魔创 / 爱酷乐 等）",
+  !brandOpts.includes("大简") && !brandOpts.includes("魔创") && !brandOpts.includes("爱酷乐"),
+  JSON.stringify(brandOpts));
+check("材料下拉只列库存里有的（PLA / PETG / 未填写）",
+  asSet(matOpts) === ["PETG", "PLA", "未填写"].sort().join(","), JSON.stringify(matOpts));
+check("外观下拉只列库存里有的（普通 / 哑光）",
+  asSet(finOpts) === ["普通", "哑光"].sort().join(","), JSON.stringify(finOpts));
+check("材料里没有库存中不存在的值（PETG-HT / ABS 等）",
+  !matOpts.includes("PETG-HT") && !matOpts.includes("ABS"), JSON.stringify(matOpts));
+check("外观里没有库存中不存在的值（丝绸 / 磨砂 等）",
+  !finOpts.includes("丝绸") && !finOpts.includes("磨砂"), JSON.stringify(finOpts));
+
+// 缺失值必须按 norm 口径收成一个值 —— 「未填写」「普通」各只出现一次
+check("空品牌收成「未填写」且只一次",
+  brandOpts.filter((v) => v === "未填写").length === 1, JSON.stringify(brandOpts));
+check("空材料收成「未填写」且只一次",
+  matOpts.filter((v) => v === "未填写").length === 1, JSON.stringify(matOpts));
+check("空外观收成「普通」（norm 口径）且不重复",
+  finOpts.filter((v) => v === "普通").length === 1, JSON.stringify(finOpts));
+check("每个下拉都带一个空值占位项（「全部 X」）",
+  brandOpts[0] === "" && matOpts[0] === "" && finOpts[0] === "",
+  `${JSON.stringify(brandOpts[0])} ${JSON.stringify(matOpts[0])} ${JSON.stringify(finOpts[0])}`);
+
+// 选中下拉里的值，必须真能筛出料盘 —— 这才是「只列有的」的意义
+state.spoolTab = "all";
+state.spoolSort = { key: "id", dir: "asc" };
+sandbox.document.getElementById("spoolSearch").value = "";
+sandbox.document.getElementById("spoolBrand").value = "拓竹";
+check("选中「拓竹」能筛出 2 盘（选项不是摆设）",
+  sandbox.filteredSpools().length === 2, String(sandbox.filteredSpools().length));
+sandbox.document.getElementById("spoolBrand").value = "未填写";
+check("选中「未填写」能筛出那盘没写品牌的",
+  sandbox.filteredSpools().length === 1 && sandbox.filteredSpools()[0].id === 4,
+  sandbox.filteredSpools().map((s) => s.id).join(","));
+sandbox.document.getElementById("spoolBrand").value = "";
+sandbox.document.getElementById("spoolFinish").value = "哑光";
+check("选中「哑光」能筛出 2 盘",
+  sandbox.filteredSpools().length === 2, String(sandbox.filteredSpools().length));
+sandbox.document.getElementById("spoolFinish").value = "";
+
+// 空库：只剩「全部 X」一项，别退回全量预设
+state.spools = [];
+sandbox.syncFilterOptions();
+check("空库时品牌下拉只剩「全部品牌」一项",
+  optCount("spoolBrand") === 1, JSON.stringify(optValues("spoolBrand")));
+check("空库时材料下拉只剩「全部材料」一项",
+  optCount("spoolMaterial") === 1, JSON.stringify(optValues("spoolMaterial")));
+check("空库时外观下拉只剩「全部外观」一项",
+  optCount("spoolFinish") === 1, JSON.stringify(optValues("spoolFinish")));
+
+// loadCatalog 不许再回来把这些下拉覆写成全量预设（上一次的回归点）
+state.spools = [{ id: 1, brand: "拓竹", material: "PLA", finish: "普通", color_name: "黑", color_hex: "#000", remaining_weight: 10 }];
+sandbox.syncFilterOptions();
+const beforeCatalog = sandbox.document.getElementById("spoolBrand").innerHTML;
+sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => ({
+  brands: ["拓竹", "Polymaker", "大简", "魔创", "兰博", "Kexcelled", "爱酷乐", "其他"],
+  materials: ["PLA", "PETG", "PETG-HT"], finishes: ["普通", "哑光", "丝绸"], colors: [],
+  preset_brands: ["拓竹", "Polymaker"],
+}) });
+await sandbox.loadCatalog();
+check("loadCatalog 不去动这三个筛选下拉（谁后跑谁说了算的竞态已消除）",
+  sandbox.document.getElementById("spoolBrand").innerHTML === beforeCatalog,
+  `前=${beforeCatalog.slice(0, 90)} 后=${String(sandbox.document.getElementById("spoolBrand").innerHTML).slice(0, 90)}`);
+check("loadCatalog 之后仍是「只有拓竹」而不是全量预设",
+  optValues("spoolBrand").filter(Boolean).join(",") === "拓竹",
+  JSON.stringify(optValues("spoolBrand")));
+
+sandbox.fetch = origFetch;
+state.spools = [];
+
+
+// ── 17g. 原生 datalist 「点击即选」 ──────────────────────────────
+// 用户原话「这个下拉菜单每次都要先删除才能选择，最好点击就能选择」。
+// 根因：原生 datalist 的候选是**拿输入框当前值做子串过滤**的 ——
+// 外观框预填着「普通」，点开就只剩「普通」一条，看着像「不删掉就选不了别的」。
+// datalist 没有属性可以关掉这个过滤，只能聚焦时先把值挪走。
+//
+// 三态是纯函数，**界面上看不出对错**（清空一下再放回去，肉眼就是闪一下），
+// 所以状态转移必须在这里逐条钉住。
+console.log("");
+console.log("── 原生下拉「点击即选」（聚焦清空、离开还原） ──");
+
+// ① 聚焦时把值挪走
+check("聚焦有值的框：清空并记下原值",
+  JSON.stringify(sandbox.comboFocus(null, "普通")) === JSON.stringify({ cleared: true, restore: "普通" }),
+  JSON.stringify(sandbox.comboFocus(null, "普通")));
+check("聚焦本来就是空的框：不用动（别白闪一下）",
+  sandbox.comboFocus(null, "").cleared === false
+  && sandbox.comboFocus(null, null).cleared === false);
+check("已经清空过再聚焦一次：不覆盖已记下的原值",
+  sandbox.comboFocus({ cleared: true, saved: "普通" }, "").restore === "普通");
+
+// ② 用户动过 → 原值作废
+check("打字/点选后，原值不再作废还原",
+  sandbox.comboInput().cleared === false && sandbox.comboInput().restore === "");
+
+// ③ 离开：只有「清空过 + 仍是空的」才还原
+check("点了就切走（什么都没选）：还原成原值",
+  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "")) 
+    === JSON.stringify({ cleared: false, restore: "普通", apply: true }),
+  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "")));
+check("选了一条：值非空，不许把原值盖回去（这正是「点了没反应」的老毛病）",
+  sandbox.comboBlur({ cleared: true, saved: "普通" }, "丝绸").apply === false,
+  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "丝绸")));
+check("没清空过（压根没聚焦过）：离开不动它",
+  sandbox.comboBlur(null, "普通").apply === false);
+check("清空过、但用户手动打了字：保留打的字",
+  sandbox.comboBlur({ cleared: true, saved: "普通" }, "磨砂").apply === false);
+
+// ④ 色卡那条路：pickPresetColor 是**直接给 value 赋值**、不派发 input 事件，
+//    标记还留着。少了判空，用户刚点中的颜色名会在失焦时被还原 —— 比原毛病更难查。
+check("点色卡后失焦（value 已赋值、标记未清）不会被还原",
+  sandbox.comboBlur({ cleared: true, saved: "黑色" }, "哑光白").apply === false,
+  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "黑色" }, "哑光白")));
+
+// ⑤ 真的挂上了吗？弹窗里的两个 datalist 都要被武装，且只挂一次
+check("两个 datalist 输入框都在弹窗里（外观 / 颜色名称）",
+  /id="f_finish"[^>]*list="finishList"/.test(appSrc)
+  && /id="f_color_name"[^>]*list="colorList"/.test(appSrc));
+check("openModal 里调用了 armComboInputs（写了函数不等于接上了）",
+  /armComboInputs\(host\)/.test(appSrc), "openModal 里没挂");
+check("armComboInput 有幂等保护（每次开弹窗都会扫一遍，不能重复挂）",
+  /dataset\.comboArmed === "1"/.test(appSrc) || /_comboArmed/.test(appSrc));
+check("用 mousedown 而不是 focus（focus 里清空会让光标落错位置）",
+  /addEventListener\("mousedown"/.test(appSrc) && /armComboInput/.test(appSrc));
+
+
+// ── 17h. 选品牌自动带出实测皮重 ──────────────────────────────────
+// 用户刚报了一批上秤实测的空盘重量。选完品牌还要自己记数字太没必要，
+// 但**绝不能把用户手填的皮重冲掉** —— 那比不带更糟。
+console.log("");
+console.log("── 选品牌自动带出实测皮重 ──");
+
+state.catalog = {
+  ...(state.catalog || {}),
+  spool_weights: {
+    "拓竹": [239, 190],
+    "Polymaker": [150, 220],
+    "大简": [239, 150],
+    "魔创": [220, 200],
+    "兰博": [160, 200],
+    "Kexcelled": [239, 240],
+    "爱酷乐": [239],
+  },
+};
+const tareEl = () => sandbox.document.getElementById("f_spool_weight");
+
+// ① 全新表单（皮重还是默认 250）→ 选品牌带出实测值
+tareEl().value = String(sandbox.TARE_DEFAULT);
+tareEl().dataset = {};
+sandbox.applyBrandTare("大简");
+check("皮重还是默认值时，选「大简」带出实测 239",
+  Number(tareEl().value) === 239, String(tareEl().value));
+
+// ② 换品牌：上一次是自动带的 → 应该换成新品牌的
+tareEl().value = "239";
+tareEl().dataset = { autoTare: "1" };
+sandbox.applyBrandTare("Polymaker");
+check("上一档是自动带的，换品牌时跟着换成新品牌的实测值（150）",
+  Number(tareEl().value) === 150, String(tareEl().value));
+
+// ③ 用户手填过 → 不许动
+tareEl().value = "123";
+tareEl().dataset = { autoTare: "" };    // onTareInput 打过的标记
+sandbox.applyBrandTare("拓竹");
+check("用户手填的皮重不会被品牌带出来的值冲掉",
+  Number(tareEl().value) === 123, String(tareEl().value));
+
+// ④ 自定义品牌没数据 → 什么都不做（不能清成空）
+sandbox.applyBrandTare("自家作坊");
+check("没收录的品牌不改动皮重框（不会清空）",
+  Number(tareEl().value) === 123, String(tareEl().value));
+
+// ⑤ 每个实测品牌的首选值都要能带对
+const wantTares = { "拓竹": 239, "Polymaker": 150, "大简": 239, "魔创": 220,
+                    "兰博": 160, "Kexcelled": 239, "爱酷乐": 239 };
+const tareHits = [];
+for (const [brand, want] of Object.entries(wantTares)) {
+  tareEl().value = String(sandbox.TARE_DEFAULT);
+  tareEl().dataset = {};
+  sandbox.applyBrandTare(brand);
+  tareHits.push(`${brand}:${tareEl().value}${Number(tareEl().value) === want ? "" : "✗"}`);
+}
+check("七个实测品牌带出来的皮重都对",
+  !tareHits.some((h) => h.includes("✗")), tareHits.join(" "));
+
+// ⑥ 用户在皮重框里打字后，标记必须被清掉（否则下一步换品牌又会覆盖）
+tareEl().value = "180";
+tareEl().dataset = { autoTare: "1" };
+sandbox.onTareInput();
+check("在皮重框里打字会清掉「自动带出」标记",
+  tareEl().dataset.autoTare === "", JSON.stringify(tareEl().dataset));
+sandbox.applyBrandTare("魔创");
+check("打字之后再换品牌，手填的值仍然是安全的",
+  Number(tareEl().value) === 180, String(tareEl().value));
+
+// ⑦ 源码级：皮重框真的挂了 oninput（不然标记永远清不掉，会一直覆盖用户的值）
+check("皮重输入框挂了 oninput=onTareInput()（漏了就永远覆盖用户填的值）",
+  /id="f_spool_weight"[\s\S]{0,120}oninput="onTareInput\(\)"/.test(appSrc));
+check("onBrandChoice 里真的调了 applyBrandTare（写了函数不等于接上了）",
+  /function onBrandChoice\(\)[\s\S]{0,600}applyBrandTare\(sel\.value\)/.test(appSrc));
 
 // ── 18. 打印记录列表行内的「耗材 / 绑定」两个键 ──────────────────
 // 用户要的是「列表里直接点」，不是「先进详情再点」。最容易错的是：

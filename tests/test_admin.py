@@ -104,7 +104,7 @@ def test_normalize() -> None:
 
     # 保留的品牌照旧
     for name in ("拓竹", "Polymaker", "大简", "爱丽兹 Allizz", "Kexcelled", "兰博", "魔创",
-                 "锐造", "JAYO", "天瑞", "iBOSS", "R3D"):
+                 "锐造", "JAYO", "天瑞", "iBOSS", "R3D", "爱酷乐"):
         check(f"品牌预设里有：{name}", name in BRAND_PRESETS, str(BRAND_PRESETS))
     check("「其他」排在候选末尾", BRAND_PRESETS[-1] == "其他", str(BRAND_PRESETS))
 
@@ -115,6 +115,8 @@ def test_normalize() -> None:
         ("tinmorry", "天瑞"), ("tinmore", "天瑞"), ("天瑞科技", "天瑞"),
         ("iboss", "iBOSS"), ("i boss", "iBOSS"),
         ("r3d", "R3D"), ("r3d印维", "R3D"), ("印维", "R3D"),
+        # 2026-09-18 用户报皮重时带出来的新品牌
+        ("icool", "爱酷乐"), ("icool3d", "爱酷乐"), ("爱酷", "爱酷乐"), ("爱酷乐3d", "爱酷乐"),
     ]
     for raw, want in new_brands:
         got = normalize_brand(raw)
@@ -123,12 +125,23 @@ def test_normalize() -> None:
         check(f"新品牌在预设里：{want}", want in BRAND_PRESETS, str(BRAND_PRESETS))
 
     # 每个预设品牌都应挂上色卡系列（否则下拉选了品牌没色可选）
+    #
+    # 例外白名单：品牌已经「能用」（有规范名 + 皮重 + 在预设里），但**官方色卡还没收**。
+    # 用户是按「我手上有这盘料」来的（报皮重时顺带把品牌带出来），色卡得等他给官方链接。
+    # 放进白名单而不是放宽整条断言 —— 松开「品牌必须有色卡」就再也没人挡得住
+    # 「随手加个品牌名但没数据」这种半成品进预设了。
+    no_series_yet = {"爱酷乐"}
     for name in BRAND_PRESETS:
-        if name == "其他":
+        if name == "其他" or name in no_series_yet:
             continue
         check(f"品牌有色卡系列：{name}",
               name in BRAND_COLOR_SERIES and len(BRAND_COLOR_SERIES[name]) > 0,
               "0 个系列")
+    # 白名单本身要能被清掉：一旦补了色卡就该从名单里划掉，留在里面会掩盖回归
+    for name in no_series_yet:
+        check(f"白名单里的品牌还没补色卡：{name}",
+              name not in BRAND_COLOR_SERIES or not BRAND_COLOR_SERIES[name],
+              "已有色卡，请从 no_series_yet 里删掉")
 
 
 # ── 2. 品牌下拉框无重复 ───────────────────────────────────────────
@@ -301,6 +314,50 @@ def test_http_delete() -> None:
               abs(r.json().get("price_total", -1) - 0.0) < 1e-9, str(r.json().get("price_total")))
 
 
+# ── 6. 空盘皮重：用户实测值必须排在第一位 ─────────────────────────
+def test_measured_spool_weights() -> None:
+    """用户 2026-09-18 报的实测皮重。
+
+    为什么必须钉死在测试里：皮重是「称重校准」的换算基数 —— 写错了不会报错，
+    只会让「余量」悄悄偏掉几十克。而且这些数**是上秤量出来的，不是厂商标称**，
+    以后谁要是「顺手按官网规格对齐一下」就会把它改回去。
+
+    口径：`spool_weight_options(brand)` 的**第一个**是首选档，新建料盘时
+    自动带出来。所以「用户实测的那个数」必须排第一，不能排在第二位。
+    """
+    measured = {
+        "大简": 239.0,
+        "Polymaker": 150.0,
+        "拓竹": 239.0,
+        "魔创": 220.0,
+        "兰博": 160.0,
+        "Kexcelled": 239.0,
+        "爱酷乐": 239.0,
+    }
+    for brand, grams in measured.items():
+        opts = spool_weight_options(brand)
+        check(f"{brand} 有皮重选项", bool(opts), str(opts))
+        if not opts:
+            continue
+        check(f"{brand} 首选皮重 = 实测 {grams:g} g", float(opts[0]) == grams,
+              f"实际首选 {opts[0] if opts else None} / 全部 {opts}")
+        check(f"{brand} 实测值在候选里", any(float(o) == grams for o in opts), str(opts))
+
+    # 别名写法也要落到同一份皮重上（否则用户打「icool」拿不到 239）
+    for raw, brand, grams in (("icool", "爱酷乐", 239.0), ("爱酷", "爱酷乐", 239.0),
+                              ("bambu", "拓竹", 239.0), ("polymaker", "Polymaker", 150.0)):
+        opts = spool_weight_options(normalize_brand(raw))
+        check(f"别名 {raw!r} 拿到 {brand} 的皮重", bool(opts) and float(opts[0]) == grams,
+              f"实际 {opts}")
+
+    # 没有实测数据的品牌也不能是空列表 —— 界面上会变成「皮重：无选项」，
+    # 而新建料盘时拿不到默认值。（它们走的是「估算」档，注释里已标明。）
+    for brand in BRAND_PRESETS:
+        if brand == "其他":
+            continue
+        check(f"{brand} 皮重非空", spool_weight_options(brand) != [], "空列表")
+
+
 if __name__ == "__main__":
     print("== 品牌归一 ==")
     test_normalize()
@@ -308,6 +365,8 @@ if __name__ == "__main__":
     test_brand_migration()
     test_http_brand()
     test_http_delete()
+    print("\n== 空盘皮重（用户实测） ==")
+    test_measured_spool_weights()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

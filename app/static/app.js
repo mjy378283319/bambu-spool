@@ -295,6 +295,9 @@ function openModal(title, bodyHtml, actionsHtml, wide = false) {
         <div class="actions">${actionsHtml || '<button onclick="closeModal()">关闭</button>'}</div>
       </div>
     </div>`;
+  // 弹窗里所有「点一下就能选」的组合框，插进 DOM 之后再挂处理器。
+  // 必须在 innerHTML 之后：查询得到才挂得上（前几轮踩过「写了新函数不等于接上了」）。
+  armComboInputs(host);
   // 弹窗进历史：后退键先关弹窗（用户直觉），再退才换视图。
   // 深链（#spool= / #bind=）那次不 push —— 那条记录本身就是「打开这个弹窗」，
   // 再 push 一条 #modal 的话，后退会先退到 #spool= 又把它重新打开，看着像没关掉。
@@ -448,20 +451,125 @@ function refillSelect(id, values, placeholder) {
   if (current && values.includes(current)) sel.value = current;
 }
 
+/* ── 「点一下就能选」的组合框（原生 datalist 的补救） ──────
+ *
+ *  用户反馈（2026-09-18）：「这个下拉菜单每次都要先删除才能选择，最好点击就能选择。」
+ *  截图里高亮的是料盘表单的**外观**字段 —— 那是个 <input list="finishList">。
+ *
+ *  为什么会「必须先删掉」：原生 datalist 的候选是拿**输入框当前的值做子串过滤**的。
+ *  外观框预填着「普通」，点开箭头时浏览器只留下名字里含「普通」的那一条 ——
+ *  整份候选只剩一项，看起来就像「不删掉就选不了别的」。颜色名称框同理
+ *  （预填「黑色」→ 只列带「黑色」的颜色）。
+ *
+ *  datalist 没有任何属性可以关掉这个过滤，所以只能自己来：**聚焦时先把值挪走**，
+ *  候选因此全量展开；离开时若用户没动过，再把原值放回去。整个过程对用户是
+ *  「点一下 → 满列表 → 点一条 → 完事」，而自由输入的能力一点没少。
+ *
+ *  三态由 `comboFocus` / `comboInput` / `comboBlur` 三个纯函数决定，
+ *  它们不改 DOM、只算「现在该怎么办」—— 因为这套逻辑的状态转移（尤其是
+ *  「点了色卡要保留、只是切走要还原」）靠肉眼看界面根本分不出来。
+ */
+
+/** 聚焦：把当前值暂存起来并清空，让候选全量展开。
+ *  返回值告诉调用方要不要真的动 DOM（已经是「已清空」态就别重复清）。 */
+function comboFocus(state, value) {
+  const cur = String(value == null ? "" : value);
+  if (state && state.cleared) return { cleared: false, restore: state.saved };
+  if (!cur) return { cleared: false, restore: "" };   // 本来就是空的，没什么好挪
+  return { cleared: true, restore: cur };
+}
+
+/** 输入/选中：用户自己动过了，原值作废（不能在他切走时把打的字盖回去）。 */
+function comboInput() { return { cleared: false, restore: "" }; }
+
+/** 离开：只有「聚焦时清空过、且离开时仍然是空的」才还原。
+ *
+ *  ⚠️ 判空是必须的，不能只看 cleared 标记：点色卡（`pickPresetColor`）和
+ *  自动预填（`applyInferredFinish`）都是**直接给 input.value 赋值**、不派发
+ *  input 事件，标记还留着。少了这个判空，用户刚点中的颜色名会在失焦时
+ *  被还原成聚焦前的旧名字 —— 「点了没反应」，比原来的毛病更难查。
+ *
+ *  返回值**永远带 `apply`**（true/false），不给 undefined：
+ *  调用方写的是 `if (!r.apply) return;`，测试也断言 `apply === false` ——
+ *  少一个键就是 `undefined === false` 为假，两边都会静默走错分支。 */
+function comboBlur(state, value) {
+  const cur = String(value == null ? "" : value);
+  if (state && state.cleared && !cur) {
+    return { cleared: false, restore: String(state.saved || ""), apply: true };
+  }
+  return { cleared: false, restore: "", apply: false };
+}
+
+/** 给一个 <input list=...> 挂上「点击即选」。
+ *  用 mousedown 而不是 focus：Chromium 在 mousedown 之后才把光标放进输入框，
+ *  在 focus 里清空的话光标会落到错误的位置；mousedown 里清则是「先空、再放光标」。 */
+function armComboInput(el) {
+  if (!el || el.dataset.comboArmed === "1") return;
+  el.dataset.comboArmed = "1";
+  el.addEventListener("mousedown", () => {
+    const r = comboFocus(el._combo, el.value);
+    if (!r.cleared) { el._combo = { cleared: false, saved: r.restore }; return; }
+    el._combo = { cleared: true, saved: r.restore };
+    // 原值退到 placeholder 上：清空之后用户还能看见「原来是普通」，
+    // 不至于像东西被弄丢了；placeholder 原本的提示语另存一份，还原时放回去。
+    if (el._comboPh == null) el._comboPh = el.getAttribute("placeholder") || "";
+    el.setAttribute("placeholder", "当前：" + r.restore);
+    el.value = "";
+  });
+  el.addEventListener("input", () => { el._combo = comboInput(); });
+  el.addEventListener("blur", () => {
+    const r = comboBlur(el._combo, el.value);
+    el._combo = { cleared: false, saved: "" };
+    if (!r.apply) return;
+    el.value = r.restore;
+    if (el._comboPh != null) {
+      if (el._comboPh) el.setAttribute("placeholder", el._comboPh);
+      else el.removeAttribute("placeholder");
+      el._comboPh = null;
+    }
+  });
+}
+
+/** 把弹窗里所有 datalist 组合框武装起来。
+ *
+ *  只能按 DOM 结构找（`input[list]`），不能写死 id：外观/颜色名称两个框在这里，
+ *  图片识色的「手动加色」也是，以后再加还会是。 */
+function armComboInputs(root) {
+  const nodes = (root || document).querySelectorAll("input[list]");
+  nodes.forEach((el) => armComboInput(el));
+}
+
 /* ── 数据加载 ──────────────────────────────────────────── */
 async function loadCatalog() {
   try {
     S.catalog = await api("/api/catalog");
-    refillSelect("spoolMaterial", S.catalog.materials, "全部材料");
-    refillSelect("spoolBrand", S.catalog.brands, "全部品牌");
-    refillSelect("spoolFinish", S.catalog.finishes, "全部外观");
+    // ⚠️ 这里**不要**再 refillSelect 那三个筛选下拉（2026-09-18）。
+    // 它们以前在这里被全量预设填满，而 loadCatalog 与 renderSpools 的先后顺序
+    // 不确定 —— 谁后跑谁说了算，于是「只列库存里有的」会被这份全量预设覆盖回去。
+    // 现在统一由 syncFilterOptions()（在 renderSpools 里）独家负责。
   } catch (err) { /* 目录加载失败不阻塞主界面 */ }
 }
 
-/** 库存页筛选项跟着实际数据走：老数据里的品牌/外观不在预设里也要能筛出来。 */
+/** 库存页筛选项跟着**实际数据**走。
+ *
+ *  ⚠️ 2026-09-18 改（用户反馈「这三个选项中，只显示已经在库存的料盘，没有的不要显示相关信息」）：
+ *  原来这里用的是全量预设（`S.catalog.brands` / `finishChoices()`），于是下拉里躺着
+ *  二十几个品牌、28 种材料、15 种外观，其中绝大多数**一盘料都没有** —— 选中它们
+ *  只会得到一个空列表，看着像「筛坏了」。改成只列 `S.spools` 里真正出现过的值。
+ *
+ *  两个必须保留的细节：
+ *  ① 取值走 `SUMMARY_DRILL_FIELDS.*.norm()` —— 它才是 `filteredSpools()` 的比对口径。
+ *     拿原始字段去重会把「未填写」和空串当成两个值，选中其中任何一个都筛不出东西。
+ *  ② 空库时下拉里只剩「全部 X」那一项（而不是退回全量预设），否则又是满屏选了没结果的项。
+ */
 function syncFilterOptions() {
-  refillSelect("spoolBrand", brandChoices(), "全部品牌");
-  refillSelect("spoolFinish", finishChoices(), "全部外观");
+  const present = (field) => {
+    const norm = SUMMARY_DRILL_FIELDS[field].norm;
+    return [...new Set(S.spools.map(norm))].sort((a, b) => String(a).localeCompare(String(b), "zh"));
+  };
+  refillSelect("spoolBrand", present("brand"), "全部品牌");
+  refillSelect("spoolMaterial", present("material"), "全部材料");
+  refillSelect("spoolFinish", present("finish"), "全部外观");
 }
 
 /** 客户端时区（UTC 以东的分钟数）。后端按它切「今天 / 本周」的边界。 */
@@ -1715,7 +1823,8 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
     <p class="hint hidden" id="finishHint"></p>
     <div class="field-row">
       <label class="field"><span>空盘皮重（g）</span>
-        <input type="number" id="f_spool_weight" value="${value.spool_weight}" step="1" /></label>
+        <input type="number" id="f_spool_weight" value="${value.spool_weight}" step="1"
+               oninput="onTareInput()" /></label>
       <label class="field"><span>满盘净重（g）</span>
         <input type="number" id="f_initial_weight" value="${value.initial_weight}" step="10" /></label>
     </div>
@@ -1738,7 +1847,14 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
   renderColorPresets();
 }
 
-/** 品牌下拉切到「＋ 自定义品牌…」时露出输入框。 */
+/** 品牌下拉切到「＋ 自定义品牌…」时露出输入框。
+ *
+ *  2026-09-18 追加：选品牌时把**该品牌的实测空盘皮重**带进「空盘皮重」框。
+ *  用户刚报了一批上秤实测值（大简 239 / Polymaker 150 / 拓竹 239 / 魔创 220 /
+ *  兰博 160 / Kexcelled 239 / 爱酷乐 239），选完品牌还要自己记数字太没必要。
+ *
+ *  ⚠️ 只在皮重框**还是默认值**时才带 —— 用户手动改过的数字绝不能被改掉
+ *  （「选了品牌就把我填的皮重冲了」是比不带更糟的结果）。 */
 function onBrandChoice() {
   const sel = document.getElementById("f_brand");
   const row = document.getElementById("brandCustomRow");
@@ -1749,7 +1865,34 @@ function onBrandChoice() {
     const input = document.getElementById("f_brand_custom");
     if (input && !input.value) input.focus();
   }
+  applyBrandTare(sel.value);
   renderColorPresets();
+}
+
+/** 品牌 -> 首选皮重（后台 `catalog.BRAND_SPOOL_WEIGHTS` 的第一个，即用户实测值）。
+ *  `S.catalog.spool_weights` 里没有这个品牌（自定义品牌）就什么都不做。 */
+const TARE_DEFAULT = 250;   // 新建料盘表单的初始皮重，和 openSpoolDialog 保持一致
+
+function applyBrandTare(brand) {
+  const el = document.getElementById("f_spool_weight");
+  if (!el) return;
+  const weights = (S.catalog.spool_weights || {})[brand] || [];
+  const want = weights[0];
+  if (want == null) return;
+  const cur = parseFloat(el.value);
+  // 只在空白/默认值/上一次自动带出来的值上覆盖，用户手填的数字留着
+  if (Number.isNaN(cur) || cur === TARE_DEFAULT || el.dataset.autoTare === "1") {
+    el.value = String(want);
+    el.dataset.autoTare = "1";
+    return;
+  }
+  if (Math.abs(cur - Number(want)) < 1e-9) return;
+}
+
+/** 用户在皮重框里打过字 -> 之后选品牌就不再自动带值。 */
+function onTareInput() {
+  const el = document.getElementById("f_spool_weight");
+  if (el) el.dataset.autoTare = "";
 }
 
 /** 读当前表单里的品牌：选「自定义」时取输入框的值。 */
@@ -2056,23 +2199,75 @@ function spoolFilteredByKeyword(s, kw) {
   return spoolMatches(s, kw);
 }
 
-/** 渲染「目标料盘」候选列表。query 为空时列全部。 */
-function renderMoveTargets(query) {
-  const box = document.getElementById("moveTargetList");
+/** 渲染「目标料盘」候选列表。query 为空时列全部。
+ *
+ *  ⚠️ 这个组件同时服务**两个**弹窗（2026-09-18）：
+ *  · 「把这条消耗转到另一盘料」（`openMoveDialog`，输入框 id `moveTargetSearch`）
+ *  · 「更改料盘」（`openRebindUsage`，输入框 id `rebindSpoolSearch`）
+ *  两处只在「用哪个 input id / 选中值存哪」上有差别，其余（检索口径、排序、
+ *  点选行为、空结果文案）必须一致 —— 所以候选列表和点选逻辑都做成参数化的，
+ *  而不是复制一份出来改。复制出来的那份一定会漂移。
+ *
+ *  **候选池由调用方给，这里不自己过滤**（`bindCandidates(选中值)`）：
+ *  「归档的不进候选、但当前正绑着的那盘例外」这条规则以前在槽位弹窗里踩过一次 ——
+ *  本次第一个版本在这里写死 `filter(!s.archived)`，于是「改成原来那盘已经归档」时
+ *  候选里没有它，提示行写「还没有选中料盘」，看着像绑定丢了。规则各写一份必然漂。
+ *
+ *  @param {string} listId  候选列表容器的 id
+ *  @param {string} query   搜索词
+ *  @param {number|null} selectedId 当前选中值（用来标 on）
+ *  @param {string} pickFn  点选回调名（挂在 window 上，供 onclick 调用）
+ *  @param {Array} pool     候选料盘（调用方用 bindCandidates 取）
+ */
+function renderSpoolPicker(listId, query, selectedId, pickFn, pool) {
+  const box = document.getElementById(listId);
   if (!box) return;
-  const all = (S.spools || []).filter((s) => !s.archived);
-  const hits = all.filter((s) => spoolMatches(s, query));
-  // 转移的前提是源盘和目标盘不是同一盘，这里不排除任何盘（源盘也可以被选回来），
-  // 但把当前选中的那盘标出来，免得用户以为没选上。
+  const hits = (pool || []).filter((s) => spoolMatches(s, query));
   box.innerHTML = hits.length
     ? hits.map((s) => `
-        <button type="button" class="pick-item${s.id === S.moveTargetId ? " on" : ""}"
-                onclick="pickMoveTarget(${s.id})" data-id="${s.id}">
+        <button type="button" class="pick-item${s.id === selectedId ? " on" : ""}"
+                onclick="${pickFn}(${s.id})" data-id="${s.id}">
           <span class="swatch" style="background:${esc(s.color_hex || "#888")}"></span>
           <span class="pick-name">${esc(s.name)}</span>
-          <span class="small muted">余 ${Number(s.remaining_weight || 0).toFixed(0)} g</span>
+          ${s.archived ? '<span class="small muted">已归档</span>' : ""}
+          <span class="small muted">${restText(s)}</span>
         </button>`).join("")
     : `<p class="hint" style="padding:10px 12px;margin:0">没有匹配的料盘 —— 换个词试试（品牌、材料、颜色、编号都能搜）。</p>`;
+}
+
+/** 余量文案：字段缺失写「余量未知」而不是「余 0 g」。
+ *  `Number(null) === 0` —— 直接 `(x||0).toFixed(0)` 会把「没这个字段」
+ *  显示成一盘空料，正是用户会照着做决定的那种错。 */
+function restText(s) {
+  const raw = s.remaining_weight;
+  if (raw === null || raw === undefined || raw === "") return "余量未知";
+  return `余 ${Number(raw).toFixed(0)} g`;
+}
+
+/** 渲染转移弹窗（openMoveDialog）用的候选列表。 */
+function renderMoveTargets(query) {
+  renderSpoolPicker("moveTargetList", query, S.moveTargetId, "pickMoveTarget",
+    bindCandidates(null));
+}
+
+/** 渲染「更改料盘」弹窗（openRebindUsage）用的候选列表。
+ *
+ *  例外的是 `st.spoolId`（**原来扣的那盘**），不是 `st.targetId`：
+ *  用户改选别的盘之后，原来那盘如果已归档就该从候选里退出去，
+ *  否则「归档盘」会一直挂在列表里、随时能被再选一次。 */
+function renderRebindTargets(query) {
+  const st = S.rebindUsage || {};
+  renderSpoolPicker("rebindSpoolList", query, st.targetId, "pickRebindTarget",
+    bindCandidates(st.spoolId));
+}
+
+/** 「把选中项的名字回填进输入框，再把列表按『全部』重画」——两个选择器共用的收尾动作。
+ *
+ *  回填是为了让人看清自己选了什么；**列表必须按空关键字重画**，否则输入框里
+ *  那句名字本身变成了筛选词，会把别的候选全滤掉（看着像「只剩这一盘了」）。 */
+function fillPickerAfterPick(inputId, spool) {
+  const el = document.getElementById(inputId);
+  if (el) el.value = spool ? spool.name : "";
 }
 
 function onMoveTargetInput() {
@@ -2082,11 +2277,7 @@ function onMoveTargetInput() {
 
 function pickMoveTarget(spoolId) {
   S.moveTargetId = spoolId;
-  const spool = spoolById(spoolId);
-  const el = document.getElementById("moveTargetSearch");
-  // 选中后把名字填回输入框（人看得懂自己在选什么），但过滤列表按「全部」重画，
-  // 否则输入框里的名字本身会变成筛选词、把别的候选全滤掉。
-  if (el) el.value = spool ? spool.name : String(spoolId);
+  fillPickerAfterPick("moveTargetSearch", spoolById(spoolId));
   renderMoveTargets("");
   // ⚠️ 这句不能漏：提示行写的是「已选中：xxx」，不跟着刷的话点完还是上一次那盘，
   // 用户会以为没选上（自测里就是这么红的）。
@@ -2094,7 +2285,7 @@ function pickMoveTarget(spoolId) {
 }
 
 function openMoveDialog(usageId, spoolId, weight) {
-  const all = (S.spools || []).filter((s) => !s.archived);
+  const all = bindCandidates(null);
   // 默认选第一个候选（和原来的 <select> 行为一致：不选就是一个有效默认值，
   // 而不是让用户点了「确认转移」才发现没选东西）。
   S.moveTargetId = all.length ? all[0].id : null;
@@ -2102,16 +2293,24 @@ function openMoveDialog(usageId, spoolId, weight) {
   openModal("把这条消耗转到另一盘料", `
     <p class="hint">将从「${esc(current ? current.name : "")}」返还 ${Math.abs(weight).toFixed(1)} g，
        并从下面选中的料盘扣减同样的重量。</p>
-    <label class="field"><span>目标料盘</span>
-      <input id="moveTargetSearch" placeholder="输入关键字筛选：品牌 / 材料 / 颜色 / 编号"
-             autocomplete="off" oninput="onMoveTargetInput()" />
-    </label>
-    <div class="pick-list" id="moveTargetList"></div>
-    <p class="hint" id="moveTargetPicked"></p>
+    ${spoolPickerHtml("moveTargetSearch", "目标料盘", "输入关键字筛选：品牌 / 材料 / 颜色 / 编号",
+        "onMoveTargetInput()", "moveTargetList", "moveTargetPicked")}
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="doMoveUsage(${usageId})">确认转移</button>`);
   renderMoveTargets("");
   refreshMoveTargetPicked();
+}
+
+/** 可搜索料盘选择器的 HTML 骨架（输入框 + 候选列表 + 选中提示行）。
+ *  两处弹窗共用一份，免得一个改了另一个没改。 */
+function spoolPickerHtml(inputId, label, placeholder, oninput, listId, pickedId) {
+  return `
+    <label class="field"><span>${esc(label)}</span>
+      <input id="${inputId}" placeholder="${esc(placeholder)}"
+             autocomplete="off" oninput="${oninput}" />
+    </label>
+    <div class="pick-list" id="${listId}"></div>
+    <p class="hint" id="${pickedId}"></p>`;
 }
 
 /** 把「当前选中哪盘」写出来。光看列表的 on 高亮不够 —— 输入框里那人自己打的字
@@ -2439,11 +2638,15 @@ async function quickCreateSpoolFromSlot(printerId, amsId, trayId) {
     const created = await api("/api/spools", {
       method: "POST",
       body: JSON.stringify({
-        brand: "Bambu Lab",
+        // ⚠️ 用规范名「拓竹」而不是「Bambu Lab」（2026-09-18）：
+        // 后端 normalize_brand 会收口，所以以前也没坏，但**发出去的**是英文旧写法，
+        // 于是库存页的「品牌」筛选里会同时出现「拓竹」和「Bambu Lab」两个选项
+        // （筛选项是照着 S.spools 里的原值列的），同一家厂被拆成两项。
+        brand: "拓竹",
         material: tray.tray_type || "PLA",
         color_name: "按机器识别",
         color_hex: tray.color,
-        spool_weight: 250,
+        spool_weight: 239,          // 拓竹空盘实测（见 catalog.BRAND_SPOOL_WEIGHTS）
         initial_weight: tray.tray_weight || 1000,
         tray_info_idx: tray.info_idx || "",
       }),
@@ -2699,7 +2902,12 @@ async function jumpToSpoolFromJob(spoolId) {
   await openSpoolDetail(id);
 }
 
-/** 打印记录里的「更改料盘」：把这条扣重流水从一盘料转到另一盘。 */
+/** 打印记录里的「更改料盘」：把这条扣重流水从一盘料转到另一盘。
+ *
+ *  ⚠️ 2026-09-18 改：这个弹窗原来是个纯 <select>，用户反馈「还是无法直接输入」——
+ *  上一轮只把「转移消耗」那个弹窗改成可搜索的，漏了这里。现在两处用同一套选择器
+ *  （`renderSpoolPicker` / `spoolPickerHtml`），选中值存在 `S.rebindUsage.targetId`
+ *  （不再读 `sel.value`，那里装的是人打的搜索词）。 */
 async function openRebindUsage(usageId, currentSpoolId) {
   const id = Number(usageId);
   if (!id) { toast("这次用量没有扣重流水，改不了", "err"); return; }
@@ -2709,23 +2917,53 @@ async function openRebindUsage(usageId, currentSpoolId) {
   }
   const list = bindCandidates(cur);
   if (!list.length) { toast("还没有料盘可改扣，先到「料盘库存」录一盘", "err"); return; }
-  S.rebindUsage = { id, spoolId: cur };
+  // 默认选中「原来那盘」而不是第一个候选：这个弹窗是「改扣到别处」，
+  // 默认值必须能一眼看出「当前扣的是哪盘」，否则用户直接点确认会以为没变化。
+  const curSpool = cur && list.some((s) => s.id === cur) ? cur : list[0].id;
+  S.rebindUsage = { id, spoolId: cur, targetId: curSpool };
   openModal("更改料盘", `
     <p class="hint">这次用量会先从原来那盘料退回去，再扣到下面选的这盘上。
       用来纠正绑错料盘、扣错盘的情况。</p>
-    <label class="fld"><span>改成这盘料</span>
-      <select id="rebindSpool">
-        ${list.map((s) => spoolOptionHtml(s, s.id === cur)).join("")}
-      </select></label>
+    ${spoolPickerHtml("rebindSpoolSearch", "改成这盘料",
+        "输入关键字筛选：品牌 / 材料 / 颜色 / 编号",
+        "onRebindTargetInput()", "rebindSpoolList", "rebindSpoolPicked")}
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="submitRebindUsage()">确认更改</button>`);
+  renderRebindTargets("");
+  refreshRebindTargetPicked();
+}
+
+function onRebindTargetInput() {
+  const el = document.getElementById("rebindSpoolSearch");
+  renderRebindTargets(el ? el.value : "");
+}
+
+function pickRebindTarget(spoolId) {
+  if (!S.rebindUsage) return;
+  S.rebindUsage.targetId = spoolId;
+  fillPickerAfterPick("rebindSpoolSearch", spoolById(spoolId));
+  // 列表按「全部」重画（回填的名字不能被当成筛选词）
+  renderRebindTargets("");
+  refreshRebindTargetPicked();
+}
+
+/** 与转移弹窗同款：显式写出「已选中哪盘」，不靠用户自己从高亮里找。 */
+function refreshRebindTargetPicked() {
+  const el = document.getElementById("rebindSpoolPicked");
+  if (!el) return;
+  const st = S.rebindUsage || {};
+  const spool = st.targetId != null ? spoolById(st.targetId) : null;
+  if (!spool) { el.textContent = "还没有选中料盘。"; el.classList.add("warn"); return; }
+  el.classList.remove("warn");
+  el.innerHTML = `已选中：<b>${esc(spool.name)}</b>（余 ${Number(spool.remaining_weight || 0).toFixed(0)} g）`;
 }
 
 async function submitRebindUsage() {
   const ctx = S.rebindUsage;
   if (!ctx) { toast("页面已刷新过，请重新打开任务详情再试", "err"); return; }
-  const sel = document.getElementById("rebindSpool");
-  const target = Number(sel && sel.value) || 0;
+  // ⚠️ 读的是 targetId，不是输入框的 value —— 那里装的是人打的搜索词，
+  // parseInt 出来是 NaN。（上一轮在转移弹窗上踩过一次，这里别重犯。）
+  const target = Number(ctx.targetId) || 0;
   if (!target) { toast("先选一盘料", "err"); return; }
   if (target === ctx.spoolId) { toast("还是原来那盘，没变化", "err"); return; }
   try {
@@ -4259,6 +4497,9 @@ async function enterApp() {
   S.auth.setupRequired = false;
   renderUserChip();
   hideAuthPage();
+  // 静态页面上如果有 datalist 组合框，这里兜一遍（目前都在弹窗里，
+  // 由 openModal 负责；留着是为了以后往 index.html 里加字段时不会漏挂）。
+  armComboInputs(document);
   await loadCatalog();
   try {
     await loadBindings();
@@ -4339,10 +4580,23 @@ window.panelDebug = {
   renderBrandDist, BRAND_BAR_COLORS, jobRowActions,
   // 槽位绑定：下拉候选、槽位弹窗的解绑入口（解绑要重开同一个槽位弹窗，别跳到料盘页）
   fillBindSpoolSelect, unbindSlotSpool,
-  // 「转到另一盘料」的可搜索选择器：过滤口径（spoolMatches）与选中值（S.moveTargetId）
-  // 都要能单独测 —— 选中值从 input.value 挪到 state 里，是最容易漏线的地方
+  // 「转到另一盘料」/「更改料盘」的可搜索选择器：过滤口径（spoolMatches）与选中值
+  // （S.moveTargetId / S.rebindUsage.targetId）都要能单独测 ——
+  // 选中值从 input.value 挪到 state 里，是最容易漏线的地方
   openMoveDialog, spoolSearchText, spoolMatches, renderMoveTargets,
   onMoveTargetInput, pickMoveTarget, refreshMoveTargetPicked, doMoveUsage,
+  // 「更改料盘」不复用 select，跟转移弹窗同一套选择器（用户反馈「还是无法直接输入」）
+  openRebindUsage, submitRebindUsage, renderSpoolPicker, renderRebindTargets,
+  onRebindTargetInput, pickRebindTarget, refreshRebindTargetPicked,
+  spoolPickerHtml, fillPickerAfterPick,
+  // 库存页筛选项只列「库里真有的值」—— 口径走 SUMMARY_DRILL_FIELDS.norm()，
+  // 与 filteredSpools() 的比对口径必须是同一个，否则选中了筛不出来
+  syncFilterOptions, loadCatalog,
+  // 「点一下就能选」：原生 datalist 会拿当前值做子串过滤（外观预填「普通」就只能选到「普通」），
+  // 聚焦时先把值挪走、离开时没动过再放回去。三态是纯函数，界面看不出来对错。
+  armComboInputs, armComboInput, comboFocus, comboInput, comboBlur,
+  // 选品牌自动带出实测皮重（只在皮重框还是默认值/自动值时带，用户手填的不动）
+  applyBrandTare, onTareInput, TARE_DEFAULT,
   // 库存页关键字框：与转移弹窗共用同一份过滤口径，别各写一套
   spoolFilteredByKeyword, filteredSpools,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去

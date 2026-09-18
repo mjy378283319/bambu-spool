@@ -108,9 +108,14 @@ def main() -> int:
         spool = session.exec(select(Spool).where(Spool.name == SPOOL_NAME)).first()
         if spool is None:
             spool = Spool(
-                name=SPOOL_NAME, brand="Bambu Lab", material="PLA",
+                # ⚠️ 规范名「拓竹」，别写 "Bambu Lab"（2026-09-18）：
+                # 直插 session 不走 HTTP 的 normalize_brand，所以这里写什么库里就是什么。
+                # 之前写英文旧写法，导致库存页「品牌」筛选里同时冒出「拓竹」和「Bambu Lab」
+                # 两个选项 —— 同一家厂被拆成两项。
+                name=SPOOL_NAME, brand="拓竹", material="PLA",
                 color_name="黑", color_hex="#1A1A1A",
-                spool_weight=250.0, initial_weight=1000.0,
+                # 拓竹空盘实测 239 g（catalog.BRAND_SPOOL_WEIGHTS）
+                spool_weight=239.0, initial_weight=1000.0,
                 remaining_weight=800.0, used_weight=200.0, price=99.0,
             )
             session.add(spool)
