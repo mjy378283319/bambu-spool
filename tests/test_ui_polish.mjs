@@ -204,6 +204,9 @@ const {
   SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable, renderBrandDist,
   jobRowActions,
   brandChoices,
+  // Phase 8：风机「未安装 / 未转」、概览图可点、类型外观排序与外观芯片
+  renderFanCard, jumpToSpoolsAll, sortHead, toggleSpoolSort, sortValue,
+  finishTone, finishChipHtml, spoolRowHtml,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -224,6 +227,8 @@ for (const name of [
   "renderSlotBindList", "onSlotBindInput", "pickSlotBind", "refreshSlotBindPicked",
   "syncBrandDeleteHint", "removeBrandFromForm", "brandChoices",
   "applyBrandTare", "onTareInput",
+  "renderFanCard", "jumpToSpoolsAll", "sortHead", "toggleSpoolSort", "sortValue",
+  "finishTone", "finishChipHtml", "spoolRowHtml",
 ]) {
   if (typeof dbg[name] !== "function") {
     console.error(`panelDebug 缺少导出：${name}（app.js 末尾的 window.panelDebug 里补上）`);
@@ -2302,6 +2307,190 @@ check("扫码落地后同步搜索框与候选列表（源码级）",
   /options\.selectId === "bindSpool"[\s\S]{0,420}renderSlotBindList\(""\)/.test(appSrc));
 check("异步补拉料盘列表后也要重画选择器",
   /fillBindSpoolSelect\(boundId\);[\s\S]{0,500}renderSlotBindList\(""\)/.test(appSrc));
+
+// ── 20. Phase 8：风扇「未安装 / 未转」· 环形图可点 · 类型外观排序 + 外观芯片 ──
+console.log("");
+console.log("── 风扇语义 / 概览图跳转 / 类型外观排序与外观芯片 ──");
+
+// 后端下发的字段名与前端读的必须是同一个字符串，两边各写一份就会静默失联
+const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "utf8");
+
+// ── 20a. 风扇：装了但没上报 ≠ 未安装 ────────────────────────────
+// 用户反馈「左(辅助) 没转的时候不要显示未安装，我的确装了」。后端现在下发
+// fans_installed 把「没装」和「装了没读到转速」分开，前端据此写两种文案。
+{
+  const card = (fans, installed) => sandbox.renderFanCard(
+    { fans, fans_installed: installed }, { model: "P2S" });
+
+  const notInstalled = card({ cooling: 70, aux: 90, exhaust: 0, secondary: null },
+    { secondary: false });
+  check("真没装 → 写「未安装」", notInstalled.includes("未安装"), notInstalled.slice(0, 300));
+  check("真没装的行带 .missing（虚线，不是 0% 实心条）",
+    /fan-row missing"/.test(notInstalled));
+
+  const installedIdle = card({ cooling: 70, aux: 90, exhaust: 0, secondary: null },
+    { secondary: true });
+  check("装了但机器没上报转速 → 写「未转」而不是「未安装」",
+    installedIdle.includes("未转") && !installedIdle.includes("未安装"),
+    installedIdle.slice(0, 300));
+  check("「未转」的行带 .idle（跟真没装的虚线条区分开）",
+    /fan-row missing idle/.test(installedIdle));
+  check("「未转」给出解释性 title（不让人猜为什么没数字）",
+    /title="已安装，机器这次没有上报转速/.test(installedIdle));
+
+  const zero = card({ cooling: 70, aux: 90, exhaust: 0, secondary: 0 }, { secondary: true });
+  check("真有转速 0% 时照写 0%（那是真的停着，不写「未转」）",
+    /fan-val">0%</.test(zero), zero.slice(-260));
+
+  check("缺 fans_installed 也不炸（老缓存快照 / 别的机型）",
+    card({ cooling: 10, aux: 10, secondary: null }, undefined).includes("未安装"));
+  check("源码里真的读了 fans_installed（写了文案不等于接上了）",
+    /state\.fans_installed/.test(appSrc) && /"fans_installed"/.test(PY_HUB_SRC));
+}
+
+// ── 20b. 概览环形图整体可点 ────────────────────────────────────
+{
+  const donut = sandbox.donutChart([
+    { label: "PLA", value: 3, color: "#2563eb" },
+    { label: "PETG", value: 1, color: "#16a34a" },
+  ]);
+  check("弧本身可点（点一下只看这种材料，和图例同一个动作）",
+    /class="donut-arc"[\s\S]{0,600}onclick="pickSummaryMaterial\('PLA'\)"/.test(donut),
+    donut.slice(0, 400));
+  check("中心有可点区域，点了去料盘库存",
+    /class="donut-hit"[\s\S]{0,200}onclick="jumpToSpoolsAll\(\)"/.test(donut));
+  check("点击区是透明填充（fill:none 收不到指针事件，点了没反应）",
+    /\.donut-hit\s*\{[^}]*fill:\s*transparent/.test(CSS_SRC));
+  check("点击区是手型光标（不然看不出能点）",
+    /\.donut-hit\s*\{[^}]*cursor:\s*pointer/.test(CSS_SRC));
+
+  // 点击区半径必须是内圈：铺满整圈的话弧就点不到了
+  const hitR = Number((donut.match(/class="donut-hit"[^>]*r="([\d.]+)"/) || [])[1]);
+  const ringR = Number((donut.match(/class="donut-arc"[^>]*r="([\d.]+)"/) || [])[1]);
+  check("点击区半径小于圆环半径（不挡住弧）",
+    Number.isFinite(hitR) && Number.isFinite(ringR) && hitR < ringR,
+    `hit=${hitR} ring=${ringR}`);
+
+  // 行为级：跳转
+  state.summarySpools = [
+    spoolForDrill(1, "拓竹", "PLA", ""),
+    spoolForDrill(2, "兰博", "PETG", ""),
+  ];
+  state.summaryFilter = null;
+  sandbox.jumpToSpoolsAll();
+  check("点中心 → 切到料盘库存", state.view === "spools", String(state.view));
+  check("没筛材料时清掉全部筛选（进来就是「全部」）",
+    sandbox.document.getElementById("spoolBrand").value === ""
+    && sandbox.document.getElementById("spoolMaterial").value === ""
+    && !state.spoolNoPrice);
+
+  state.summaryFilter = "PETG";
+  sandbox.jumpToSpoolsAll();
+  check("环形图上筛着材料时，带着材料一起跳（所见即所得）",
+    sandbox.document.getElementById("spoolMaterial").value === "PETG",
+    String(sandbox.document.getElementById("spoolMaterial").value));
+  state.summaryFilter = null;
+  ["spoolBrand", "spoolMaterial", "spoolFinish"].forEach((id) => {
+    sandbox.document.getElementById(id).value = "";
+  });
+}
+
+// ── 20c. 类型 / 外观可排序 ─────────────────────────────────────
+{
+  check("类型表头走可排序的 sortHead",
+    /sortHead\("material", "类型"/.test(appSrc));
+  check("外观表头走可排序的 sortHead",
+    /sortHead\("finish", "外观"/.test(appSrc));
+  const th = sandbox.sortHead("finish", "外观", "84px");
+  check("表头点一下会切排序方向",
+    /onclick="toggleSpoolSort\('finish'\)"/.test(th) && /sortable/.test(th), th);
+
+  const matPool = [
+    { id: 7, material: "PLA" },
+    { id: 8, material: "PETG" },
+    { id: 9, material: "ABS" },
+    { id: 10, material: "" },          // 未填写
+  ];
+  state.spoolSort = { key: "material", dir: "asc" };
+  check("类型升序（空值排最后）",
+    sortSpools(matPool).map((s) => s.id).join(",") === "9,8,7,10",
+    sortSpools(matPool).map((s) => s.id).join(","));
+  state.spoolSort = { key: "material", dir: "desc" };
+  check("类型降序时空值仍排最后（不能因为降序被顶到最前）",
+    sortSpools(matPool).map((s) => s.id).join(",") === "7,8,9,10",
+    sortSpools(matPool).map((s) => s.id).join(","));
+
+  // 外观列：界面上空值就写「普通」，排序也得按「普通」算，
+  // 否则一列「普通」会散在两头，跟看到的对不上。
+  check("外观列排序取值与显示一致（空 → 普通）",
+    sandbox.sortValue({ finish: "" }, "finish") === "普通"
+    && sandbox.sortValue({ finish: "丝绸" }, "finish") === "丝绸");
+  state.spoolSort = { key: "finish", dir: "asc" };
+  const finSorted = sortSpools([
+    { id: 1, finish: "丝绸" }, { id: 2, finish: "" }, { id: 3, finish: "普通" },
+  ]).map((s) => s.id);
+  const pos = (id) => finSorted.indexOf(id);
+  check("没填外观的盘与显式「普通」的盘挨在一起（同一档，靠 ID 兜底）",
+    Math.abs(pos(2) - pos(3)) === 1, finSorted.join(","));
+  check("中文外观能排（用的是 localeCompare，不是 ASCII 位序）",
+    /localeCompare\(vb, "zh"\)/.test(appSrc), "");
+  state.spoolSort = { key: "id", dir: "asc" };
+}
+
+// ── 20d. 外观芯片：类型之间要能一眼分出来 ──────────────────────
+{
+  check("普通 → 中性灰", sandbox.finishTone("普通") === "plain" && sandbox.finishTone("") === "plain");
+  check("丝绸 → 紫", sandbox.finishTone("丝绸") === "silk");
+  check("哑光 → 深色", sandbox.finishTone("哑光") === "matte");
+  check("荧光 → 绿", sandbox.finishTone("荧光") === "glow");
+  check("英文写法一样认（Silk / MATTE / glow）",
+    sandbox.finishTone("Silk") === "silk" && sandbox.finishTone("MATTE") === "matte"
+    && sandbox.finishTone("glow") === "glow");
+  check("自定义写法不瞎归类（认不出就是中性灰）",
+    sandbox.finishTone("土豪金限定版") === "plain"
+    && sandbox.finishTone("反光磨砂") === "matte");
+  check("芯片带上色调 class", sandbox.finishChipHtml("丝绸").includes('class="finish-chip silk"'),
+    sandbox.finishChipHtml("丝绸"));
+  check("空外观显示「普通」而不是空白", />普通</.test(sandbox.finishChipHtml("")));
+
+  const row = sandbox.spoolRowHtml({
+    id: 5, name: "测试盘", material: "PLA", color_hex: "#112233", finish: "哑光",
+    price: 88, remaining_weight: 500, initial_weight: 1000, remaining_percent: 50,
+    slots: [], usages: [],
+  });
+  check("库存表外观列用的是芯片", /data-label="外观"><span class="finish-chip matte">哑光<\/span>/.test(row),
+    (row.match(/data-label="外观">[^<]*<[^>]*>[^<]*/) || [""])[0]);
+  check("CSS 里各色调都有定义",
+    /\.finish-chip\.silk/.test(CSS_SRC) && /\.finish-chip\.matte/.test(CSS_SRC)
+    && /\.finish-chip\.glow/.test(CSS_SRC) && /\.finish-chip\.plain/.test(CSS_SRC));
+  check("芯片圆角与字号有钉住（别退化成方框大字）",
+    /\.finish-chip\s*\{[^}]*border-radius:\s*999px/.test(CSS_SRC)
+    && /\.finish-chip\s*\{[^}]*font-size:\s*12px/.test(CSS_SRC));
+
+  // 表单里的外观下拉候选也画成芯片（跟列表那一列长得一样）
+  const finInput = fakeInput("finishList");
+  finInput.dataset.comboTone = "finish";
+  sandbox.armComboInput(finInput);
+  sandbox.document.getElementById("finishList").querySelectorAll =
+    () => FINISH_OPTS.map((v) => ({ value: v }));
+  sandbox.comboRender(finInput, "");
+  const pop = sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  check("外观下拉候选是彩色芯片（不是一行行灰字）",
+    pop.innerHTML.includes("finish-chip silk") && pop.innerHTML.includes("finish-chip matte"),
+    pop.innerHTML.slice(0, 220));
+
+  // 其余下拉（颜色名称）保持纯文字：没有 data-combo-tone 就不该跟着变色
+  const colorInput = fakeInput("colorList");
+  sandbox.armComboInput(colorInput);
+  sandbox.document.getElementById("colorList").querySelectorAll =
+    () => [{ value: "哑光黑" }, { value: "丝绸白" }].map((o) => o);
+  sandbox.comboRender(colorInput, "");
+  const pop2 = sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  check("颜色名称候选仍是纯文字（颜色名里带「哑光」也不该画成外观芯片）",
+    !pop2.innerHTML.includes("finish-chip") && pop2.innerHTML.includes("哑光黑"),
+    pop2.innerHTML.slice(0, 200));
+  sandbox.comboClose();
+}
 
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");

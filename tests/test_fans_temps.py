@@ -44,6 +44,8 @@ from app.core.status import (  # noqa: E402
     AIRDUCT_PART_RIGHT_AUX,
     airduct_fan_percent,
     airduct_fans,
+    airduct_declared_parts,
+    airduct_left_aux_installed,
     airduct_left_aux_percent,
     airduct_other_fan_percent,
     airduct_part_states,
@@ -162,6 +164,68 @@ def test_panel_four_channels() -> None:
           airduct_other_fan_percent(parts((0, 16, 90), (6, 200, 60))) is None)
 
 
+# ── 2c. 「左(辅助)」装没装：不转的时候不能写成「未安装」 ──────────
+def test_left_aux_installed() -> None:
+    """2026-09-18 反馈：我确实装了左辅助风扇，它没转的时候面板却写「未安装」。
+
+    根因是按 parts 里有没有 id==160 判断「装没装」—— 真机 P2S 报文里，
+    那台风扇没转时 parts 根本不含 160，而 airduct.modeList 里一直写着它。
+    """
+    print("== 左(辅助) 装没装（parts / modeList / aux_part_fan） ==")
+
+    # 真机 P2S 样本：parts 只有 [16, 32]；modeList[0].ctrl 带 160、modeList[1].off 带 160
+    real = {"device": {"airduct": {
+        "modeList": [{"modeId": 0, "ctrl": [16, 32, 160]},
+                     {"modeId": 1, "ctrl": [16, 32], "off": [160]}],
+        "parts": [{"func": 0, "id": 16, "state": 90}, {"func": 6, "id": 32, "state": 0}],
+    }}}
+    check("真机样本：parts 里没有 160，但 modeList 提到 → 算装了",
+          airduct_left_aux_installed(real) is True)
+    check("真机样本：这一包依然读不到转速（界面写「未转」而不是画 0%）",
+          airduct_left_aux_percent(real) is None)
+    check("modeList 的 ctrl 与 off 都算数",
+          airduct_declared_parts(real) == {16, 32, 160}, str(airduct_declared_parts(real)))
+
+    # 转着的时候 parts 直接报 160
+    running = parts((0, 16, 90), (0, 160, 40))
+    check("转着时 parts 报 160 → 装了", airduct_left_aux_installed(running) is True)
+
+    # 没装的机器：parts 与 modeList 都不提 160
+    naked = {"device": {"airduct": {
+        "modeList": [{"modeId": 0, "ctrl": [16, 32]}],
+        "parts": [{"func": 0, "id": 16, "state": 0}, {"func": 6, "id": 32, "state": 0}],
+    }}}
+    check("parts 与 modeList 都没 160 → 未安装", airduct_left_aux_installed(naked) is False)
+
+    # 硬件标志位（部分固件用它报「装了辅助风扇」）
+    check("aux_part_fan=true 也算装了", airduct_left_aux_installed({"aux_part_fan": True}) is True)
+    check("aux_part_fan=false 不算", airduct_left_aux_installed({"aux_part_fan": False}) is False)
+    check("老机型没有 device 块 → 未安装（不凭空说人家装了）",
+          airduct_left_aux_installed({"big_fan1_speed": "5"}) is False)
+
+    # 结构异常不炸
+    check("airduct 不是字典不炸", airduct_left_aux_installed({"device": {"airduct": "x"}}) is False)
+    check("modeList 里塞了脏值不炸",
+          airduct_declared_parts({"device": {"airduct": {"modeList": [None, {"ctrl": "x"}],
+                                                         "parts": [{"id": "160"}]}}}) >= {160})
+
+    # 落到 state 上
+    st = parse_report({"print": {"device": {"airduct": {
+        "modeList": [{"modeId": 0, "ctrl": [16, 32, 160]}],
+        "parts": [{"func": 0, "id": 16, "state": 90}],
+    }}}})
+    check("parse_report 带上 secondary_aux_installed",
+          st is not None and st.secondary_aux_installed
+          and st.secondary_aux_fan_pct is None, str(st and st.secondary_aux_installed))
+
+    from app.core.hub import hub as _hub  # noqa: E402
+    payload = _hub.state_dict(st, 1)
+    check("state_dict 下发 fans_installed（前端据此区分「未转」与「未安装」）",
+          payload.get("fans_installed", {}).get("secondary") is True,
+          str(payload.get("fans_installed")))
+    check("转速仍是 null（不编一个 0% 出来）", payload["fans"]["secondary"] is None)
+
+
 def test_exhaust_fallback() -> None:
     print("== 外排（airduct 额外部件 → big_fan2 兜底） ==")
     # 装了外排套件、固件以新增部件上报
@@ -222,6 +286,27 @@ def test_chamber_temp() -> None:
     check("都没有时仓温为 0", none is not None and none.chamber_temper == 0.0)
     check("device 不是字典时不炸", parse_report({"print": {"device": "x"}}) is not None)
 
+    # 2026-09-18 反馈「仓温没有了」：有的固件把 chamber_temper 一起带上却常年报 0，
+    # 只看「字段在不在」就会取到这个 0，前端又画回「—」；真正的读数在 ctc 里。
+    zero = parse_report({"print": {"chamber_temper": 0, "device": {"ctc": {"info": {"temp": 43}}}}})
+    check("chamber_temper 报 0 时改读 ctc（不再画成「—」）",
+          zero is not None and zero.chamber_temper == 43.0, str(zero and zero.chamber_temper))
+
+    zero_str = parse_report({"print": {"chamber_temper": "0.0",
+                                       "device": {"ctc": {"info": {"temp": 38}}}}})
+    check("字符串 \"0.0\" 也一样让位给 ctc",
+          zero_str is not None and zero_str.chamber_temper == 38.0,
+          str(zero_str and zero_str.chamber_temper))
+
+    both_zero = parse_report({"print": {"chamber_temper": 0, "device": {"ctc": {"info": {"temp": 0}}}}})
+    check("两边都是 0 才落回 0（界面显示「—」而不是假装 0℃）",
+          both_zero is not None and both_zero.chamber_temper == 0.0,
+          str(both_zero and both_zero.chamber_temper))
+
+    warm = parse_report({"print": {"chamber_temper": -1, "device": {"ctc": {"info": {"temp": 41}}}}})
+    check("负温（冬天）也照读 ctc —— 只有「0 / 缺失」才让位",
+          warm is not None and warm.chamber_temper == 41.0, str(warm and warm.chamber_temper))
+
 
 # ── 4. 真机 P2S 报文（字段取自 ha-bambulab 的 MOCK-P2S.json） ────
 REAL_P2S = {
@@ -236,7 +321,9 @@ REAL_P2S = {
     "big_fan1_speed": "0",
     "big_fan2_speed": "0",
     "heatbreak_fan_speed": "15",
-    "aux_part_fan": True,
+    # 真机样本（research/_MOCK-P2S.json）里这一位是 false：P2S 的辅助风扇
+    # 不走这个硬件标志位，它在 airduct.parts 里报，别拿它当「装没装」的唯一依据。
+    "aux_part_fan": False,
     "device": {
         "ctc": {"info": {"temp": 37}, "state": 0},
         "airduct": {
@@ -265,6 +352,10 @@ def test_real_p2s_report() -> None:
           state.airduct_fan_pct == 90, str(state.airduct_fan_pct))
     check("真机 P2S 没装左(辅助) → secondary 为 None",
           state.secondary_aux_fan_pct is None, str(state.secondary_aux_fan_pct))
+    check("三个信号都没有 → 判定为「未安装」（界面照旧写「未安装」）",
+          state.secondary_aux_installed is False, str(state.secondary_aux_installed))
+    check("未安装的通道不下发 installed=true",
+          (hub.state_dict(state, 1).get("fans_installed") or {}).get("secondary") is False)
     check("外排退回 big_fan2（真机 0）→ 0%", state.exhaust_fan_pct == 0,
           str(state.exhaust_fan_pct))
     check("仓温 37℃", state.chamber_temper == 37.0, str(state.chamber_temper))
@@ -312,6 +403,7 @@ if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
     test_panel_four_channels()
+    test_left_aux_installed()
     test_exhaust_fallback()
     test_chamber_temp()
     test_real_p2s_report()

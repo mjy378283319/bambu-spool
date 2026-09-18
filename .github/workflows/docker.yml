@@ -49,6 +49,9 @@ jobs:
       - name: 运行风扇档位与仓温解析自测
         run: python tests/test_fans_temps.py
 
+      - name: 运行增量报文合并与选配风扇记忆自测
+        run: python tests/test_hub_merge.py
+
       - name: 运行标签二维码自测
         run: python tests/test_labels.py
 

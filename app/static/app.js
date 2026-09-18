@@ -433,6 +433,35 @@ function finishFromSeries(series) {
   return hit === "普通" ? "" : hit;
 }
 
+/** 外观 -> 芯片色调。用户反馈「外观里面的类型要有区别」：
+ *  一列全写成灰字，扫一眼分不出普通 / 丝绸 / 哑光 / 荧光，得逐个读。
+ *  这里给每种外观一个稳定的色调（背景 + 文字），在列表、下拉候选、
+ *  表单预览里共用一份映射 —— 三个地方各写一套必然出现「这里紫那里灰」。
+ *  认不出来的自定义写法一律走 plain（中性灰），不会因为多了个词就整列变色。 */
+const FINISH_TONES = [
+  [/丝绸|丝滑|丝光|silk/i, "silk"],
+  [/哑光|磨砂|matte|matt/i, "matte"],
+  [/荧光|夜光|glow|luminous/i, "glow"],
+  [/珠光|金属|metallic|pearl/i, "metal"],
+  [/半透|透明|translucent|clear/i, "clear"],
+  [/渐变|双色|彩虹|rainbow|gradient|twotone/i, "gradient"],
+  [/木纹|碳纤|wood|carbon/i, "wood"],
+  [/亮面|光面|gloss/i, "gloss"],
+];
+
+function finishTone(finish) {
+  const text = String(finish || "").trim();
+  if (!text || text === "普通") return "plain";
+  for (const [re, tone] of FINISH_TONES) { if (re.test(text)) return tone; }
+  return "plain";
+}
+
+/** 外观芯片（列表 / 下拉 / 表单共用）。空值按界面上一直以来的写法显示「普通」。 */
+function finishChipHtml(finish) {
+  const text = String(finish || "").trim() || "普通";
+  return `<span class="finish-chip ${finishTone(text)}">${esc(text)}</span>`;
+}
+
 /** 品牌候选：目录预设 + 库里实际用过的品牌（历史品牌与自定义品牌也要能筛）。 */
 function brandChoices(extra) {
   const preset = (S.catalog.brands || []).slice();
@@ -504,9 +533,13 @@ function comboRender(el, query) {
   const pop = document.createElement("div");
   pop.id = "comboPop";
   pop.className = "combo-pop";
+  // 外观这路候选画成芯片（带色调），跟列表里那一列长得一样 ——
+  // 光看文字「普通 / 丝绸 / 哑光」得逐个读，有色块一眼分得清。
+  const asFinish = el.dataset ? el.dataset.comboTone === "finish" : false;
   pop.innerHTML = hits.length
     ? hits.map((v) => `<button type="button" class="combo-item${v === cur ? " active" : ""}"
-        data-value="${esc(v)}">${esc(v)}${v === cur ? '<span class="tick">✓</span>' : ""}</button>`).join("")
+        data-value="${esc(v)}">${asFinish ? finishChipHtml(v) : esc(v)}${
+        v === cur ? '<span class="tick">✓</span>' : ""}</button>`).join("")
     : `<div class="combo-empty">没有匹配项 —— 直接输入自定义值即可</div>`;
   document.body.appendChild(pop);
 
@@ -1150,23 +1183,28 @@ function renderTempCard(state) {
 
 /** 风扇状态：每条通道一根细进度条。值是后端换算好的百分比（原始 0-15 档位在解析层已经换算）。
  *
- *  值为 null 表示机器没装这一件（左侧辅助风扇 / 外排风扇都是选配件），
- *  这时不画进度条，直接写「未安装」—— 画成 0% 会让人以为是风扇停了。
+ *  值为 null 表示**这一次没读到转速**，要分两种情况看（2026-09-18 反馈）：
+ *   - `state.fans_installed[key]` 为假 → 真没装（左辅助 / 外排都是选配件），写「未安装」；
+ *   - 为真 → 装了，只是机器这次没上报（选配件没转时固件可能干脆不在 parts 里报它），
+ *     写「未转」并压暗。以前一律写「未安装」，用户明明装了左辅助风扇却被判成没装。
  *
  *  这张卡排在右列最后，并且会撑满剩余高度（.pcard.grow）：右列（AMS）通常比
  *  左列（照片 + 打印状态 + 温度）矮，不撑满的话右下角会空出一大块。 */
 function renderFanCard(state, printer) {
   const fans = state.fans || {};
+  const installed = state.fans_installed || {};
   const rows = fanChannels(printer).filter(([key, , required]) => required || fans[key] != null);
   if (!rows.length) return "";
   return `<div class="pcard grow fan-card">
     <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
     <div class="fan-rows">${rows.map(([key, label]) => {
       if (fans[key] == null) {
-        return `<div class="fan-row missing">
+        const has = !!installed[key];
+        return `<div class="fan-row missing${has ? " idle" : ""}"
+            title="${has ? "已安装，机器这次没有上报转速（多半是没转）" : "这台机器没装这一路风扇"}">
           <span class="fan-name">${esc(label)}</span>
           <span class="fan-bar"></span>
-          <span class="fan-val">未安装</span>
+          <span class="fan-val">${has ? "未转" : "未安装"}</span>
         </div>`;
       }
       const value = Math.max(0, Math.min(100, Number(fans[key]) || 0));
@@ -1418,14 +1456,38 @@ function priceBuckets(spools) {
 }
 
 /* ── 表头排序 ──────────────────────────────────────────── */
+
+/** 走文字比较的列（其余按数值）。外观列空值显示成「普通」，排序也按显示值来。 */
+const TEXT_SORT_KEYS = { last_used_at: 1, material: 1, finish: 1, brand: 1, name: 1 };
+
+/** 排序用的取值：外观列没有值时按界面上显示的「普通」参与比较，
+ *  不然一整列「普通」会散在排序结果的另一头，跟看到的对不上。 */
+function sortValue(spool, key) {
+  if (key === "finish") return spool.finish || "普通";
+  if (key === "material") return spool.material || "";
+  const v = spool[key];
+  return v == null ? "" : String(v);
+}
+
 function sortSpools(list) {
   const sort = S.spoolSort || { key: "id", dir: "asc" };
   const factor = sort.dir === "desc" ? -1 : 1;
   return list.slice().sort((a, b) => {
-    let va = a[sort.key];
-    let vb = b[sort.key];
-    if (sort.key === "last_used_at") { va = va || ""; vb = vb || ""; }
-    else { va = Number(va) || 0; vb = Number(vb) || 0; }
+    if (TEXT_SORT_KEYS[sort.key]) {
+      const va = sortValue(a, sort.key);
+      const vb = sortValue(b, sort.key);
+      // 空值恒定排在最后（升序降序都一样）——「没用过」「没填材料」
+      // 混在中间最难看，两头固定才好找。注意这里**不能乘 factor**，
+      // 否则降序时「有值的」反而被赶到末尾。
+      if (!va || !vb) {
+        if (!va && !vb) return (a.id || 0) - (b.id || 0);
+        return va ? -1 : 1;
+      }
+      const cmp = va.localeCompare(vb, "zh");
+      return cmp ? cmp * factor : (a.id || 0) - (b.id || 0);
+    }
+    let va = Number(a[sort.key]) || 0;
+    let vb = Number(b[sort.key]) || 0;
     if (va < vb) return -1 * factor;
     if (va > vb) return 1 * factor;
     return (a.id || 0) - (b.id || 0);   // 同值时按 ID 兜底，顺序稳定
@@ -1543,7 +1605,7 @@ function spoolRowHtml(spool) {
     </td>
     <td data-label="类型"><span class="tag">${esc(spool.material)}</span></td>
     <td data-label="颜色"><span class="hex-pill"><i style="background:${esc(spool.color_hex)}"></i>${esc((spool.color_hex || "").toUpperCase())}</span></td>
-    <td class="small muted" data-label="外观">${esc(spool.finish || "普通")}</td>
+    <td data-label="外观">${finishChipHtml(spool.finish)}</td>
     <td class="num" data-label="价格">${hasPrice ? "¥" + spool.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
     <td data-label="剩余">
       <div class="bar-cell">
@@ -1598,9 +1660,9 @@ function renderSpools() {
     <thead><tr>
       ${sortHead("id", "ID", "66px")}
       <th>料盘</th>
-      <th style="width:92px">类型</th>
+      ${sortHead("material", "类型", "92px")}
       <th style="width:140px">颜色</th>
-      <th style="width:70px">外观</th>
+      ${sortHead("finish", "外观", "84px")}
       ${sortHead("price", "价格", "104px", "right")}
       ${sortHead("remaining_weight", "剩余", "148px")}
       ${sortHead("last_used_at", "使用时间", "168px")}
@@ -1917,7 +1979,8 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
     <div class="field-row">
       <label class="field"><span>材料</span><select id="f_material" onchange="renderColorPresets()">${materialOptions}</select></label>
       <label class="field"><span>外观</span>
-        <input id="f_finish" list="finishList" value="${esc(finish)}" placeholder="如：丝绸 / 哑光 / 亮面" />
+        <input id="f_finish" list="finishList" data-combo-tone="finish" value="${esc(finish)}"
+               placeholder="如：丝绸 / 哑光 / 亮面" />
         <datalist id="finishList">${finishChoices(finish).map((f) => `<option value="${esc(f)}">`).join("")}</datalist>
       </label>
     </div>
@@ -3332,7 +3395,11 @@ function summaryMaterials(spools) {
 }
 
 /** 手绘环形图。不引图表库 —— 这个应用常跑在没外网的内网里，多一个离线依赖不值当。
- *  segments: [{label, value, color}]，按 value 占比分配弧长（总和为 0 时只画底环）。 */
+ *  segments: [{label, value, color}]，按 value 占比分配弧长（总和为 0 时只画底环）。
+ *
+ *  整个图标都可点（2026-09-18 反馈「这个图标也是可以点击跳转的」）：
+ *    - 点某一段弧 → 只看那种材料（与图例同一个动作）；
+ *    - 点中间的盘数 → 到料盘库存看这批盘（已按材料筛选就带着材料过去）。 */
 function donutChart(segments, size, thickness) {
   const box = size || 176;
   const w = thickness || 28;
@@ -3347,7 +3414,8 @@ function donutChart(segments, size, thickness) {
       fill="none" stroke="${esc(seg.color)}" stroke-width="${w}"
       stroke-dasharray="${on.toFixed(2)} ${(c - on).toFixed(2)}"
       stroke-dashoffset="${(-acc * c).toFixed(2)}"
-      transform="rotate(-90 ${box / 2} ${box / 2})"></circle>`;
+      transform="rotate(-90 ${box / 2} ${box / 2})"
+      onclick="pickSummaryMaterial('${esc(seg.label)}')"><title>${esc(seg.label)} · ${seg.value} 盘（点一下只看这种）</title></circle>`;
     acc += frac;
     return arc;
   }).join("");
@@ -3357,7 +3425,25 @@ function donutChart(segments, size, thickness) {
     ${arcs}
     <text class="donut-total" x="${box / 2}" y="${box / 2 + 2}">${total}</text>
     <text class="donut-unit" x="${box / 2}" y="${box / 2 + 20}">盘</text>
+    <circle class="donut-hit" cx="${box / 2}" cy="${box / 2}" r="${Math.max(1, r - w / 2)}"
+      onclick="jumpToSpoolsAll()">
+      <title>到料盘库存里看这 ${total} 盘</title>
+    </circle>
   </svg>`;
+}
+
+/** 点环形图中心（盘数）-> 到「料盘库存」看这批盘。
+ *  环形图上已经按材料筛过时，把材料一起带过去（所见即所得）；没筛就看全部。
+ *  和别的钻取入口一样先清掉其它筛选，免得两个条件叠出空列表。 */
+function jumpToSpoolsAll() {
+  const filter = S.summaryFilter || "";
+  if (filter) { jumpToSpoolsByField("material", filter); return; }
+  switchView("spools");
+  ["spoolSearch", "spoolPriceMin", "spoolPriceMax", "spoolBrand", "spoolMaterial", "spoolFinish"]
+    .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+  if (S.spoolNoPrice) { S.spoolNoPrice = false; syncNoPriceChip(); }
+  S.spoolPage = 1;
+  switchSpoolTab("all");
 }
 
 /** 点环形图上的材料 -> 只统计这块。再点一次取消。 */
@@ -3525,7 +3611,8 @@ function renderSummaryOverview() {
           }).join("")}
         </div>
         <p class="hint" style="margin:10px 0 0">
-          点材料只统计那种材料，点状态行可直接跳到料盘库存的对应标签页。
+          点材料（图例或圆环）只统计那种材料，点圆环中间的盘数直接到料盘库存，
+          点状态行则可跳到库存页的对应标签页。
         </p>
       </div>
     </div>`;
@@ -4842,10 +4929,14 @@ setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {})
 // 肉眼很难盯住，钉在这里。
 window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
+  // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
+  renderFanCard,
   // 外观预填、区域文案、机型照片、扫码认码 —— 错了都是「界面看着正常但不对」
   inferFinish, finishFromSeries, finishChoices, regionLabel, printerPhoto, parseScanText,
   // 料盘状态口径 / 排序 / 价格分档 / 概览图：库存页与汇总页共用，必须一致
   spoolUseState, useStateTally, USE_STATE_META, priceBuckets, sortSpools,
+  // 类型 / 外观也要能排序：文本列走 localeCompare，空值恒定排最后
+  sortHead, toggleSpoolSort, TEXT_SORT_KEYS, spoolRowHtml,
   summaryMaterials, donutChart, allSlotEntries, slotKey,
   // 下拉里的料盘候选：余量缺失别显示成 0 g、归档的除非正绑着否则不进候选
   spoolOptionHtml, bindCandidates,
@@ -4874,6 +4965,10 @@ window.panelDebug = {
   syncFilterOptions, loadCatalog,
   // 「另有 N 盘未登记价格」钻取：隐藏开关必须配可见芯片，否则列表少了不知道为什么
   jumpToSpoolsNoPrice, clearNoPriceFilter, syncNoPriceChip,
+  // 概览环形图整块可点：弧 = 只看该材料，中心盘数 = 到料盘库存看这批
+  jumpToSpoolsAll,
+  // 外观芯片：色调映射只有一份，列表 / 下拉候选 / 表单共用
+  finishTone, finishChipHtml, sortValue,
   // 自绘组合框（替代原生 datalist）：弹层高度与过滤行为浏览器不开放，
   // 只能自己画。候选现读 datalist（renderColorPresets 会实时改写），
   // 品牌归一（canonicalBrand）后色卡才查得到别名写法。

@@ -45,6 +45,28 @@ FINISH_STATES = {"FINISH"}
 FAIL_STATES = {"FAILED"}
 IDLE_STATES = {"IDLE", "OFFLINE"}
 
+
+def _deep_merge(base: dict, delta: dict) -> dict:
+    """把增量报文合并进已缓存的全量报文（**递归**合并字典，列表整体替换）。
+
+    为什么必须递归：打印机的 push_status 经常只带变化的那几个键，
+    而 `print.device` 底下是个多层嵌套（ctc / airduct / bed / extruder …）。
+    浅合并 `{**old, **new}` 一旦碰到带 `device` 的增量，就把整棵子树换成
+    这一小块 —— device.ctc 没了，仓温在界面变成「—」；airduct 半截没了，
+    风扇行也跟着错。ha-bambulab 同样做递归合并，原因一样。
+
+    列表不合并：ams / hms / lights_report 报的是「当前完整状态」，
+    逐项合并会把已经拔掉的料盘、已经清掉的报错留在里面。
+    """
+    out = dict(base or {})
+    for key, value in (delta or {}).items():
+        old = out.get(key)
+        if isinstance(old, dict) and isinstance(value, dict):
+            out[key] = _deep_merge(old, value)
+        else:
+            out[key] = value
+    return out
+
 # ── AMS 编号语义 ────────────────────────────────────────
 # 官方上报的 ams[].id：0..3 是普通 AMS（A/B/C/D），128..131 是 AMS HT（HT A..HT D）。
 # tray_now 里 254 表示外挂料盘、255 表示无料。
@@ -94,6 +116,9 @@ class PrinterHub:
     def __init__(self) -> None:
         self.states: dict[int, PrinterState] = {}
         self._raw: dict[str, dict] = {}
+        # 见过「左(辅助)」风扇的机器序列号：见过一次就记住装了，之后它不转
+        # （固件只在转着时上报该部件）也仍显示「已装·未转」而不是「未安装」。
+        self._left_aux_serial: set[str] = set()
         self._printer_by_serial: dict[str, int] = {}
         self._mqtt: Optional[CloudMqttConnection] = None
         self._mqtt_token: str = ""
@@ -497,13 +522,27 @@ class PrinterHub:
         block = payload.get("print")
         if not isinstance(block, dict):
             return
-        # P1/A1 只推增量，这里做一层合并后再解析
-        merged = {**(self._raw.get(serial) or {}), **block}
+        # P1/A1 只推增量，这里做一层合并后再解析。
+        # ⚠️ 必须是**深合并**（2026-09-18 修）：原来写的是 `{**old, **new}`，
+        # 只要这次增量带了 `device` 键（哪怕里面只更新 airduct / bed），
+        # 整个 device 子树就被换掉 —— device.ctc 随之消失，仓温在界面上
+        # 变成「—」，而且只要打印机不再重发整包就永远回不来。
+        # 列表（ams / hms / lights_report）整体替换，不逐项合并：
+        # 这两个数组是「这一次的完整状态」，合并反而会留下已经拔掉的料盘。
+        merged = _deep_merge(self._raw.get(serial) or {}, block)
         self._raw[serial] = merged
 
         state = parse_report({"print": merged}, serial)
         if state is None:
             return
+
+        # 左(辅助) 是选配件，有些固件只在它转着的时候才在 airduct.parts 里报它。
+        # 见过一次就记住这台机器装了，之后它不转（parts 里没有）也仍算「已装·未转」，
+        # 而不是判成「未安装」。
+        if state.secondary_aux_installed:
+            self._left_aux_serial.add(serial)
+        elif serial in self._left_aux_serial:
+            state.secondary_aux_installed = True
 
         printer_id = self._printer_by_serial.get(serial)
         if printer_id is None:
@@ -815,7 +854,8 @@ class PrinterHub:
             # 全部为百分比（0/10/…/100）。命名对齐拓竹官方 App 的「空调系统」页：
             #   cooling=部件 / aux=右(辅助) / secondary=左(辅助) / exhaust=外排
             #   chamber 只在没有自适应风道组件的机型（X1/P1/A1/H2）上是「腔体风扇」
-            # secondary / exhaust 为 null 表示机器没装那一件（选配件）
+            # secondary / exhaust 为 null 表示**没读到转速** —— 是「没装」还是
+            # 「装了但没转」，看下面的 fans_installed，别一律写成「未安装」。
             "fans": {
                 "cooling": state.cooling_fan_pct,
                 "aux": aux_pct,
@@ -823,6 +863,10 @@ class PrinterHub:
                 "heatbreak": state.heatbreak_fan_pct,
                 "secondary": state.secondary_aux_fan_pct,
                 "exhaust": state.exhaust_fan_pct,
+            },
+            # 选配件「装没装」：转速为 null 时用它区分「未安装」与「已装·未转」
+            "fans_installed": {
+                "secondary": bool(state.secondary_aux_installed),
             },
             "wifi_signal": state.wifi_signal,
             "lights": state.lights,

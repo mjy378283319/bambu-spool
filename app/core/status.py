@@ -188,6 +188,50 @@ def airduct_left_aux_percent(block: dict) -> Optional[int]:
     return airduct_part_states(block).get(AIRDUCT_PART_LEFT_AUX)
 
 
+def airduct_declared_parts(block: dict) -> set[int]:
+    """device.airduct 里**提到过**的部件 id（含 modeList 的 ctrl / off）。
+
+    真机 P2S 样本（research/_MOCK-P2S.json）里，左(辅助) 没转的时候
+    `parts` 只有 [16, 32]，**根本没有 160**；但
+    `modeList[0].ctrl = [16, 32, 160]`、`modeList[1].off = [160]`
+    明明白白写着这台机器有 160 这一路。
+
+    所以「装没装」不能只看 parts —— 只看 parts 的话，一件**装好但没在转**的
+    选配件会被判成「未安装」（2026-09-18 用户反馈：我确实装了左辅助风扇）。
+    """
+    ids: set[int] = set()
+    for part in _airduct_parts(block):
+        part_id = _as_int(part.get("id"), -1)
+        if part_id >= 0:
+            ids.add(part_id)
+    device = block.get("device")
+    airduct = device.get("airduct") if isinstance(device, dict) else None
+    if not isinstance(airduct, dict):
+        return ids
+    for mode in airduct.get("modeList") or []:
+        if not isinstance(mode, dict):
+            continue
+        for key in ("ctrl", "off"):
+            for raw in mode.get(key) or []:
+                part_id = _as_int(raw, -1)
+                if part_id >= 0:
+                    ids.add(part_id)
+    return ids
+
+
+def airduct_left_aux_installed(block: dict) -> bool:
+    """这台机器装了左侧选配辅助风扇吗？（决定界面写「未安装」还是「未转」）
+
+    三路信号取或 —— 固件版本不一，单看一路必然漏：
+      ① `parts` 里直接报了 id 160（转着的时候才报）；
+      ② `modeList` 提到过 160（没转时也一直在，见 airduct_declared_parts）；
+      ③ `print.aux_part_fan` 为真（部分机型的硬件标志位）。
+    """
+    if AIRDUCT_PART_LEFT_AUX in airduct_declared_parts(block):
+        return True
+    return block.get("aux_part_fan") in (True, 1, "1", "true")
+
+
 def airduct_other_fan_percent(block: dict) -> Optional[int]:
     """除右/左辅助、风门之外的**额外风扇部件**的转速。
 
@@ -295,6 +339,9 @@ class PrinterState:
     airduct_fan_pct: Optional[int] = None
     # 「左(辅助)」——左侧选配那台；只有上报了才不是 None
     secondary_aux_fan_pct: Optional[int] = None
+    # 「左(辅助)」到底装没装。转速为 None 时用它区分「未安装」和「装了但没转」——
+    # 选配件没转的时候机器可能压根不在 parts 里报它（见 airduct_declared_parts）。
+    secondary_aux_installed: bool = False
     # 「外排」——外排风扇套件；没装 / 没上报时退回 big_fan2 档位，再没有才是 None
     exhaust_fan_pct: Optional[int] = None
 
@@ -394,17 +441,23 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     # 仓温：P2S / 新固件放在 device.ctc.info.temp，是个 32 位打包值
     # （低 16 位 = 当前温度，高 16 位 = 目标温度）；X1 等老机型直接在
     # print.chamber_temper。原来只读后者，所以 P2S 上仓温一直是「—」。
-    if block.get("chamber_temper") is not None:
-        state.chamber_temper = _as_float(block.get("chamber_temper"))
-    else:
+    #
+    # 2026-09-18 第二次修：只看「字段在不在」仍然不够 —— 有的固件会把
+    # chamber_temper 一起带上却常年报 0（前端 `chamber ? … : "—"` 于是又成了「—」）。
+    # 所以改成：**大于 0 的 chamber_temper 优先**；为 0 / 负数 / 缺失时再看 ctc 打包值
+    # （负数按「无有效读数」处理，室内打印机不存在 0℃ 以下的仓温读数）。
+    # 两边都没有有效值才落回 0 —— 界面显示「—」，不假装成 0℃。
+    chamber = _as_float(block.get("chamber_temper"))
+    if chamber <= 0:
         ctc = block.get("device")
         ctc = ctc.get("ctc") if isinstance(ctc, dict) else None
         ctc = ctc.get("info") if isinstance(ctc, dict) else None
         packed = ctc.get("temp") if isinstance(ctc, dict) else None
         if packed is not None:
             value = _as_int(packed)
-            state.chamber_temper = float(value & 0xFFFF)
+            chamber = float(value & 0xFFFF)
             state.chamber_target = float((value >> 16) & 0xFFFF)
+    state.chamber_temper = chamber
 
     state.cooling_fan_pct = fan_percent(block.get("cooling_fan_speed"))
     state.aux_fan_pct = fan_percent(block.get("big_fan1_speed"))
@@ -415,6 +468,7 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     # 没装该组件的机型（X1/P1/A1）这里就是 None，界面改走 big_fan1。
     state.airduct_fan_pct = airduct_fan_percent(block)
     state.secondary_aux_fan_pct = airduct_left_aux_percent(block)
+    state.secondary_aux_installed = airduct_left_aux_installed(block)
 
     # 外排：套件并入空调系统后会多报一个风扇部件，优先用它；
     # 没有就退回 big_fan2（X 系列与 P2S 外排/腔体都走这一路档位）
