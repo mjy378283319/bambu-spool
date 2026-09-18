@@ -135,7 +135,7 @@
   /* ── 配置 ───────────────────────────────────────────────── */
 
   function defaultCfg() {
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap", showAll: false };
+    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap", writeMode: "ack", showAll: false };
   }
 
   function loadCfg() {
@@ -510,14 +510,30 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     return st;
   }
 
+  /** 实际用哪种写入：cfg.writeMode "ack"=应答写入（默认），"fast"=无应答写入。
+   *  特征不支持所选方式时自动退到另一种。返回 {noResp, label}。 */
+  function pickWriteMode() {
+    const st = LABEL.ble;
+    const wantFast = loadCfg().writeMode === "fast";
+    const canFast = !!st.char.properties.writeWithoutResponse;
+    const canAck = !!st.char.properties.write;
+    const noResp = wantFast ? (canFast || !canAck) : (!canAck && canFast);
+    return { noResp, label: noResp ? "无应答写入" : "应答写入" };
+  }
+
   async function bleWriteAll(bytes, onProgress) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
-    // 优先「带应答写入」（GATT Write）：每个包都有链路层确认，通道堵了会立刻
-    // 报错，能触发下面的减包重发；之前的「无应答写入」没有流控，Windows 蓝牙栈
-    // 发送缓冲一满就静默丢包 —— 界面显示已全部发出、打印机却缺斤少两甚至一张
-    // 都没收全，正是「发送成功却打不出」的元凶。只有特征不支持应答写入时才退回。
-    const useNoResp = !st.char.properties.write;
+    // 写入方式可在界面切换（cfg.writeMode）：
+    // - 应答写入（默认）：每个包都有链路层确认，通道堵了会立刻报错并触发
+    //   下面的减包重发；此前的「无应答写入」没有流控，Windows 蓝牙栈发送
+    //   缓冲一满就静默丢包 —— 界面显示已全部发出、打印机却没收全，
+    //   正是「发送成功却打不出」的元凶之一。
+    // - 无应答写入：汉印自家 App 的走法，个别固件只认这个；每包之间固定
+    //   等 20ms 给打印机留消化时间。
+    const mode = pickWriteMode();
+    const useNoResp = mode.noResp;
+    st.lastMode = mode.label;
     let size = st.chunk;
     let sent = 0;
     const parts = [];
@@ -540,7 +556,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       sent = end;
       if (onProgress) onProgress(sent, bytes.length);
       // 无应答写入没有流控，节奏太快打印机会丢数据
-      if (useNoResp) await sleep(12);
+      if (useNoResp) await sleep(20);
     }
     return parts;
   }
@@ -675,7 +691,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         })
       );
       const secs = ((Date.now() - started) / 1000).toFixed(1);
-      const mode = LABEL.ble.char && LABEL.ble.char.properties.write ? "应答写入" : "无应答写入";
+      const mode = LABEL.ble.lastMode || "应答写入";
       LABEL.probeLog.unshift({
         at: new Date().toLocaleTimeString("zh-CN"),
         what: "打印作业（" + mode + "）",
@@ -817,7 +833,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "</div>" +
       (connected
         ? '<div class="small muted" style="margin-top:6px">写特征 <code>' + esc(st.char.uuid) +
-          "</code> · " + (st.char.properties.write ? "应答写入" : "无应答写入") +
+          "</code> · " + (loadCfg().writeMode === "fast" ? "无应答写入" : "应答写入") +
           " · 分包 " + st.chunk + " 字节 · 服务 " + st.services.length + " 个</div>"
         : "") +
       '<div class="label-ble-tests">' +
@@ -893,6 +909,10 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
             '<option value="gap"' + (cfg.feedMode !== "lines" ? " selected" : "") + '>按间隙定位（多张不串位，推荐）</option>' +
             '<option value="lines"' + (cfg.feedMode === "lines" ? " selected" : "") + '>固定行数（旧行为，多张会累积串位）</option>' +
           "</select></label>" +
+          '<label class="field"><span>写入方式</span><select id="labelWriteMode" onchange="labelPickWriteMode(this.value)">' +
+            '<option value="ack"' + (cfg.writeMode !== "fast" ? " selected" : "") + '>应答写入（每包有确认，推荐）</option>' +
+            '<option value="fast"' + (cfg.writeMode === "fast" ? " selected" : "") + '>无应答写入（汉印 App 同款走法）</option>' +
+          "</select></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -910,11 +930,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "多张打印的走纸默认「按间隙定位」：每张位图后发 <code>FF（0x0C）</code>，机器按间隙学习结果" +
       "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
       "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
-      "写入默认走「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完。" +
+      "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完；" +
+      "个别固件只吃汉印 App 那套「无应答写入」，打不出就切换试试。" +
       "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
       "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
       "② 打印机开关机一次再连（清掉它那头僵死的旧连接，比重启电脑快）；" +
-      "③ 点「查询状态」看「收发记录」：有回执说明链路通，可调浓度或换尺寸重试；" +
+      "③ 把「写入方式」切到无应答写入再打；" +
+      "④ 点「查询状态」看「收发记录」：有回执说明链路通，可调浓度或换尺寸重试；" +
       "完全没回执则是指令集不匹配，可以用「原始指令」手工试协议。</p>";
 
     openModal(
@@ -1000,6 +1022,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     saveCfg();
   }
 
+  function labelPickWriteMode(value) {
+    const cfg = loadCfg();
+    cfg.writeMode = value === "fast" ? "fast" : "ack";
+    saveCfg();
+    renderBlePanel();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -1038,6 +1067,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelPickDensity,
     labelPickCopies,
     labelPickFeedMode,
+    labelPickWriteMode,
     labelPickShowAll,
   });
 })();
