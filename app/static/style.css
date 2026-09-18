@@ -1093,6 +1093,33 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 }
 .price-more { font-size: 13.5px; color: var(--accent); }
 
+/* 「另有 N 盘未登记价格」这类行内可点文字：像链接，不像按钮。 */
+.linklike {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font: inherit; text-align: left;
+}
+.linklike:hover { text-decoration: underline; }
+
+/* ── 自绘组合框候选层（input[list] 的替代品） ──────────
+   原生 datalist 的弹层高度和过滤行为都改不了，armComboInput 直接把它
+   替换成这个浮层：全量候选、可滚动、点击即选。挂在 body 上用 fixed 定位，
+   避免被弹窗的 overflow 裁掉。 */
+.combo-pop {
+  position: fixed; z-index: 1000;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: var(--shadow-md);
+  max-height: 300px; overflow-y: auto; min-width: 160px;
+  padding: 4px;
+}
+.combo-pop .combo-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: left;
+  padding: 7px 10px; border-radius: 6px; font: inherit; color: var(--text);
+}
+.combo-pop .combo-item:hover, .combo-pop .combo-item.active { background: var(--accent-soft); }
+.combo-pop .combo-item .tick { margin-left: auto; color: var(--accent); font-size: 12px; }
+.combo-pop .combo-empty { padding: 8px 10px; color: var(--text-3); font-size: 13px; }
+
 /* ── 窄屏 ───────────────────────────────────────────── */
 @media (max-width: 1024px) {
   /* 概览卡（内含 236px 定宽栅格）和品牌分布并排会各剩 300 出头，

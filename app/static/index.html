@@ -181,6 +181,13 @@
         <button class="tab" data-tab="low">余量不足</button>
         <button class="tab" data-tab="archived">已归档</button>
       </div>
+      <!-- 「只看未登记价格」的可见芯片：开关是 jumpToSpoolsNoPrice 设的隐藏标记，
+           没有这枚芯片的话筛出来的列表少一截、用户不知道为什么（也不会关）。 -->
+      <div id="noPriceChip" style="display:none;margin:8px 0 0">
+        <span class="tag amber">只看未登记价格
+          <button class="linklike" onclick="clearNoPriceFilter()" title="取消这个筛选" style="margin-left:4px">×</button>
+        </span>
+      </div>
       <div class="filter-grid">
         <label class="fld wide"><span>关键字</span>
           <!-- 多个词用空格分隔，按 AND 收窄（「魔创 天蓝」）。口径与「转移消耗」弹窗的

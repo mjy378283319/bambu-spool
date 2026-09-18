@@ -35,6 +35,7 @@ from ..catalog import (
     MATERIAL_COLOR_SERIES,
     MATERIALS,
     MODEL_CODE_TO_NAME,
+    brand_lookup_map,
     build_spool_name,
     model_display_name,
     normalize_brand,
@@ -215,7 +216,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "0.9.0",
+        "version": "0.10.0",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {

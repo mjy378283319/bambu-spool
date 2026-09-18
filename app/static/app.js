@@ -281,7 +281,17 @@ function closeModal(historyBack) {
   // 普通弹窗：把那条 `#modal` 记录退掉，地址栏回到当前视图。
   // 已经在 popstate 里被退掉（historyBack）或本来就没有弹窗记录时不用动。
   if (hadModal && !historyBack && hash === "modal") {
-    try { history.back(); } catch (e) { /* 忽略 */ }
+    // ⚠️ back() 必须**延一拍**再退（2026-09-18，用户反馈「手动补录消耗、
+    // 称重校准、编辑都进不去了」）：这些按钮是 `closeModal(); openXxxDialog()`
+    // 連招 —— back() 是异步的，popstate 还没回来新弹窗就开了，popstate 一到
+    // 就把**刚打开的新弹窗**当垃圾关掉，表现是弹窗闪一下就没、像按钮坏了。
+    // 延迟期间弹窗重新打开了（换弹窗）就作废这次 back：新弹窗与旧的那条
+    // #modal 共用一条历史记录，关闭时自然会退。
+    setTimeout(() => {
+      if (location.hash.slice(1) !== "modal") return;   // 记录已被别的后退消费掉
+      if (document.getElementById("modalHost").innerHTML) return;   // 换弹窗：新弹窗顶上了
+      try { history.back(); } catch (e) { /* 忽略 */ }
+    }, 0);
   }
 }
 
@@ -451,81 +461,126 @@ function refillSelect(id, values, placeholder) {
   if (current && values.includes(current)) sel.value = current;
 }
 
-/* ── 「点一下就能选」的组合框（原生 datalist 的补救） ──────
+/* ── 自绘组合框（原生 datalist 的替代） ──────────────────
  *
- *  用户反馈（2026-09-18）：「这个下拉菜单每次都要先删除才能选择，最好点击就能选择。」
- *  截图里高亮的是料盘表单的**外观**字段 —— 那是个 <input list="finishList">。
+ *  2026-09-18 两轮反馈合起来把这个方案顶掉了原来的「聚焦清空」补丁：
+ *  ① 「每次都要先删除才能选择」—— 原生 datalist 拿输入框当前值做子串过滤，
+ *     且没有任何属性能关掉；② 「把这个下拉列表加长」—— 原生弹层高度写死
+ *     （约 4 行半），CSS 够不着。
  *
- *  为什么会「必须先删掉」：原生 datalist 的候选是拿**输入框当前的值做子串过滤**的。
- *  外观框预填着「普通」，点开箭头时浏览器只留下名字里含「普通」的那一条 ——
- *  整份候选只剩一项，看起来就像「不删掉就选不了别的」。颜色名称框同理
- *  （预填「黑色」→ 只列带「黑色」的颜色）。
+ *  两个毛病同根：弹层是浏览器画的。所以干脆不用它 —— armComboInput 把
+ *  input 的 list 属性摘掉（原生弹层不再出现），换成自己画的浮层：
+ *  全量候选、最高 300px 可滚动、点击即选、支持键盘上下/回车，值始终留在
+ *  输入框里不用清空，「点一下 → 满列表 → 点一条 → 完事」。
  *
- *  datalist 没有任何属性可以关掉这个过滤，所以只能自己来：**聚焦时先把值挪走**，
- *  候选因此全量展开；离开时若用户没动过，再把原值放回去。整个过程对用户是
- *  「点一下 → 满列表 → 点一条 → 完事」，而自由输入的能力一点没少。
- *
- *  三态由 `comboFocus` / `comboInput` / `comboBlur` 三个纯函数决定，
- *  它们不改 DOM、只算「现在该怎么办」—— 因为这套逻辑的状态转移（尤其是
- *  「点了色卡要保留、只是切走要还原」）靠肉眼看界面根本分不出来。
+ *  数据源仍是 <datalist> 元素本体（留在 DOM 里）：renderColorPresets 会
+ *  实时改写颜色候选，浮层每次打开**现读**，改过多少轮都是新的。
  */
 
-/** 聚焦：把当前值暂存起来并清空，让候选全量展开。
- *  返回值告诉调用方要不要真的动 DOM（已经是「已清空」态就别重复清）。 */
-function comboFocus(state, value) {
-  const cur = String(value == null ? "" : value);
-  if (state && state.cleared) return { cleared: false, restore: state.saved };
-  if (!cur) return { cleared: false, restore: "" };   // 本来就是空的，没什么好挪
-  return { cleared: true, restore: cur };
+/** 读输入框对应的 datalist 里的候选值。 */
+function comboOptions(el) {
+  const dl = el._comboListId ? document.getElementById(el._comboListId) : null;
+  if (!dl) return [];
+  return Array.from(dl.querySelectorAll("option"))
+    .map((o) => o.value || o.getAttribute("value") || "")
+    .filter((v) => String(v).trim() !== "");
 }
 
-/** 输入/选中：用户自己动过了，原值作废（不能在他切走时把打的字盖回去）。 */
-function comboInput() { return { cleared: false, restore: "" }; }
+function comboClose() {
+  const pop = document.getElementById("comboPop");
+  if (pop) pop.remove();
+}
 
-/** 离开：只有「聚焦时清空过、且离开时仍然是空的」才还原。
- *
- *  ⚠️ 判空是必须的，不能只看 cleared 标记：点色卡（`pickPresetColor`）和
- *  自动预填（`applyInferredFinish`）都是**直接给 input.value 赋值**、不派发
- *  input 事件，标记还留着。少了这个判空，用户刚点中的颜色名会在失焦时
- *  被还原成聚焦前的旧名字 —— 「点了没反应」，比原来的毛病更难查。
- *
- *  返回值**永远带 `apply`**（true/false），不给 undefined：
- *  调用方写的是 `if (!r.apply) return;`，测试也断言 `apply === false` ——
- *  少一个键就是 `undefined === false` 为假，两边都会静默走错分支。 */
-function comboBlur(state, value) {
-  const cur = String(value == null ? "" : value);
-  if (state && state.cleared && !cur) {
-    return { cleared: false, restore: String(state.saved || ""), apply: true };
+let _comboChromeBound = false;
+
+/** 画出（或重画）输入框 el 的候选浮层。query 为过滤词，空 = 全量。 */
+function comboRender(el, query) {
+  comboClose();
+  const all = comboOptions(el);
+  const q = String(query == null ? "" : query).trim().toLowerCase();
+  const hits = q ? all.filter((v) => v.toLowerCase().includes(q)) : all;
+  const cur = String(el.value || "").trim();
+
+  const pop = document.createElement("div");
+  pop.id = "comboPop";
+  pop.className = "combo-pop";
+  pop.innerHTML = hits.length
+    ? hits.map((v) => `<button type="button" class="combo-item${v === cur ? " active" : ""}"
+        data-value="${esc(v)}">${esc(v)}${v === cur ? '<span class="tick">✓</span>' : ""}</button>`).join("")
+    : `<div class="combo-empty">没有匹配项 —— 直接输入自定义值即可</div>`;
+  document.body.appendChild(pop);
+
+  // 定位：贴在输入框正下方，放不下就放上方；宽度至少同输入框。
+  const r = el.getBoundingClientRect();
+  pop.style.minWidth = r.width + "px";
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)) + "px";
+  const below = r.bottom + 4;
+  if (below + pop.offsetHeight > window.innerHeight - 8 && r.top - pop.offsetHeight - 4 > 8) {
+    pop.style.top = (r.top - pop.offsetHeight - 4) + "px";
+  } else {
+    pop.style.top = below + "px";
   }
-  return { cleared: false, restore: "", apply: false };
+
+  // pointerdown + preventDefault：选中时输入框不失焦（blur 关浮层的兜底不会抢先），
+  // click 阶段再把值落进去。先关浮层再赋值+派发 input —— 派发会触发
+  // onColorNameInput 之类的处理器，别让它们把浮层又画回来。
+  pop.addEventListener("pointerdown", (e) => {
+    const item = e.target.closest(".combo-item");
+    if (!item) return;
+    e.preventDefault();
+    comboClose();
+    el.value = item.dataset.value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  if (!_comboChromeBound) {
+    _comboChromeBound = true;
+    // capture：弹窗里任何容器的滚动都算 —— 浮层是 fixed 的，不跟着滚，直接关掉。
+    window.addEventListener("scroll", comboClose, true);
+    window.addEventListener("resize", comboClose);
+  }
 }
 
-/** 给一个 <input list=...> 挂上「点击即选」。
- *  用 mousedown 而不是 focus：Chromium 在 mousedown 之后才把光标放进输入框，
- *  在 focus 里清空的话光标会落到错误的位置；mousedown 里清则是「先空、再放光标」。 */
+/** 把一个 <input list=...> 升级成自绘组合框。 */
 function armComboInput(el) {
   if (!el || el.dataset.comboArmed === "1") return;
   el.dataset.comboArmed = "1";
-  el.addEventListener("mousedown", () => {
-    const r = comboFocus(el._combo, el.value);
-    if (!r.cleared) { el._combo = { cleared: false, saved: r.restore }; return; }
-    el._combo = { cleared: true, saved: r.restore };
-    // 原值退到 placeholder 上：清空之后用户还能看见「原来是普通」，
-    // 不至于像东西被弄丢了；placeholder 原本的提示语另存一份，还原时放回去。
-    if (el._comboPh == null) el._comboPh = el.getAttribute("placeholder") || "";
-    el.setAttribute("placeholder", "当前：" + r.restore);
-    el.value = "";
+  el._comboListId = el.getAttribute("list") || "";
+  if (el._comboListId) el.removeAttribute("list");   // 摘掉：否则原生弹层跟着一起出
+
+  el.addEventListener("mousedown", () => comboRender(el, ""));   // 点击框体：全量展开
+  el.addEventListener("focus", () => comboRender(el, ""));       // Tab 键进来也一样
+  // 打字过滤只在浮层开着时重画 —— pickPresetColor 等直接赋值+派发 input 的
+  // 调用方不该把浮层凭空弹出来。
+  el.addEventListener("input", () => {
+    if (document.getElementById("comboPop")) comboRender(el, el.value);
   });
-  el.addEventListener("input", () => { el._combo = comboInput(); });
-  el.addEventListener("blur", () => {
-    const r = comboBlur(el._combo, el.value);
-    el._combo = { cleared: false, saved: "" };
-    if (!r.apply) return;
-    el.value = r.restore;
-    if (el._comboPh != null) {
-      if (el._comboPh) el.setAttribute("placeholder", el._comboPh);
-      else el.removeAttribute("placeholder");
-      el._comboPh = null;
+  el.addEventListener("blur", () => setTimeout(comboClose, 120));   // 点别处：兜底收起
+  el.addEventListener("keydown", (e) => {
+    const pop = document.getElementById("comboPop");
+    if (!pop) return;
+    const items = Array.from(pop.querySelectorAll(".combo-item"));
+    if (!items.length) return;
+    let idx = items.findIndex((i) => i.classList.contains("active"));
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      idx = e.key === "ArrowDown" ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+      items.forEach((i) => i.classList.remove("active"));
+      items[idx].classList.add("active");
+      items[idx].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      // 浮层开着时回车 = 选中，不要把表单提交了
+      const target = items[Math.max(idx, 0)];
+      if (target) {
+        e.preventDefault();
+        comboClose();
+        el.value = target.dataset.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    } else if (e.key === "Escape") {
+      comboClose();
     }
   });
 }
@@ -1309,11 +1364,10 @@ const PRICE_BANDS = [
   { from: 10, to: 20, label: "¥10 - 20" },
   { from: 20, to: 30, label: "¥20 - 30" },
   { from: 30, to: 40, label: "¥30 - 40" },
-  { from: 40, to: 50, label: "¥40 - 50" },
-  { from: 50, to: null, label: "¥50 以上" },
+  { from: 40, to: null, label: "¥40 以上" },
 ];
 
-/** 把料盘按整盘价分进固定六档。
+/** 把料盘按整盘价分进固定五档（原 ¥40-50 与 ¥50以上 合并为 ¥40以上）。
  *
  *  @returns {{buckets: Array, unpriced: number, priced: number}}
  */
@@ -1324,12 +1378,12 @@ function priceBuckets(spools) {
 
   const buckets = PRICE_BANDS.map((band) => {
     // 全部档位统一「左开右闭」(from, to]：价格正好等于档位边界时落在**低**的一档。
-    // 这样 20 元归「¥10 - 20」、50 元归「¥40 - 50」，相邻两档不会重复计数。
+    // 这样 20 元归「¥10 - 20」、40 元归「¥30 - 40」，相邻两档不会重复计数。
     //
-    // 最后一档（to == null）也必须左开：写成 `p >= from` 的话，
-    // 50 元会同时落进「¥40 - 50」和「¥50 以上」（实测就是这么漏的，占比之和变成 133%）。
+    // 最后一档「¥40 以上」（to == null）也必须左开：写成 `p >= from` 的话，
+    // 40 元会同时落进「¥30 - 40」和「¥40 以上」（占比之和超 100%）。
     // 上不封顶只管「没有上界」，不代表「下界闭合」——
-    // 所以 50 元算 40-50 档，50.01 元才算「¥50 以上」。
+    // 所以 40 元算 30-40 档，40.01 元才算「¥40 以上」。
     const hit = priced.filter((s) => {
       const p = Number(s.price) || 0;
       return band.to == null ? p > band.from : (p > band.from && p <= band.to);
@@ -1393,6 +1447,9 @@ function switchSpoolTab(tab) {
 function resetSpoolFilters() {
   ["spoolSearch", "spoolPriceMin", "spoolPriceMax", "spoolBrand", "spoolMaterial", "spoolFinish"]
     .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+  // 「只看未登记价格」是隐藏开关（没有对应输入框），别的钻取入口进来时必须一并收口，
+  // 否则两个条件叠一起筛出空列表，用户还以为数据丢了。
+  if (S.spoolNoPrice) { S.spoolNoPrice = false; syncNoPriceChip(); }
   S.spoolPage = 1;
   switchSpoolTab("all");
 }
@@ -1427,6 +1484,11 @@ function filteredSpools() {
     if (finish && SUMMARY_DRILL_FIELDS.finish.norm(s) !== finish) return false;
     if (!isNaN(minPrice) && (s.price || 0) < minPrice) return false;
     if (!isNaN(maxPrice) && (s.price || 0) > maxPrice) return false;
+    // 汇总页「另有 N 盘未登记价格」点过来的专用筛选：只留「价格没填」的盘，
+    // 把登记过价的排除掉（和用户看到的「N 盘未登记」口径一致）。
+    // 这是个隐藏开关（筛选区没有对应的输入框），所以必须配一枚可见的芯片
+    // （syncNoPriceChip），不然筛出来的列表少了一截、用户不知道为什么。
+    if (S.spoolNoPrice && (Number(s.price) || 0) > 0) return false;
     if (kw) {
       // 走 spoolMatches：位置/备注也在关键词里（提示语写了「位置」），多词 AND，
       // 并且与转移弹窗的搜索口径**共用一份实现** —— 两处各写一套必然出现
@@ -1640,19 +1702,44 @@ async function editCurrentSpool(id) {
 }
 
 /* ── 品牌官方色卡（如 Polymaker Panchroma / PETG） ─────── */
+/** 把品牌写法归一到规范名（「Bambu Lab」→「拓竹」）。
+ *
+ *  色卡按规范名做键，而料盘上的品牌可能来自老数据、扫码或手输的别名。
+ *  后端启动时会归一库存（db._migrate_data），但查找时再归一一次不花钱，
+ *  两层都坏掉才查不到 —— 这类「数据在了却匹配不上」的问题只能这么防。
+ */
+function canonicalBrand(brand) {
+  const map = S.catalog.brand_lookup || {};
+  const key = String(brand || "").trim().toLowerCase().replace(/\s+/g, "");
+  return map[key] || String(brand || "").trim();
+}
+
 function presetGroupsFor(brand, material) {
   const all = S.catalog.color_series || {};
-  const seriesMap = all[brand];
+  const seriesMap = all[canonicalBrand(brand)];
   if (!seriesMap) return [];
   const map = S.catalog.material_color_series || {};
   const mat = (material || "").toUpperCase();
   const groups = [];
+  const matched = {};
   Object.keys(map).forEach((key) => {
     if (!mat.startsWith(key)) return;
     (map[key] || []).forEach((name) => {
       const colors = seriesMap[name];
-      if (colors && colors.length) groups.push({ series: name, colors });
+      if (colors && colors.length) { matched[name] = 1; groups.push({ series: name, colors }); }
     });
+  });
+  // 前缀兜底（与后端 color_series_for 同一口径，两边各写一套必须对齐）：
+  // 系列名去空格后以材料名开头的也算命中 —— 兰博官网的系列名是
+  // 「PLA耗材」「PLA哑光」「PETG玻纤」这类写法，不在显式映射表里，
+  // 没有这层的话兰博的色卡一条都出不来。
+  const matNorm = mat.replace(/\s+/g, "");
+  Object.keys(seriesMap).forEach((name) => {
+    if (matched[name]) return;
+    const colors = seriesMap[name];
+    if (colors && colors.length && name.replace(/\s+/g, "").toUpperCase().startsWith(matNorm)) {
+      groups.push({ series: name, colors });
+    }
   });
   return groups;
 }
@@ -3141,8 +3228,38 @@ function jumpToSpoolsByPrice(from, to) {
   const max = document.getElementById("spoolPriceMax");
   if (min) min.value = String(from);
   if (max) max.value = to == null || to === "" ? "" : String(to);
+  // 价格档钻取与「只看未登记价格」互斥：进来就收掉那个隐藏开关。
+  if (S.spoolNoPrice) { S.spoolNoPrice = false; syncNoPriceChip(); }
   S.spoolPage = 1;
   renderSpools();
+}
+
+/* ── 汇总页「未登记价格」钻取 ──────────────────────────── */
+/** 点汇总页「另有 N 盘未登记价格（不计入）」→ 跳到库存页，只看那些没填价格的料盘。
+ *  与品牌/价格区间钻取互斥：进这里先清空其它筛选，避免叠加后筛出空列表让用户以为丢了数据。 */
+function jumpToSpoolsNoPrice() {
+  switchView("spools");
+  ["spoolSearch", "spoolPriceMin", "spoolPriceMax", "spoolBrand", "spoolMaterial", "spoolFinish"]
+    .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+  S.spoolNoPrice = true;
+  syncNoPriceChip();
+  S.spoolPage = 1;
+  switchSpoolTab("all");
+}
+
+/** 取消「只看未登记价格」筛选（点芯片上的 × 或切到别的钻取时调用）。 */
+function clearNoPriceFilter() {
+  S.spoolNoPrice = false;
+  syncNoPriceChip();
+  S.spoolPage = 1;
+  renderSpools();
+}
+
+/** 根据 S.spoolNoPrice 显隐库存页顶部的「只看未登记价格」芯片。 */
+function syncNoPriceChip() {
+  const chip = document.getElementById("noPriceChip");
+  if (!chip) return;
+  chip.style.display = S.spoolNoPrice ? "" : "none";
 }
 
 /* ── 汇总表 → 料盘库存 的钻取 ──────────────────────────── */
@@ -3322,8 +3439,11 @@ function renderPriceDist() {
 
   const counter = document.getElementById("priceDistCount");
   if (counter) {
-    counter.textContent = unpriced
-      ? `另有 ${unpriced} 盘未登记价格（不计入）`
+    // 有未登记价格的盘时给一枚可点的按钮（2026-09-18 反馈：要点进去看是哪几盘）；
+    // 没有时维持原来的纯文字档位计数。
+    counter.innerHTML = unpriced
+      ? `<button class="linklike" onclick="jumpToSpoolsNoPrice()"
+           title="到料盘库存里只看这几盘">另有 ${unpriced} 盘未登记价格（不计入）→</button>`
       : (buckets.length ? `共 ${buckets.length} 档` : "");
   }
 
@@ -4592,9 +4712,12 @@ window.panelDebug = {
   // 库存页筛选项只列「库里真有的值」—— 口径走 SUMMARY_DRILL_FIELDS.norm()，
   // 与 filteredSpools() 的比对口径必须是同一个，否则选中了筛不出来
   syncFilterOptions, loadCatalog,
-  // 「点一下就能选」：原生 datalist 会拿当前值做子串过滤（外观预填「普通」就只能选到「普通」），
-  // 聚焦时先把值挪走、离开时没动过再放回去。三态是纯函数，界面看不出来对错。
-  armComboInputs, armComboInput, comboFocus, comboInput, comboBlur,
+  // 「另有 N 盘未登记价格」钻取：隐藏开关必须配可见芯片，否则列表少了不知道为什么
+  jumpToSpoolsNoPrice, clearNoPriceFilter, syncNoPriceChip,
+  // 自绘组合框（替代原生 datalist）：弹层高度与过滤行为浏览器不开放，
+  // 只能自己画。候选现读 datalist（renderColorPresets 会实时改写），
+  // 品牌归一（canonicalBrand）后色卡才查得到别名写法。
+  armComboInputs, armComboInput, comboRender, comboClose, comboOptions, canonicalBrand,
   // 选品牌自动带出实测皮重（只在皮重框还是默认值/自动值时带，用户手填的不动）
   applyBrandTare, onTareInput, TARE_DEFAULT,
   // 库存页关键字框：与转移弹窗共用同一份过滤口径，别各写一套

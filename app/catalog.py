@@ -463,26 +463,55 @@ from .brand_colors_cailab import (  # noqa: E402
 
 BRAND_COLOR_SERIES.update(BRAND_COLOR_SERIES_EXTRA)
 BRAND_COLOR_SERIES.update(_CAILAB_SERIES)
-for _mat, _series in {**MATERIAL_COLOR_SERIES_EXTRA, **_CAILAB_MATERIALS}.items():
-    _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
-    MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _series if s not in _existing]
+# ⚠️ 材料映射必须**三份拼接**、不能拿字典覆盖：2026-09-18 发现
+# `{**EXTRA, **CAILAB}` 的写法让 CAILAB 的两行 PLA/PETG 把 brand_colors.py 里
+# 整份映射顶掉了 —— 拓竹（PLA Basic）、Kexcelled（K5 PLA）、魔创 PLA 的色卡
+# 从那以后一齐消失，界面上的症状是「这些品牌怎么都没有色卡」。
+for _src in (MATERIAL_COLOR_SERIES_EXTRA, _CAILAB_MATERIALS):
+    for _mat, _series in _src.items():
+        _existing = MATERIAL_COLOR_SERIES.setdefault(_mat, [])
+        MATERIAL_COLOR_SERIES[_mat] = _existing + [s for s in _series if s not in _existing]
 
 
 def color_series_for(brand: str, material: str) -> list[dict]:
-    """返回该品牌+材料组合下可用的官方色卡分组（无预设时返回空列表）。"""
+    """返回该品牌+材料组合下可用的官方色卡分组（无预设时返回空列表）。
+
+    命中规则有两层，前端 `presetGroupsFor` 保持同一口径：
+    1. 显式映射：材料 -> 系列名清单（MATERIAL_COLOR_SERIES）；
+    2. 前缀兜底：系列名（去空格）以材料名开头也算 —— 兰博官网的系列名是
+       「PLA耗材」「PLA哑光」「PETG玻纤」这类写法，不在显式映射里，
+       没有这层的话兰博的色卡一条都出不来。
+    """
     series = BRAND_COLOR_SERIES.get(brand)
     if not series:
         return []
     mat = (material or "").upper()
     groups: list[dict] = []
+    matched: set[str] = set()
     for mat_key, names in MATERIAL_COLOR_SERIES.items():
         if not mat.startswith(mat_key):
             continue
         for name in names:
             colors = series.get(name)
             if colors:
+                matched.add(name)
                 groups.append({"series": name, "colors": colors})
+    mat_norm = mat.replace(" ", "")
+    for name, colors in series.items():
+        if name in matched or not colors:
+            continue
+        if name.replace(" ", "").upper().startswith(mat_norm):
+            groups.append({"series": name, "colors": colors})
     return groups
+
+
+def brand_lookup_map() -> dict[str, str]:
+    """别名/规范名（小写、去空格）-> 规范名，给前端色卡查找做归一。
+
+    老库虽然启动时会归一品牌写法（db._migrate_data），但用户手输的「kexcelled」、
+    扫码带进来的「Bambu Lab」仍可能存在；色卡按规范名做键，查之前先归一一次。
+    """
+    return dict(_BRAND_LOOKUP)
 
 
 def normalize_color(value: str) -> str:

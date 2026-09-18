@@ -72,7 +72,11 @@ const localStorageStub = {
 
 const sandbox = {
   console,
-  setTimeout: () => 0,
+  // 定时器不真跑：push 进队列，测试里用 __flushTimers 手动触发。
+  // closeModal 的 back() 现在延迟一拍，竞态测试要能控制「这一拍」的时机。
+  __timers: [],
+  __flushTimers: () => { while (sandbox.__timers.length) sandbox.__timers.shift()(); },
+  setTimeout: (fn) => { sandbox.__timers.push(fn); return sandbox.__timers.length; },
   clearTimeout: () => {},
   setInterval: () => 0,
   clearInterval: () => {},
@@ -192,7 +196,9 @@ for (const name of [
   "onRebindTargetInput", "pickRebindTarget", "refreshRebindTargetPicked",
   "spoolPickerHtml", "fillPickerAfterPick",
   "syncFilterOptions", "loadCatalog",
-  "armComboInputs", "armComboInput", "comboFocus", "comboInput", "comboBlur",
+  "jumpToSpoolsNoPrice", "clearNoPriceFilter", "syncNoPriceChip",
+  "armComboInputs", "armComboInput", "comboRender", "comboClose", "comboOptions",
+  "canonicalBrand",
   "applyBrandTare", "onTareInput",
 ]) {
   if (typeof dbg[name] !== "function") {
@@ -497,8 +503,8 @@ check("三种状态都有标签与对应标签页",
   ["unused", "in_use", "empty"].every((k) => USE_STATE_META[k]
     && USE_STATE_META[k].label && USE_STATE_META[k].color && USE_STATE_META[k].tab));
 
-// ── 9. 价格区间分档（固定六档） ────────────────────────────────
-console.log("== 价格区间分布（固定六档、不重不漏） ==");
+// ── 9. 价格区间分档（固定五档） ────────────────────────────────
+console.log("== 价格区间分布（固定五档、不重不漏） ==");
 
 const emptyBuckets = priceBuckets([]);
 check("没有料盘 -> 没有档", emptyBuckets.buckets.length === 0, JSON.stringify(emptyBuckets));
@@ -506,39 +512,40 @@ const noPrice = priceBuckets([{ price: 0 }, { price: 0 }]);
 check("全都没登记价格 -> 没有档，但记下未登记数量",
   noPrice.buckets.length === 0 && noPrice.unpriced === 2, JSON.stringify(noPrice));
 
-// 用户反馈：原来的「¥40 以上」把 42 元和 200 元混在一档里，看不出「贵的到底多贵」，
-// 所以拆成 40-50 与 50 以上两档（最后一档仍上不封顶）。
-const EXPECTED_BANDS = ["¥0 - 10", "¥10 - 20", "¥20 - 30", "¥30 - 40", "¥40 - 50", "¥50 以上"];
+// 档位拆拆合合的历史（都写在 PRICE_BANDS 的注释里）：用户 2026-09-18 反馈
+// 盘太少，40-50 与 50 以上各只有一两盘太碎，合并回「¥40 以上」上不封顶。
+const EXPECTED_BANDS = ["¥0 - 10", "¥10 - 20", "¥20 - 30", "¥30 - 40", "¥40 以上"];
 const p10 = priceBuckets([
   { price: 45 }, { price: 50 }, { price: 12 }, { price: 0 },
 ]);
-check("固定六档：0-10 / 10-20 / 20-30 / 30-40 / 40-50 / 50以上",
-  p10.buckets.length === 6 && p10.buckets.every((b, i) => b.label === EXPECTED_BANDS[i]),
+check("固定五档：0-10 / 10-20 / 20-30 / 30-40 / 40以上",
+  p10.buckets.length === 5 && p10.buckets.every((b, i) => b.label === EXPECTED_BANDS[i]),
   JSON.stringify(p10.buckets.map((b) => b.label)));
 check("未登记价格的盘不计入档内", p10.buckets.reduce((s, b) => s + b.count, 0) === 3,
   String(p10.buckets.reduce((s, b) => s + b.count, 0)));
 check("未登记数量单独给出（界面要提一句）", p10.unpriced === 1, String(p10.unpriced));
-// 左开右闭：正好 50 元归「¥40 - 50」，12 元归「¥10 - 20」
-check("边界价落对档（45 与 50 同在「¥40 - 50」，12 在「¥10 - 20」）",
-  p10.buckets.find((b) => b.label === "¥40 - 50").count === 2
+// 左开右闭：正好 40 元归「¥30 - 40」，45 与 50 都归「¥40 以上」
+check("边界价落对档（40 归 30-40 档；45 与 50 都在「¥40 以上」）",
+  p10.buckets.find((b) => b.label === "¥30 - 40").count === 0
+  && p10.buckets.find((b) => b.label === "¥40 以上").count === 2
   && p10.buckets.find((b) => b.label === "¥10 - 20").count === 1, JSON.stringify(p10.buckets));
 check("每一档的占比之和约为 100%",
   Math.abs(p10.buckets.reduce((s, b) => s + b.percent, 0) - 100) < 0.01);
 
 const hi = priceBuckets([{ price: 1200 }]);
-check("单盘 1200 元也只出固定六档", hi.buckets.length === 6, String(hi.buckets.length));
-check("最后一档「¥50 以上」兜住最高价",
+check("单盘 1200 元也只出固定五档", hi.buckets.length === 5, String(hi.buckets.length));
+check("最后一档「¥40 以上」兜住最高价",
   hi.buckets[hi.buckets.length - 1].count === 1, JSON.stringify(hi.buckets.map((b) => b.label)));
 
-// 40-50 与 50 以上必须真的分得开，而且 50 只能落一档（左开右闭：50 归 40-50）
-const split = priceBuckets([{ price: 49.99 }, { price: 50 }, { price: 88 }]);
-check("40-50 与 50 以上确实拆开了（49.99 / 50 都在 40-50，88 在 50 以上）",
-  split.buckets.find((b) => b.label === "¥40 - 50").count === 2
-  && split.buckets.find((b) => b.label === "¥50 以上").count === 1,
-  JSON.stringify(split.buckets.map((b) => `${b.label}=${b.count}`)));
-check("边界价 50 只落一档（不会被 40-50 和 50 以上重复计数）",
-  split.buckets.reduce((s, b) => s + b.count, 0) === 3,
-  JSON.stringify(split.buckets.map((b) => `${b.label}=${b.count}`)));
+// 边界 40 只能落一档（左开右闭：40 归 30-40，40.01 才算 40 以上）
+const merged = priceBuckets([{ price: 39.99 }, { price: 40 }, { price: 88 }]);
+check("合并后不重不漏（39.99 与 40 都在 30-40，88 在 40 以上）",
+  merged.buckets.find((b) => b.label === "¥30 - 40").count === 2
+  && merged.buckets.find((b) => b.label === "¥40 以上").count === 1,
+  JSON.stringify(merged.buckets.map((b) => `${b.label}=${b.count}`)));
+check("边界价 40 只落一档（不会被 30-40 和 40 以上重复计数）",
+  merged.buckets.reduce((s, b) => s + b.count, 0) === 3,
+  JSON.stringify(merged.buckets.map((b) => `${b.label}=${b.count}`)));
 
 // 覆盖面：任意价格都必须落进恰好一档
 let covered = true;
@@ -1571,60 +1578,212 @@ sandbox.fetch = origFetch;
 state.spools = [];
 
 
-// ── 17g. 原生 datalist 「点击即选」 ──────────────────────────────
-// 用户原话「这个下拉菜单每次都要先删除才能选择，最好点击就能选择」。
-// 根因：原生 datalist 的候选是**拿输入框当前值做子串过滤**的 ——
-// 外观框预填着「普通」，点开就只剩「普通」一条，看着像「不删掉就选不了别的」。
-// datalist 没有属性可以关掉这个过滤，只能聚焦时先把值挪走。
-//
-// 三态是纯函数，**界面上看不出对错**（清空一下再放回去，肉眼就是闪一下），
-// 所以状态转移必须在这里逐条钉住。
+// ── 17g. 自绘组合框（原生 datalist 的替代） ──────────────────────
+// 两轮反馈合起来逼出来的方案：①「每次都要先删除才能选择」——原生 datalist
+// 拿输入框当前值做子串过滤，没有属性能关；②「把这个下拉列表加长」——原生
+// 弹层高度写死约 4 行半，CSS 够不着。现在 armComboInput 把 list 属性摘掉、
+// 换成自己画的浮层：全量候选、可滚动、点击即选、值不用清空。
 console.log("");
-console.log("── 原生下拉「点击即选」（聚焦清空、离开还原） ──");
+console.log("── 自绘组合框（全量候选、点击即选、高度可控） ──");
 
-// ① 聚焦时把值挪走
-check("聚焦有值的框：清空并记下原值",
-  JSON.stringify(sandbox.comboFocus(null, "普通")) === JSON.stringify({ cleared: true, restore: "普通" }),
-  JSON.stringify(sandbox.comboFocus(null, "普通")));
-check("聚焦本来就是空的框：不用动（别白闪一下）",
-  sandbox.comboFocus(null, "").cleared === false
-  && sandbox.comboFocus(null, null).cleared === false);
-check("已经清空过再聚焦一次：不覆盖已记下的原值",
-  sandbox.comboFocus({ cleared: true, saved: "普通" }, "").restore === "普通");
-
-// ② 用户动过 → 原值作废
-check("打字/点选后，原值不再作废还原",
-  sandbox.comboInput().cleared === false && sandbox.comboInput().restore === "");
-
-// ③ 离开：只有「清空过 + 仍是空的」才还原
-check("点了就切走（什么都没选）：还原成原值",
-  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "")) 
-    === JSON.stringify({ cleared: false, restore: "普通", apply: true }),
-  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "")));
-check("选了一条：值非空，不许把原值盖回去（这正是「点了没反应」的老毛病）",
-  sandbox.comboBlur({ cleared: true, saved: "普通" }, "丝绸").apply === false,
-  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "普通" }, "丝绸")));
-check("没清空过（压根没聚焦过）：离开不动它",
-  sandbox.comboBlur(null, "普通").apply === false);
-check("清空过、但用户手动打了字：保留打的字",
-  sandbox.comboBlur({ cleared: true, saved: "普通" }, "磨砂").apply === false);
-
-// ④ 色卡那条路：pickPresetColor 是**直接给 value 赋值**、不派发 input 事件，
-//    标记还留着。少了判空，用户刚点中的颜色名会在失焦时被还原 —— 比原毛病更难查。
-check("点色卡后失焦（value 已赋值、标记未清）不会被还原",
-  sandbox.comboBlur({ cleared: true, saved: "黑色" }, "哑光白").apply === false,
-  JSON.stringify(sandbox.comboBlur({ cleared: true, saved: "黑色" }, "哑光白")));
-
-// ⑤ 真的挂上了吗？弹窗里的两个 datalist 都要被武装，且只挂一次
-check("两个 datalist 输入框都在弹窗里（外观 / 颜色名称）",
+// ① 源码级接线检查
+check("两个 datalist 输入框还在弹窗里（外观 / 颜色名称，HTML 是数据源）",
   /id="f_finish"[^>]*list="finishList"/.test(appSrc)
   && /id="f_color_name"[^>]*list="colorList"/.test(appSrc));
 check("openModal 里调用了 armComboInputs（写了函数不等于接上了）",
   /armComboInputs\(host\)/.test(appSrc), "openModal 里没挂");
+check("armComboInput 会摘掉 list 属性（留着的话原生弹层跟自绘的一起出）",
+  /removeAttribute\("list"\)/.test(appSrc));
 check("armComboInput 有幂等保护（每次开弹窗都会扫一遍，不能重复挂）",
   /dataset\.comboArmed === "1"/.test(appSrc) || /_comboArmed/.test(appSrc));
-check("用 mousedown 而不是 focus（focus 里清空会让光标落错位置）",
-  /addEventListener\("mousedown"/.test(appSrc) && /armComboInput/.test(appSrc));
+check("浮层挂在 body 上（弹窗 overflow 会把挂在弹窗里的 absolute 浮层裁掉）",
+  /document\.body\.appendChild\(pop\)/.test(appSrc));
+const CSS_SRC = fs.readFileSync(path.join(ROOT, "app", "static", "style.css"), "utf8");
+check(".combo-pop 是 fixed 定位（浮层随输入框定位，不随弹窗滚动）",
+  /\.combo-pop\s*\{[^}]*position:\s*fixed/.test(CSS_SRC));
+check(".combo-pop 有 max-height（用户要求下拉能「加长」——本质是可滚动）",
+  /\.combo-pop\s*\{[^}]*max-height:\s*300px/.test(CSS_SRC));
+check("候选是现读 datalist 的（renderColorPresets 会实时改写颜色候选，不能缓存）",
+  /function comboOptions\(el\)/.test(appSrc)
+  && /_comboListId/.test(appSrc));
+
+// ② 行为级：摘 list 属性 + 候选现读
+function fakeInput(listId) {
+  const attrs = {};
+  if (listId) attrs.list = listId;   // 模拟 <input list="finishList">：armComboInput 要能读到并摘掉
+  return {
+    dataset: {}, value: "", _listeners: {},
+    addEventListener(t, fn) { (this._listeners[t] = this._listeners[t] || []).push(fn); },
+    getAttribute: (k) => (k in attrs ? attrs[k] : null),
+    setAttribute: (k, v) => { attrs[k] = String(v); },
+    removeAttribute: (k) => { delete attrs[k]; },
+    getBoundingClientRect: () => ({ top: 100, left: 10, bottom: 130, width: 200, height: 30 }),
+    focus() {}, dispatchEvent() {},
+  };
+}
+const fakeFinish = fakeInput("finishList");
+sandbox.armComboInput(fakeFinish);
+check("arm 之后 list 属性被摘掉（原生弹层不再出现）",
+  fakeFinish.getAttribute("list") === null && fakeFinish._comboListId === "finishList",
+  JSON.stringify({ list: fakeFinish.getAttribute("list"), id: fakeFinish._comboListId }));
+check("arm 是幂等的（再 arm 一次不重复挂监听）",
+  (fakeFinish._listeners.mousedown || []).length === 1
+  && (fakeFinish._listeners.focus || []).length === 1);
+
+const FINISH_OPTS = ["普通", "亮面", "哑光", "磨砂", "丝绸", "珠光", "金属", "夜光"];
+sandbox.document.getElementById("finishList").querySelectorAll = () =>
+  FINISH_OPTS.map((v) => ({ value: v }));
+check("comboOptions 从 datalist 现读候选（不缓存，改写后是新的）",
+  JSON.stringify(sandbox.comboOptions(fakeFinish)) === JSON.stringify(FINISH_OPTS),
+  JSON.stringify(sandbox.comboOptions(fakeFinish)));
+
+// ③ 浮层渲染：全量 / 过滤 / 空态
+const bodyKids = () => sandbox.document.body.children.length;
+fakeFinish.value = "哑光";   // 当前值要能落到「选中标记」上，否则没有任何 item 该高亮
+sandbox.comboRender(fakeFinish, "");
+{
+  const pop = sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  check("聚焦展开的是全量候选（不是被当前值过滤过的残列表）",
+    FINISH_OPTS.every((v) => pop.innerHTML.includes(v)), pop.innerHTML.slice(0, 200));
+  check("当前值带选中标记", pop.innerHTML.includes("active") && pop.innerHTML.includes("哑光"));
+}
+sandbox.comboRender(fakeFinish, "磨");
+{
+  const pop = sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  check("打字后候选按子串收窄",
+    pop.innerHTML.includes("磨砂") && !pop.innerHTML.includes("丝绸"),
+    pop.innerHTML.slice(0, 200));
+}
+sandbox.comboRender(fakeFinish, "不存在的工艺");
+{
+  const pop = sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  check("没有匹配项时提示「直接输入自定义值」而不是空浮层",
+    pop.innerHTML.includes("直接输入自定义值"));
+}
+
+// ── 17g-2. 弹窗竞态：关一个、开一个 ──────────────────────────────
+// 用户反馈「手动补录消耗、称重校准、编辑都进不去了」。根因：closeModal 里的
+// history.back() 是异步的 —— popstate 还没回来，新弹窗已经开了；popstate 一到
+// 就把刚打开的新弹窗当垃圾关掉。修法：back() 延迟一拍，期间弹窗重新打开就作废。
+console.log("");
+console.log("── 弹窗竞态（详情弹窗里点「手动补录/校准/编辑」进不去的根因） ──");
+
+const modalHost = () => sandbox.document.getElementById("modalHost");
+// 场景 A：普通关闭 —— back 延迟一拍
+sandbox.history._reset();
+sandbox.location.hash = "#view=spools";
+sandbox.history.replaceState(null, "", "#view=spools");
+sandbox.history.pushState(null, "", "#modal");
+modalHost().innerHTML = "<div>旧弹窗</div>";
+sandbox.closeModal();
+check("closeModal 立即清空弹窗内容", modalHost().innerHTML === "");
+check("back() 延迟一拍：flush 之前地址还停在 #modal",
+  sandbox.location.hash === "#modal", sandbox.location.hash);
+sandbox.__flushTimers();
+check("flush 之后地址退回视图记录（该退的一条没少）",
+  sandbox.location.hash === "#view=spools", sandbox.location.hash);
+
+// 场景 B：关了马上开新的 —— back 必须作废
+sandbox.history._reset();
+sandbox.location.hash = "#view=spools";
+sandbox.history.replaceState(null, "", "#view=spools");
+sandbox.history.pushState(null, "", "#modal");
+modalHost().innerHTML = "<div>详情弹窗</div>";
+sandbox.closeModal();
+modalHost().innerHTML = "<div>手动补录消耗</div>";   // openUseDialog 同步顶上
+sandbox.__flushTimers();
+check("换弹窗时 back 作废：新弹窗还在、地址也没被退掉",
+  modalHost().innerHTML === "<div>手动补录消耗</div>" && sandbox.location.hash === "#modal",
+  `hash=${sandbox.location.hash}`);
+// 新弹窗正常关闭：还是只退一条记录（closeModal 自己会清空 host 并排程 back）
+sandbox.closeModal();
+sandbox.__flushTimers();
+check("新弹窗关闭后地址退回视图（历史记录没有堆积）",
+  sandbox.location.hash === "#view=spools", sandbox.location.hash);
+// 源码级：这个延迟只能长存在 closeModal 里
+check("closeModal 的 back() 走 setTimeout 延迟（同步 back 会关掉刚打开的替换弹窗）",
+  /function closeModal[\s\S]{0,900}setTimeout\(/.test(appSrc));
+
+// ── 17g-3. 「另有 N 盘未登记价格」钻取 ───────────────────────────
+console.log("");
+console.log("── 汇总页「未登记价格」钻到库存 ──");
+
+state.spools = [
+  { ...spoolForDrill(1, "拓竹", "PLA", "丝绸"), price: 0 },
+  { ...spoolForDrill(2, "兰博", "PETG", ""), price: 42.79 },
+  { ...spoolForDrill(3, "Kexcelled", "PLA", ""), price: 0 },
+];
+sandbox.jumpToSpoolsNoPrice();
+check("点了之后切到库存页", state.view === "spools", String(state.view));
+check("只留没登记价格的盘",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[1,3]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+check("芯片可见（隐藏开关没有芯片就是「列表少了不知道为什么」）",
+  sandbox.document.getElementById("noPriceChip").style.display === "");
+check("汇总页计数真的换成了可点的按钮（源码级）",
+  /class="linklike" onclick="jumpToSpoolsNoPrice\(\)"/.test(appSrc));
+
+// 别的钻取入口必须把这个隐藏开关关掉，否则两个条件叠一起筛出空列表
+sandbox.jumpToSpoolsByField("brand", "拓竹");
+check("点品牌钻取会顺带关掉「未登记」开关（resetSpoolFilters 统一收口）",
+  !state.spoolNoPrice
+  && sandbox.document.getElementById("noPriceChip").style.display === "none");
+check("关掉之后列表恢复该品牌的全部盘",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[1]",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)));
+
+sandbox.jumpToSpoolsNoPrice();
+sandbox.clearNoPriceFilter();
+check("芯片可以手动关掉，关掉后恢复完整列表",
+  JSON.stringify(sandbox.filteredSpools().map((s) => s.id)) === "[1,2,3]"
+  && sandbox.document.getElementById("noPriceChip").style.display === "none");
+
+state.spoolNoPrice = true;
+sandbox.jumpToSpoolsByPrice(40, "");
+check("点价格档钻取也关掉「未登记」开关（互斥条件不能叠加）",
+  !state.spoolNoPrice);
+
+// ── 17g-4. 品牌色卡：归一 + 前缀兜底 ─────────────────────────────
+// 用户反馈「拓竹、兰博、kexcelled 怎么都没有色卡」。两个根因都在数据接线：
+// ① CAILAB 的材料映射用字典覆盖顶掉了前面全部品牌的映射；② 兰博官网的系列名
+// （「PLA耗材」这类）从不在映射表里。这里钉住前端查找的两个补丁。
+console.log("");
+console.log("── 品牌官方色卡：品牌归一 + 系列前缀兜底 ──");
+
+state.catalog = {
+  ...(state.catalog || {}),
+  brand_lookup: { bambulab: "拓竹", bambu: "拓竹", kexcelled: "Kexcelled", kecelled: "Kexcelled" },
+  color_series: {
+    "拓竹": { "PLA Basic": [{ name: "黑色", hex: "#000000" }], "PETG HF": [{ name: "白", hex: "#ffffff" }] },
+    "Kexcelled": { "K5 PLA": [{ name: "黑", hex: "#111111" }] },
+    "兰博": { "PLA耗材": [{ name: "白", hex: "#eeeeee" }], "PETG耗材": [{ name: "雾霾蓝", hex: "#BCCBE0" }] },
+  },
+  material_color_series: { "PLA": ["PLA Basic", "K5 PLA"], "PETG": ["PETG HF"] },
+};
+check("别名「Bambu Lab」归一成「拓竹」",
+  sandbox.canonicalBrand("Bambu Lab") === "拓竹", sandbox.canonicalBrand("Bambu Lab"));
+check("小写「kexcelled」也能归一（色卡按规范名做键）",
+  sandbox.canonicalBrand("kexcelled") === "Kexcelled");
+check("没收录的品牌原样返回（自定义品牌不能被改坏）",
+  sandbox.canonicalBrand("自家作坊") === "自家作坊");
+check("空值安全", sandbox.canonicalBrand("") === "" && sandbox.canonicalBrand(null) === "");
+
+const gBambu = sandbox.presetGroupsFor("Bambu Lab", "PLA");
+check("老写法「Bambu Lab」也能查到拓竹色卡（归一先行）",
+  gBambu.length === 1 && gBambu[0].series === "PLA Basic",
+  JSON.stringify(gBambu.map((g) => g.series)));
+const gLanbo = sandbox.presetGroupsFor("兰博", "PETG");
+check("兰博「PETG耗材」靠前缀兜底命中（显式映射里没有这个名字）",
+  gLanbo.some((g) => g.series === "PETG耗材"), JSON.stringify(gLanbo.map((g) => g.series)));
+const gBambuPetg = sandbox.presetGroupsFor("拓竹", "PETG");
+check("显式映射照常命中（兜底不能把老路径弄坏）",
+  gBambuPetg.some((g) => g.series === "PETG HF"), JSON.stringify(gBambuPetg.map((g) => g.series)));
+check("不同材料的前缀不误伤（兰博 PLA 系列不会混进 PETG）",
+  !sandbox.presetGroupsFor("兰博", "PETG").some((g) => g.series === "PLA耗材"));
+check("没有色卡数据的品牌返回空数组而不是报错",
+  JSON.stringify(sandbox.presetGroupsFor("自家作坊", "PLA")) === "[]");
+check("presetGroupsFor 查之前先过 canonicalBrand（源码级）",
+  /const seriesMap = all\[canonicalBrand\(brand\)\]/.test(appSrc));
 
 
 // ── 17h. 选品牌自动带出实测皮重 ──────────────────────────────────
