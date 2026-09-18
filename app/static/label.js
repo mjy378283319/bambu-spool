@@ -77,7 +77,7 @@
   const LABEL = {
     cfg: null,
     spoolId: 0,
-    ble: { device: null, server: null, char: null, notify: null, chunk: 182, services: [], writes: [] },
+    ble: { device: null, server: null, char: null, notify: null, chunk: 20, services: [], writes: [] },
     busy: false,
     progress: "",
     probeLog: [],
@@ -490,7 +490,11 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     st.server = server;
     st.char = writeChar;
     st.notify = notifyChar;
-    st.chunk = writeChar.properties.writeWithoutResponse ? 182 : 64;
+    // 分包固定 20 字节：Web Bluetooth 没有 API 查链路 MTU，而这台 T260LR 实测
+    // 182 字节分包时——应答写入直接报 GATT operation failed（触发长写流程，
+    // 固件不支持）；无应答写入每包被静默截断到 ~20 字节，打出来只有标签头
+    // 一小条。按 ATT 默认 MTU 23 的最保守值走，慢一点但一定完整。
+    st.chunk = 20;
     st.services = seen;
     st.writes = allWrites.map((c) => c.uuid);
     st.notifyUuid = notifyChar ? notifyChar.uuid : "";
@@ -532,7 +536,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     // - 无应答写入：汉印自家 App 的走法，个别固件只认这个；每包之间固定
     //   等 20ms 给打印机留消化时间。
     const mode = pickWriteMode();
-    const useNoResp = mode.noResp;
+    let useNoResp = mode.noResp;
     st.lastMode = mode.label;
     let size = st.chunk;
     let sent = 0;
@@ -544,11 +548,19 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         if (useNoResp) await st.char.writeValueWithoutResponse(chunk);
         else await st.char.writeValue(chunk);
       } catch (err) {
-        // 多半是单包超过链路 MTU（或打印缓冲满），减半重试
-        if (size > 24) {
-          size = Math.max(24, Math.floor(size / 2));
+        // 单包太大：先减半重试（20 字节以内就不再减）
+        if (size > 20) {
+          size = Math.max(20, Math.floor(size / 2));
           st.chunk = size;
           parts.push("分包降到 " + size + " 字节重试");
+          continue;
+        }
+        // 20 字节的应答写入还被拒（个别固件根本不吃 Write 命令）：
+        // 自动降级到无应答写入，同一包重发——应答失败意味着没写进去，重发安全。
+        if (!useNoResp && st.char.properties.writeWithoutResponse) {
+          useNoResp = true;
+          st.lastMode = "无应答写入（应答失败自动切换）";
+          parts.push("应答写入被拒，已自动切到无应答写入");
           continue;
         }
         throw err;
@@ -556,7 +568,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       sent = end;
       if (onProgress) onProgress(sent, bytes.length);
       // 无应答写入没有流控，节奏太快打印机会丢数据
-      if (useNoResp) await sleep(20);
+      if (useNoResp) await sleep(15);
     }
     return parts;
   }
@@ -573,7 +585,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       try {
         await st.notify.startNotifications();
       } catch (err) {
-        /* 已订阅过等情况，忽略 */
+        // 订阅失败要留痕，不然「无回执」分不清是没说还是收不了
+        notices.push("（订阅通知失败：" + err.message + "）");
       }
     }
     await action();
@@ -607,7 +620,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     }
     LABEL.ble = {
       device: null, server: null, char: null, notify: null,
-      chunk: 182, services: [], writes: [],
+      chunk: 20, services: [], writes: [],
     };
   }
 
@@ -931,7 +944,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
       "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
       "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完；" +
-      "个别固件只吃汉印 App 那套「无应答写入」，打不出就切换试试。" +
+      "若固件拒绝应答写入会自动切到无应答写入。分包固定 20 字节（这台机器的链路 MTU " +
+      "协商不到大值，包大了会被静默截断——之前「只打出标签头一条」就是它），" +
+      "所以每张标签发送约需 6~15 秒，属正常速度别当卡死。" +
       "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
       "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
       "② 打印机开关机一次再连（清掉它那头僵死的旧连接，比重启电脑快）；" +
