@@ -156,6 +156,43 @@ def _dominant_hex(path: Path) -> str:
     return "#CCCCCC"
 
 
+def _dominant_hexes(path: Path, want: int = 3) -> list[str]:
+    """多色交织料（三色丝绸）的取色：取前 want 个**彼此够远**的主色。
+
+    与 `_dominant_hex` 的区别：三色料没有「单一定义色」，一张图里就有两三种
+    交缠的颜色 —— 只取众数会把另外两种丢掉，界面上 41 盘全画成同一个灰。
+    这里在整张料饼区域（中心 60%）统计量化后的颜色，按出现次数从多到少收，
+    收的时候要求与已收颜色保持一个最小距离（欧氏距离 > 60），免得同一根
+    黑金料里的「黑」和「深金」被并成两份近似色。白色背景与浅灰水印跳过。
+    """
+    from PIL import Image
+
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        w, h = im.size
+        box = im.crop((w // 5, h // 5, w * 4 // 5, h * 4 // 5))
+        box = box.resize((100, 100), Image.Resampling.BILINEAR)
+        counts: dict[tuple[int, int, int], int] = {}
+        for px in box.getdata():
+            q = (px[0] // 12 * 12, px[1] // 12 * 12, px[2] // 12 * 12)
+            counts[q] = counts.get(q, 0) + 1
+
+    picked: list[tuple[int, int, int]] = []
+    for (r, g, b), _n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        if r > 228 and g > 228 and b > 228:
+            continue   # 白底
+        if all((r - p[0]) ** 2 + (g - p[1]) ** 2 + (b - p[2]) ** 2 > 60**2 for p in picked):
+            picked.append((r, g, b))
+        if len(picked) >= want:
+            break
+    if not picked:
+        return ["#CCCCCC"]
+    out = [f"#{r:02X}{g:02X}{b:02X}" for r, g, b in picked]
+    while len(out) < want:
+        out.append(out[-1])
+    return out
+
+
 def _split_name(color: str) -> tuple[str, str]:
     """把 "Red AC199" 拆成 (中文名, 英文名, 官方色号)。"""
     m = re.search(r"\b([A-Z]{1,4}\d{2,6})\b", color)
@@ -186,8 +223,15 @@ def build() -> int:
             # 不能只按名字里有没有 &/+ 判断 —— Sakura white / Moonlight / SS001 这些
             # 名字里没有分隔符，会漏判、被取到一个根本不代表它的色值。
             is_multi = series == "三色丝绸 PLA" or any(h in color for h in MULTICOLOR_HINTS)
+            if is_multi and url:
+                img = CACHE / _img_name(url)
+                if img.exists():
+                    h1, h2, h3 = _dominant_hexes(img)
+                    label = en + (f" {code}" if code else "")
+                    rows.append(f"    _c({label!r}, {en!r}, {h1!r}, {h2!r}, {h3!r}),")
+                    continue
             if is_multi or not url:
-                # 没有单一定义色的：用中性灰占位（只做名字候选），
+                # 没图可取的（或取色失败）：主色用中性灰占位（只做名字候选），
                 # 前端点色块仍能把颜色名填进去，不会留空
                 hexv = "#CCCCCC"
             else:
@@ -209,17 +253,22 @@ def build() -> int:
 - **色名与官方色号（AC199 / MT9003 / G419 …）是官方字段**，直接取自 variant 标题；
 - **HEX 不是官方公布的**，是从官方逐色色片图取主色得到的**近似值** → official=False。
   取色方式见脚本 `_dominant_hex()`：量化后取中心区众数，避开白底与文字水印。
-- 三色丝绸 / 彩虹渐变这类没有「单一定义色」的，HEX 留中性灰 #CCCCCC（只做名字候选，
-  别当成真实颜色去比对），避免拿一个假色值去误导识色。
+- 三色丝绸这类多色交织的没有「单一定义色」，改取**前三个主色**（hex/hex2/hex3），
+  前端把色块画成三段渐变；主色 hex 仍按近似值对待（选中标记/识色比对都用它）。
+  实在没有图可取的才落回中性灰 #CCCCCC 占位。
 
 重新生成：
     python scripts/build_cailab_colors.py --fetch && python scripts/build_cailab_colors.py --build
 """
 
 
-def _c(name: str, en: str, hex_value: str) -> dict:
-    # 彩多屋不公布 Hex Code Table，全部按近似值处理
-    return {"name": name or en, "en": en, "hex": hex_value, "official": False}
+def _c(name: str, en: str, hex_value: str, hex2: str = "", hex3: str = "") -> dict:
+    # 彩多屋不公布 Hex Code Table，全部按近似值处理；hex2/hex3 只在三色系列给
+    d = {"name": name or en, "en": en, "hex": hex_value, "official": False}
+    if hex2:
+        d["hex2"] = hex2
+        d["hex3"] = hex3 or hex2
+    return d
 
 
 '''

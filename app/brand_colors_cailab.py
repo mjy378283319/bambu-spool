@@ -4,17 +4,22 @@
 - **色名与官方色号（AC199 / MT9003 / G419 …）是官方字段**，直接取自 variant 标题；
 - **HEX 不是官方公布的**，是从官方逐色色片图取主色得到的**近似值** → official=False。
   取色方式见脚本 `_dominant_hex()`：量化后取中心区众数，避开白底与文字水印。
-- 三色丝绸 / 彩虹渐变这类没有「单一定义色」的，HEX 留中性灰 #CCCCCC（只做名字候选，
-  别当成真实颜色去比对），避免拿一个假色值去误导识色。
+- 三色丝绸这类多色交织的没有「单一定义色」，改取**前三个主色**（hex/hex2/hex3），
+  前端把色块画成三段渐变；主色 hex 仍按近似值对待（选中标记/识色比对都用它）。
+  实在没有图可取的才落回中性灰 #CCCCCC 占位。
 
 重新生成：
     python scripts/build_cailab_colors.py --fetch && python scripts/build_cailab_colors.py --build
 """
 
 
-def _c(name: str, en: str, hex_value: str) -> dict:
-    # 彩多屋不公布 Hex Code Table，全部按近似值处理
-    return {"name": name or en, "en": en, "hex": hex_value, "official": False}
+def _c(name: str, en: str, hex_value: str, hex2: str = "", hex3: str = "") -> dict:
+    # 彩多屋不公布 Hex Code Table，全部按近似值处理；hex2/hex3 只在三色系列给
+    d = {"name": name or en, "en": en, "hex": hex_value, "official": False}
+    if hex2:
+        d["hex2"] = hex2
+        d["hex3"] = hex3 or hex2
+    return d
 
 
 # 彩多屋 金属 PLA（官方在售 7 色，来源 cailab3d.com）
@@ -85,47 +90,47 @@ CAILAB_SILK_PLA: list[dict] = [
 
 # 彩多屋 三色丝绸 PLA（官方在售 41 色，来源 cailab3d.com）
 CAILAB_TRI_SILK_PLA: list[dict] = [
-    _c('Red&Black SP001', 'Red&Black', '#CCCCCC'),
-    _c('Magenta&Gold SP002', 'Magenta&Gold', '#CCCCCC'),
-    _c('Blue&Green SP003', 'Blue&Green', '#CCCCCC'),
-    _c('Green&Gold SP004', 'Green&Gold', '#CCCCCC'),
-    _c('Purple&Blue SP005', 'Purple&Blue', '#CCCCCC'),
-    _c('Blue&Gold SP006', 'Blue&Gold', '#CCCCCC'),
-    _c('Silver&Gold SP007', 'Silver&Gold', '#CCCCCC'),
-    _c('Black&Gold SP008', 'Black&Gold', '#CCCCCC'),
-    _c('Pink&Gold SP009', 'Pink&Gold', '#CCCCCC'),
-    _c('Rose&Azure SP010', 'Rose&Azure', '#CCCCCC'),
-    _c('Pink&Lilac SP011', 'Pink&Lilac', '#CCCCCC'),
-    _c('Blue&Silver SP012', 'Blue&Silver', '#CCCCCC'),
-    _c('Purple&Gold SP013', 'Purple&Gold', '#CCCCCC'),
-    _c('Red&Gold SP014', 'Red&Gold', '#CCCCCC'),
-    _c('Black&Green SP015', 'Black&Green', '#CCCCCC'),
-    _c('Black&Purple SP016', 'Black&Purple', '#CCCCCC'),
-    _c('Black&Silver SP017', 'Black&Silver', '#CCCCCC'),
-    _c('Purple&Green SP018', 'Purple&Green', '#CCCCCC'),
-    _c('Magenta&Green SP019', 'Magenta&Green', '#CCCCCC'),
-    _c('Sakura white SP020', 'Sakura white', '#CCCCCC'),
-    _c('Moonlight Pink SP021', 'Moonlight Pink', '#CCCCCC'),
-    _c('Gold&Lavender SP022', 'Gold&Lavender', '#CCCCCC'),
-    _c('Blue&Black SP023', 'Blue&Black', '#CCCCCC'),
-    _c('Blue&Copper SP024', 'Blue&Copper', '#CCCCCC'),
-    _c('PURPLE&BLUE&YELLOW SAN001', 'PURPLE&BLUE&YELLOW', '#CCCCCC'),
-    _c('RED&YELLOW&GREEN SAN002', 'RED&YELLOW&GREEN', '#CCCCCC'),
-    _c('RED&GREEN&BLUE SAN003', 'RED&GREEN&BLUE', '#CCCCCC'),
-    _c('GREEN&GOLD&PURPLE SAN004', 'GREEN&GOLD&PURPLE', '#CCCCCC'),
-    _c('TRISTLE&SAGE&GRAPE SAN005', 'TRISTLE&SAGE&GRAPE', '#CCCCCC'),
-    _c('GOLD&SILVER&COPPER SAN007', 'GOLD&SILVER&COPPER', '#CCCCCC'),
-    _c('YELLOW&GREEN&BLUE SAN008', 'YELLOW&GREEN&BLUE', '#CCCCCC'),
-    _c('COPPER&PURPLE&GREEN SAN010', 'COPPER&PURPLE&GREEN', '#CCCCCC'),
-    _c('TURQUOISE&TEAL&AMBER SAN011', 'TURQUOISE&TEAL&AMBER', '#CCCCCC'),
-    _c('RED&GOLD&PURPLE SAN012', 'RED&GOLD&PURPLE', '#CCCCCC'),
-    _c('GREEN&RED&PURPLE SAN013', 'GREEN&RED&PURPLE', '#CCCCCC'),
-    _c('GREEN&GOLD&BLACK SAN014', 'GREEN&GOLD&BLACK', '#CCCCCC'),
-    _c('BLACK&PURPLE&GOLD SAN015', 'BLACK&PURPLE&GOLD', '#CCCCCC'),
-    _c('Purple Crush SS001', 'Purple Crush', '#CCCCCC'),
-    _c('Royal Mirage SS002', 'Royal Mirage', '#CCCCCC'),
-    _c('Four Primary Colors SS003', 'Four Primary Colors', '#CCCCCC'),
-    _c('Steampunk SS004', 'Steampunk', '#CCCCCC'),
+    _c('Red&Black SP001', 'Red&Black', '#303030', '#606060', '#903C3C'),
+    _c('Magenta&Gold SP002', 'Magenta&Gold', '#E49C30', '#B40C48', '#D82478'),
+    _c('Blue&Green SP003', 'Blue&Green', '#006018', '#006078', '#009C30'),
+    _c('Green&Gold SP004', 'Green&Gold', '#009C24', '#9CCC30', '#549000'),
+    _c('Purple&Blue SP005', 'Purple&Blue', '#001884', '#0048B4', '#90249C'),
+    _c('Blue&Gold SP006', 'Blue&Gold', '#6C6C00', '#0C3060', '#243018'),
+    _c('Silver&Gold SP007', 'Silver&Gold', '#C0B490', '#847800', '#F0F0E4'),
+    _c('Black&Gold SP008', 'Black&Gold', '#242424', '#484848', '#6C6C6C'),
+    _c('Pink&Gold SP009', 'Pink&Gold', '#D8783C', '#F07878', '#FC9CA8'),
+    _c('Rose&Azure SP010', 'Rose&Azure', '#006CC0', '#003090', '#B448C0'),
+    _c('Pink&Lilac SP011', 'Pink&Lilac', '#546CB4', '#789CD8', '#9C60CC'),
+    _c('Blue&Silver SP012', 'Blue&Silver', '#002460', '#E4E4F0', '#8490A8'),
+    _c('Purple&Gold SP013', 'Purple&Gold', '#6C0060', '#B48400', '#843C18'),
+    _c('Red&Gold SP014', 'Red&Gold', '#9C0C0C', '#B47800', '#C03030'),
+    _c('Black&Green SP015', 'Black&Green', '#0C0C0C', '#303030', '#545454'),
+    _c('Black&Purple SP016', 'Black&Purple', '#0C000C', '#303030', '#60006C'),
+    _c('Black&Silver SP017', 'Black&Silver', '#242424', '#484848', '#6C6C6C'),
+    _c('Purple&Green SP018', 'Purple&Green', '#6C0060', '#309048', '#9C2490'),
+    _c('Magenta&Green SP019', 'Magenta&Green', '#900060', '#3C9048', '#C03084'),
+    _c('Sakura white SP020', 'Sakura white', '#FC90B4', '#F0CCD8', '#E46090'),
+    _c('Moonlight Pink SP021', 'Moonlight Pink', '#B4609C', '#D884C0', '#F0E4F0'),
+    _c('Gold&Lavender SP022', 'Gold&Lavender', '#6C5484', '#9C9024', '#9078A8'),
+    _c('Blue&Black SP023', 'Blue&Black', '#242424', '#005478', '#484848'),
+    _c('Blue&Copper SP024', 'Blue&Copper', '#904824', '#C07854', '#54240C'),
+    _c('PURPLE&BLUE&YELLOW SAN001', 'PURPLE&BLUE&YELLOW', '#484848', '#90CCFC', '#906000'),
+    _c('RED&YELLOW&GREEN SAN002', 'RED&YELLOW&GREEN', '#FCC0E4', '#3C5400', '#484848'),
+    _c('RED&GREEN&BLUE SAN003', 'RED&GREEN&BLUE', '#FCC0E4', '#484848', '#006054'),
+    _c('GREEN&GOLD&PURPLE SAN004', 'GREEN&GOLD&PURPLE', '#FCCCD8', '#485400', '#484848'),
+    _c('TRISTLE&SAGE&GRAPE SAN005', 'TRISTLE&SAGE&GRAPE', '#484848', '#B4CC90', '#F0E4FC'),
+    _c('GOLD&SILVER&COPPER SAN007', 'GOLD&SILVER&COPPER', '#604800', '#F0CCCC', '#484848'),
+    _c('YELLOW&GREEN&BLUE SAN008', 'YELLOW&GREEN&BLUE', '#484848', '#006C48', '#84D8FC'),
+    _c('COPPER&PURPLE&GREEN SAN010', 'COPPER&PURPLE&GREEN', '#54180C', '#484848', '#CCFCF0'),
+    _c('TURQUOISE&TEAL&AMBER SAN011', 'TURQUOISE&TEAL&AMBER', '#003C54', '#303000', '#484848'),
+    _c('RED&GOLD&PURPLE SAN012', 'RED&GOLD&PURPLE', '#480C6C', '#242424', '#FCF0C0'),
+    _c('GREEN&RED&PURPLE SAN013', 'GREEN&RED&PURPLE', '#480030', '#183000', '#D884F0'),
+    _c('GREEN&GOLD&BLACK SAN014', 'GREEN&GOLD&BLACK', '#003018', '#CCCC84', '#3C3C3C'),
+    _c('BLACK&PURPLE&GOLD SAN015', 'BLACK&PURPLE&GOLD', '#242424', '#546030', '#E4F0B4'),
+    _c('Purple Crush SS001', 'Purple Crush', '#C0CCF0', '#604884', '#242424'),
+    _c('Royal Mirage SS002', 'Royal Mirage', '#242424', '#E4D830', '#CC90B4'),
+    _c('Four Primary Colors SS003', 'Four Primary Colors', '#242424', '#1818B4', '#480C60'),
+    _c('Steampunk SS004', 'Steampunk', '#000C00', '#E4E4E4', '#183048'),
 ]
 
 # 彩多屋 PLA+（官方在售 34 色，来源 cailab3d.com）

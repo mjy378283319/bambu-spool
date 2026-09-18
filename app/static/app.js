@@ -521,13 +521,15 @@ function comboRender(el, query) {
     pop.style.top = below + "px";
   }
 
-  // pointerdown + preventDefault：选中时输入框不失焦（blur 关浮层的兜底不会抢先），
-  // click 阶段再把值落进去。先关浮层再赋值+派发 input —— 派发会触发
-  // onColorNameInput 之类的处理器，别让它们把浮层又画回来。
+  // pointerdown + preventDefault：**无论点在候选还是空白/滚动条上**都不把输入框的
+  // 焦点抢走 —— blur 关浮层的兜底就不会抢先（2026-09-18 反馈「一动就出来了」的
+  // 一半根因在这：滚候选列表时手指/鼠标先「点」了浮层，输入框 blur → 弹层被关）。
+  // 点候选：关浮层再赋值+派发 input —— 派发会触发 onColorNameInput 之类的处理器，
+  // 别让它们把浮层又画回来。点空白/滚动条：只保焦点，滚动照常进行。
   pop.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
     const item = e.target.closest(".combo-item");
     if (!item) return;
-    e.preventDefault();
     comboClose();
     el.value = item.dataset.value;
     el.dispatchEvent(new Event("input", { bubbles: true }));
@@ -537,7 +539,15 @@ function comboRender(el, query) {
   if (!_comboChromeBound) {
     _comboChromeBound = true;
     // capture：弹窗里任何容器的滚动都算 —— 浮层是 fixed 的，不跟着滚，直接关掉。
-    window.addEventListener("scroll", comboClose, true);
+    // ⚠️ 唯独**浮层自己内部**的滚动不能关（「一动就出来了」的另一半根因）：
+    // 捕获监听连 #comboPop 自己的 scroll 事件也收得到。scroll 事件的 target 就是
+    // 滚动元素本身，用它区分「滚的是浮层」还是「滚的是底下的页面/弹窗」。
+    window.addEventListener("scroll", (e) => {
+      const pop = document.getElementById("comboPop");
+      const t = e.target;
+      if (pop && t && t.nodeType === 1 && (t === pop || pop.contains(t))) return;
+      comboClose();
+    }, true);
     window.addEventListener("resize", comboClose);
   }
 }
@@ -556,7 +566,14 @@ function armComboInput(el) {
   el.addEventListener("input", () => {
     if (document.getElementById("comboPop")) comboRender(el, el.value);
   });
-  el.addEventListener("blur", () => setTimeout(comboClose, 120));   // 点别处：兜底收起
+  // 点别处：兜底收起。但收之前看一眼 —— 焦点落进了浮层（键盘导航）、
+  // 或指针还悬在浮层上（正在拖滚动条 / 滚轮悬停滚动）时，这次 blur 不是「点别处」，
+  // 不能收，否则候选列表一滚就整个消失。
+  el.addEventListener("blur", () => setTimeout(() => {
+    const pop = document.getElementById("comboPop");
+    if (pop && (pop.contains(document.activeElement) || pop.matches(":hover"))) return;
+    comboClose();
+  }, 120));
   el.addEventListener("keydown", (e) => {
     const pop = document.getElementById("comboPop");
     if (!pop) return;
@@ -1774,8 +1791,13 @@ function renderColorPresets() {
         const seriesFinish = finishFromSeries(g.series);
         const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}${c.official ? "" : "（色值为近似）"}`
           + (seriesFinish ? ` · 外观：${seriesFinish}` : "");
+        // 三色丝绸这类「多色交织」没有单一定义色：数据里带 hex2/hex3 两个辅色，
+        // 色块画成三段渐变（hex 仍是主色，选中标记/比对都按它算）。
+        const bg = c.hex2
+          ? `linear-gradient(135deg, ${esc(c.hex)} 0 45%, ${esc(c.hex2)} 45% 75%, ${esc(c.hex3 || c.hex2)} 75% 100%)`
+          : esc(c.hex);
         return `<button type="button" class="preset-chip${c.official ? "" : " approx"}"
-          data-hex="${esc(c.hex)}" data-series="${esc(g.series)}" style="background:${esc(c.hex)}" title="${esc(tip)}"
+          data-hex="${esc(c.hex)}" data-series="${esc(g.series)}" style="background:${bg}" title="${esc(tip)}"
           onclick="pickPresetColor('${esc(c.hex)}', '${esc(c.name)}', '${esc(g.series)}')"></button>`;
       }).join("")}</div>
     </div>`).join("");
@@ -1886,6 +1908,7 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
     <label class="field"><span>品牌</span>
       <select id="f_brand" onchange="onBrandChoice()">${brandOptions}
         <option value="__custom__"${customSelected}>＋ 自定义品牌…</option></select></label>
+    <p class="hint hidden" id="brandDelRow"></p>
     <div class="field-row${customSelected ? "" : " hidden"}" id="brandCustomRow">
       <label class="field"><span>自定义品牌名</span>
         <input id="f_brand_custom" value="${customSelected ? esc(value.brand) : ""}"
@@ -1932,6 +1955,52 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
   renderColorPresets();
+  syncBrandDeleteHint();
+}
+
+/** 品牌下拉下面那行「删除这个自定义品牌」。当前选中的是自定义品牌（不在预设表里）时才露出来。
+ *
+ *  2026-09-18 之前删除入口只在设置页 —— 用户根本找不到，只能看着手滑打错的
+ *  品牌名（爱乐酷 ↔ 爱酷乐）在下拉里一直挂着。放表单里，选到它就能删。 */
+function syncBrandDeleteHint() {
+  const row = document.getElementById("brandDelRow");
+  const sel = document.getElementById("f_brand");
+  if (!row || !sel) return;
+  const brand = sel.value;
+  const presets = S.catalog.preset_brands || [];
+  const isCustom = brand && brand !== "__custom__" && !presets.includes(brand);
+  row.classList.toggle("hidden", !isCustom);
+  row.innerHTML = isCustom
+    ? `<button class="linklike" onclick="removeBrandFromForm()">删除「${esc(brand)}」这个自定义品牌</button>
+       <span class="small muted">—— 只影响下拉候选，已录入的料盘不受影响</span>`
+    : "";
+}
+
+/** 在料盘表单里删掉当前选中的自定义品牌。
+ *
+ *  删完之后这盘料还停在这个品牌上：把下拉切到「＋ 自定义品牌…」、原名填回
+ *  自定义输入框 —— 保存时仍按原名存，不会因为候选少了而被悄悄改掉。 */
+async function removeBrandFromForm() {
+  const sel = document.getElementById("f_brand");
+  if (!sel) return;
+  const name = sel.value;
+  const presets = S.catalog.preset_brands || [];
+  if (!name || name === "__custom__" || presets.includes(name)) return;
+  if (!window.confirm(`删除自定义品牌「${name}」？\n已录入的料盘不受影响，只是下拉候选里不再出现。`)) return;
+  try {
+    const data = await api(`/api/brands/${encodeURIComponent(name)}`, { method: "DELETE" });
+    S.catalog = { ...(S.catalog || {}), brands: data.brands, custom_brands: data.custom_brands };
+    // 把选项从下拉里摘掉
+    const opt = [...sel.options].find((o) => o.value === name);
+    if (opt) opt.remove();
+    sel.value = "__custom__";
+    const row = document.getElementById("brandCustomRow");
+    if (row) row.classList.remove("hidden");
+    const custom = document.getElementById("f_brand_custom");
+    if (custom) custom.value = name;
+    syncBrandDeleteHint();
+    toast(`已删除品牌「${name}」，这盘料的品牌保持不变`, "ok");
+  } catch (err) { toast(err.message, "err"); }
 }
 
 /** 品牌下拉切到「＋ 自定义品牌…」时露出输入框。
@@ -1954,6 +2023,7 @@ function onBrandChoice() {
   }
   applyBrandTare(sel.value);
   renderColorPresets();
+  syncBrandDeleteHint();
 }
 
 /** 品牌 -> 首选皮重（后台 `catalog.BRAND_SPOOL_WEIGHTS` 的第一个，即用户实测值）。
@@ -2305,12 +2375,19 @@ function spoolFilteredByKeyword(s, kw) {
  *  @param {number|null} selectedId 当前选中值（用来标 on）
  *  @param {string} pickFn  点选回调名（挂在 window 上，供 onclick 调用）
  *  @param {Array} pool     候选料盘（调用方用 bindCandidates 取）
+ *  @param {object} [opts]  可选项。`unbindLabel`：给一条「不绑定」首项（点选回调收到 0），
+ *                          槽位绑定弹窗用 —— 那里必须能选「不绑」，而且打字过滤后它也得一直在。
  */
-function renderSpoolPicker(listId, query, selectedId, pickFn, pool) {
+function renderSpoolPicker(listId, query, selectedId, pickFn, pool, opts) {
   const box = document.getElementById(listId);
   if (!box) return;
+  const o = opts || {};
   const hits = (pool || []).filter((s) => spoolMatches(s, query));
-  box.innerHTML = hits.length
+  const lead = o.unbindLabel
+    ? `<button type="button" class="pick-item${selectedId === 0 ? " on" : ""}"
+            onclick="${pickFn}(0)">${esc(o.unbindLabel)}</button>`
+    : "";
+  box.innerHTML = lead + (hits.length
     ? hits.map((s) => `
         <button type="button" class="pick-item${s.id === selectedId ? " on" : ""}"
                 onclick="${pickFn}(${s.id})" data-id="${s.id}">
@@ -2319,7 +2396,7 @@ function renderSpoolPicker(listId, query, selectedId, pickFn, pool) {
           ${s.archived ? '<span class="small muted">已归档</span>' : ""}
           <span class="small muted">${restText(s)}</span>
         </button>`).join("")
-    : `<p class="hint" style="padding:10px 12px;margin:0">没有匹配的料盘 —— 换个词试试（品牌、材料、颜色、编号都能搜）。</p>`;
+    : `<p class="hint" style="padding:10px 12px;margin:0">没有匹配的料盘 —— 换个词试试（品牌、材料、颜色、编号都能搜）。</p>`);
 }
 
 /** 余量文案：字段缺失写「余量未知」而不是「余 0 g」。
@@ -2530,6 +2607,13 @@ async function ensureSpoolOptions(boundId) {
   if (hint) hint.textContent = "正在读取料盘列表…";
   await loadSpools().catch(() => {});
   const ok = fillBindSpoolSelect(boundId);
+  // 补拉之后选择器也要跟上：隐藏 select 重建了，搜索框回填当前绑定、列表重画
+  const sel = document.getElementById("bindSpool");
+  const cur = sel && sel.value ? spoolById(Number(sel.value)) : null;
+  const inp = document.getElementById("bindSpoolSearch");
+  if (inp && !inp.value && cur) inp.value = cur.name;
+  renderSlotBindList("");
+  refreshSlotBindPicked();
   if (!hint) return;
   hint.textContent = ok ? ""
     : "系统里还没有登记任何料盘 —— 可以点下面的「按槽位信息建料盘」，或先去「料盘库存」新增一盘。";
@@ -2540,6 +2624,9 @@ function openSlotDialog(printerId, amsId, trayId) {
   const binding = (S.bindingMap || {})[`${printerId}:${amsId}:${trayId}`];
   const tray = findTray(printer, amsId, trayId);
   const boundId = binding ? binding.spool_id : 0;
+  // 候选池按**打开弹窗时**的绑定算（归档例外规则见 bindCandidates），
+  // 存起来让 renderSlotBindList 取 —— 用户换选别的盘不能把池子搅浑。
+  S._slotBindBoundId = boundId;
   // 外挂料盘用 ams_id = -1 表示，标题别写成「AMS 0」
   const isExt = amsId < 0;
   const unit = (((printer.state || {}).ams) || []).find((u) => u.ams_id === amsId);
@@ -2571,8 +2658,14 @@ function openSlotDialog(printerId, amsId, trayId) {
         </div>
       </div>
     </div>
-    <label class="field"><span>绑定到哪盘料</span>
-      <select id="bindSpool"><option value="">— 不绑定 —</option>${options}</select></label>
+    <label class="field"><span>绑定到哪盘料（可输入关键词筛选）</span>
+      <input id="bindSpoolSearch" placeholder="输入品牌 / 材料 / 颜色 / 编号，边打边筛"
+             autocomplete="off" oninput="onSlotBindInput()"
+             value="${boundSpool ? esc(boundSpool.name) : ""}" />
+    </label>
+    <div class="pick-list" id="bindSpoolList"></div>
+    <p class="hint" id="bindSpoolPicked"></p>
+    <select id="bindSpool" hidden><option value="">— 不绑定 —</option>${options}</select>
     <p class="hint" id="bindSpoolHint"></p>
     ${unbindRow}
     <div class="slot-actions">
@@ -2592,9 +2685,64 @@ function openSlotDialog(printerId, amsId, trayId) {
   `, `<button onclick="closeModal()">取消</button>
       <button class="primary" onclick="saveBinding(${printerId},${amsId},${trayId})">保存绑定</button>`);
 
+  renderSlotBindList("");
+  refreshSlotBindPicked();
+
   // 弹窗先弹出来（不卡手），下拉是空的就异步补一次料盘列表再重建。
   // 空列表只说明「这次会话还没进过料盘库存」，不代表系统里没有料盘。
   if (!(S.spools || []).length) ensureSpoolOptions(boundId);
+}
+
+/* ── 槽位绑定的可搜索料盘选择器 ──────────────────────────
+ *
+ *  2026-09-18 反馈：料盘一多，原来的 <select> 找一盘要滚半天，「也要可以输入
+ *  关键词」。改成和「更改料盘 / 转移消耗」同一套 pick-list（renderSpoolPicker，
+ *  加一条「— 不绑定 —」首项），检索口径、点选行为与那两处保持一致。
+ *
+ *  真值仍存在隐藏的 <select id="bindSpool"> 里 —— saveBinding、扫码落地
+ *  （pickSpoolInSelect）读的都是它，这条链路一行不动；选择器只是它的「脸」。 */
+function renderSlotBindList(query) {
+  const sel = document.getElementById("bindSpool");
+  const selId = sel ? (Number(sel.value) || 0) : 0;
+  renderSpoolPicker("bindSpoolList", query, selId, "pickSlotBind",
+    bindCandidates(S._slotBindBoundId || 0), { unbindLabel: "— 不绑定 —" });
+}
+
+function onSlotBindInput() {
+  const el = document.getElementById("bindSpoolSearch");
+  renderSlotBindList(el ? el.value : "");
+}
+
+/** 点选候选（id=0 表示「不绑定」）。真值写进隐藏 select，选择器只负责展示。 */
+function pickSlotBind(id) {
+  const sel = document.getElementById("bindSpool");
+  if (!sel) return;
+  if (id) {
+    if (![...sel.options].some((o) => o.value === String(id))) {
+      const s = spoolById(id);
+      if (!s) return;
+      const opt = document.createElement("option");
+      opt.value = String(s.id);
+      opt.textContent = `${s.name}（${restText(s)}）`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(id);
+  } else {
+    sel.value = "";
+  }
+  fillPickerAfterPick("bindSpoolSearch", id ? spoolById(id) : null);
+  renderSlotBindList("");
+  refreshSlotBindPicked();
+}
+
+/** 把「当前选中哪盘」显式写出来 —— 打完字没点候选时，输入框内容和选中值是对不上的。 */
+function refreshSlotBindPicked() {
+  const el = document.getElementById("bindSpoolPicked");
+  if (!el) return;
+  const raw = (document.getElementById("bindSpool") || {}).value || "";
+  const spool = raw ? spoolById(Number(raw)) : null;
+  if (!spool) { el.textContent = "还没有选中料盘 —— 保存后这个槽位将是空槽。"; return; }
+  el.innerHTML = `已选中：<b>${esc(spool.name)}</b>`;
 }
 
 /** 槽位绑定弹窗里的「相机扫码」：扫到料盘码就填进上面的下拉，
@@ -2687,7 +2835,19 @@ async function applyScan(text, opts) {
     return true;
   }
 
-  if (options.selectId) return pickSpoolInSelect(hit.id, options.selectId);
+  if (options.selectId) {
+    const okPick = await pickSpoolInSelect(hit.id, options.selectId);
+    // 槽位绑定弹窗：真值已写进隐藏 select，把搜索框/候选列表/选中提示同步上来
+    if (okPick && options.selectId === "bindSpool"
+        && document.getElementById("bindSpoolSearch")) {
+      const spool = spoolById(hit.id);
+      const inp = document.getElementById("bindSpoolSearch");
+      if (inp && spool) inp.value = spool.name;
+      renderSlotBindList("");
+      refreshSlotBindPicked();
+    }
+    return okPick;
+  }
   if (!(S.spools || []).length) await loadSpools().catch(() => {});
   switchView("spools");
   await openSpoolDetail(hit.id);
@@ -4718,6 +4878,12 @@ window.panelDebug = {
   // 只能自己画。候选现读 datalist（renderColorPresets 会实时改写），
   // 品牌归一（canonicalBrand）后色卡才查得到别名写法。
   armComboInputs, armComboInput, comboRender, comboClose, comboOptions, canonicalBrand,
+  // 槽位绑定的可搜索选择器：真值在隐藏 select（saveBinding/扫码链路不动），选择器只是「脸」
+  renderSlotBindList, onSlotBindInput, pickSlotBind, refreshSlotBindPicked,
+  // 料盘表单里的自定义品牌删除（设置页之外唯一入口，选到即能删）
+  syncBrandDeleteHint, removeBrandFromForm,
+  // 品牌候选（预设 + 库里用过的 + 自定义）—— 重复项会让下拉里出现两个同名品牌
+  brandChoices, finishChoices,
   // 选品牌自动带出实测皮重（只在皮重框还是默认值/自动值时带，用户手填的不动）
   applyBrandTare, onTareInput, TARE_DEFAULT,
   // 库存页关键字框：与转移弹窗共用同一份过滤口径，别各写一套

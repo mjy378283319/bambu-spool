@@ -330,12 +330,40 @@ check("彩多屋色块均标 official=False（HEX 非官方公布）",
 check("彩多屋每条都有可显示名（点色块能填出颜色名）",
       all((e.get("name") or "").strip() for e in cai))
 
-# 渐变/三色这类没有「单一定义色」的，HEX 必须是中性占位灰，
-# 否则会拿一个假色值去参与 ΔE 匹配、推荐出根本不存在的颜色
+# 渐变/三色这类没有「单一定义色」的料：**界面要能看出是哪种配色**，但不能拿它的
+# 主色去参与 ΔE 匹配 —— 那会拿一个假色值推荐出根本不存在的颜色。
+# 2026-09-18 用户反馈「彩多屋的三色丝绸是一个 [灰块]」：41 色全长一个样。
+# 修法是双轨：色块显示用从料饼图取的三个主色（前端画三段渐变），
+# 匹配时靠 multicolor 标记整条排除（下面的断言两件事都要盯）。
 multi = [e for e in cai if e["series"] == "三色丝绸 PLA"]
-check("三色丝绸用中性占位灰（不拿假色去比对）",
-      all(e["hex"].upper() == "#CCCCCC" for e in multi),
-      str(sorted({e["hex"] for e in multi}))[:80])
+check("三色丝绸不再是同一块占位灰（41 色能分辨）",
+      len({e["hex"] for e in multi}) >= 30,
+      f"{len({e['hex'] for e in multi})} 个不同色值")
+
+from app.colors import match_catalog  # noqa: E402
+from app.brand_colors_cailab import BRAND_COLOR_SERIES_EXTRA as _CAI  # noqa: E402
+
+# hex2/hex3 是**界面渐变用的显示字段**，不进口味索引（索引只留匹配要用的东西）。
+# 所以这两条从原始色卡数据断，不从 index 断。
+_raw_tri = _CAI["彩多屋"]["三色丝绸 PLA"]
+check("三色丝绸每条都带 3 个主色（渐变三段所需）",
+      all(len(c.get("hex2") or "") and len(c.get("hex3") or "") for c in _raw_tri),
+      str(_raw_tri[0] if _raw_tri else None))
+check("三色丝绸的三色互不相同（不是把主色抄三遍）",
+      all(c["hex2"] != c["hex3"] for c in _raw_tri))
+# 用三色丝绸自己的主色去匹配（最坏情况：颜色完全一样），
+# 只要 multicolor 排除生效，它就一条都不该出现
+_red = next(e for e in multi if "Red" in (e.get("en") or ""))
+_hits = match_catalog(_red["hex"], material="PLA", limit=20, max_delta_e=100.0)
+check("三色丝绸不参与识色匹配（拿它自己的主色去比也匹配不到它）",
+      not any(h["series"] == "三色丝绸 PLA" for h in _hits),
+      str([h["series"] for h in _hits][:5]))
+# 排除不能把普通系列一起误伤
+check("普通系列照常参与匹配（排除只针对多色料）",
+      any(h["series"] != "三色丝绸 PLA" for h in _hits),
+      str([h["series"] for h in _hits][:5]))
+check("三色丝绸仍留在色卡数据里（界面点色块还能填颜色名）",
+      len(_CAI["彩多屋"]["三色丝绸 PLA"]) == 41)
 
 # 品牌写法归一
 for variant in ("cailab", "CAILAB", "CaiLab", "cailab3d", "彩多屋旗舰店"):

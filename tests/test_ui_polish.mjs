@@ -41,14 +41,27 @@ function stubEl() {
     style: {}, dataset: {}, innerHTML: "", outerHTML: "", textContent: "",
     value: "", checked: false, hidden: false, disabled: false,
     files: [], children: [], options: [], selectedIndex: 0,
+    // 真实 DOM 节点都有 nodeType（元素=1）；app.js 里「这个事件目标是不是元素」
+    // （如 scroll 守卫 `t.nodeType === 1`）就靠它判断，桩缺了这条会走进错误分支。
+    nodeType: 1,
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     // 真的把节点挂上去：钻取那条断言要看「下拉里有没有补出这个 option」
     appendChild(node) {
       this.children.push(node);
       if (node && node.tagName === "OPTION") this.options.push(node);
+      if (node && typeof node === "object") node._parent = this;   // 给 remove() 用
       return node;
     },
-    removeChild() {}, remove() {},
+    removeChild() {},
+    // remove() 必须**真的**从父节点的 children 里摘掉：浮层「关没关」只能这么观察。
+    // 原来写成空函数时，body.children.length 只增不减 —— 任何「弹层还在不在」的
+    // 断言都是恒真（本轮写组合框滚动用例时踩到，才补上）。
+    remove() {
+      const p = this._parent;
+      if (!p || !Array.isArray(p.children)) return;
+      const i = p.children.indexOf(this);
+      if (i >= 0) p.children.splice(i, 1);
+    },
     setAttribute() {}, getAttribute() { return null; },
     hasAttribute() { return false; }, removeAttribute() {},
     addEventListener() {}, removeEventListener() {},
@@ -139,6 +152,14 @@ sandbox.globalThis = sandbox;
 const elCache = new Map();
 sandbox.document = {
   getElementById(id) {
+    // 浮层是 createElement 造出来、appendChild 挂在 body 上的 —— 真实浏览器里
+    // getElementById("comboPop") 找得到它，桩里也必须找得到：否则 comboClose()
+    // 里那句 `if (pop) pop.remove()` 直接空转，「弹层关没关」永远测不出来
+    // （本轮写组合框滚动用例时踩到；下面那批 combo 断言全靠这条）。
+    if (id === "comboPop") {
+      const hit = sandbox.document.body.children.find((n) => n && n.id === "comboPop");
+      return hit || null;
+    }
     if (!elCache.has(id)) elCache.set(id, stubEl());
     return elCache.get(id);
   },
@@ -182,6 +203,7 @@ const {
   VIEW_NAMES, syncHashView, VIEW_STORE_KEY, lastRememberedView, rememberView, applyHashRoute,
   SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable, renderBrandDist,
   jobRowActions,
+  brandChoices,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -199,6 +221,8 @@ for (const name of [
   "jumpToSpoolsNoPrice", "clearNoPriceFilter", "syncNoPriceChip",
   "armComboInputs", "armComboInput", "comboRender", "comboClose", "comboOptions",
   "canonicalBrand",
+  "renderSlotBindList", "onSlotBindInput", "pickSlotBind", "refreshSlotBindPicked",
+  "syncBrandDeleteHint", "removeBrandFromForm", "brandChoices",
   "applyBrandTare", "onTareInput",
 ]) {
   if (typeof dbg[name] !== "function") {
@@ -2037,6 +2061,247 @@ console.log("── 打印成果图 ──");
     !/NaN/.test(String(sandbox.jobCoverUrl({ id: undefined, has_cover: true }))),
     String(sandbox.jobCoverUrl({ id: undefined, has_cover: true })));
 }
+
+// ── 19. 组合框「一动就关」：弹层内滚动 / 拖滚动条不能把弹层关掉 ──────
+// 用户反馈两处下拉（外观、颜色名称）：「可以直接选择了，但是不能滑动了，一动就出来了」。
+// 根因三处，都是「弹层自己引发的事件被当成『用户在别处操作』」：
+//   ① window scroll 是**捕获**监听，连 #comboPop 自己滚出来的 scroll 也收得到；
+//   ② 拖滚动条 / 滚轮前先 pointerdown，输入框 blur → 120ms 后兜底关掉；
+//   ③ 点空白处没 preventDefault，焦点被抢走 → 同样走到 blur 兜底。
+console.log("");
+console.log("── 组合框弹层内滚动不该关闭弹层 ──");
+
+check("scroll 监听不再是一把梭 comboClose（要看滚动目标是不是弹层自己）",
+  !/addEventListener\("scroll",\s*comboClose,\s*true\)/.test(appSrc)
+  && /pop\.contains\(t\)/.test(appSrc));
+check("blur 兜底前先看焦点是否落回弹层内 / 指针是否还悬在弹层上",
+  /pop\.contains\(document\.activeElement\)/.test(appSrc)
+  && /pop\.matches\(":hover"\)/.test(appSrc));
+check("浮层上的 pointerdown 无论点在哪都 preventDefault（点空白/滚动条不许把焦点抢走）",
+  /pop\.addEventListener\("pointerdown",\s*\(e\)\s*=>\s*\{\s*e\.preventDefault\(\);/.test(appSrc));
+
+// 行为级：真跑一遍 capture 监听 + blur 兜底两条路
+//
+// ⚠️ 「弹层还在不在」不能查 document.getElementById("comboPop")：桩里的 getElementById
+// 是 elCache 缓存（第一次调用就把对象记下了），而 stubEl().remove() 是空实现 ——
+// 缓存里那份永远在，断言会恒真。只有 renderSlotBindList 那种被真实赋值的 innerHTML 读得出来。
+// 这里直接看 **body.children 的长度**（appendChild 是真的 push 进去的）。
+{
+  const fake = fakeInput("finishList2");
+  sandbox.document.getElementById("finishList2").querySelectorAll = () =>
+    FINISH_OPTS.map((v) => ({ value: v }));
+  sandbox.armComboInput(fake);
+  fake.value = "";
+  const kids = () => sandbox.document.body.children.length;
+  const last = () => sandbox.document.body.children[sandbox.document.body.children.length - 1];
+  const scrollHandlers = (windowListeners.get("scroll") || []).filter((fn) => typeof fn === "function");
+
+  sandbox.comboRender(fake, "");
+  const pop = last();
+  const before = kids();
+  pop.contains = (t) => t === pop;
+  scrollHandlers.forEach((fn) => fn({ target: pop }));
+  check("滚弹层内部：捕获监听放行，弹层还在",
+    kids() === before, `${before} -> ${kids()}`);
+
+  scrollHandlers.forEach((fn) => fn({ target: { nodeType: 1, id: "app" } }));
+  check("滚底下的页面/弹窗：捕获监听照样关掉",
+    kids() === before - 1, `${before} -> ${kids()}`);
+
+  // blur 兜底：指针悬在弹层上时不能关
+  sandbox.comboRender(fake, "");
+  const pop2 = last();
+  const before2 = kids();
+  const blurFns = (fake._listeners.blur || []).slice();
+  pop2.matches = () => true;                       // 指针还悬在候选列表上
+  sandbox.document.activeElement = sandbox.document.body;
+  blurFns.forEach((fn) => fn());
+  sandbox.__flushTimers();
+  check("正在拖滚动条（指针悬在弹层上）时，blur 兜底不关弹层",
+    kids() === before2, `${before2} -> ${kids()}`);
+
+  pop2.matches = () => false;                      // 指针移开了、焦点也不在弹层
+  blurFns.forEach((fn) => fn());
+  sandbox.__flushTimers();
+  check("真的点到别处（指针不在弹层、焦点也不在弹层）才收起",
+    kids() === before2 - 1, `${before2} -> ${kids()}`);
+  sandbox.comboClose();
+}
+
+// ── 20. 三色丝绸色卡：色块要画成渐变，不能是一片灰 ────────────────
+// 用户反馈「彩多屋的三色丝绸是一个 [灰块]」。根因：生成脚本对多色系列跳过取色、
+// 41 色全写成中性灰 #CCCCCC 占位。改为取 3 个主色，前端按 hex/hex2/hex3 画三段渐变。
+console.log("");
+console.log("── 三色丝绸色卡（多色料不再画成同一块灰） ──");
+check("色块背景走三段渐变（hex2 存在时才用）",
+  /linear-gradient\(135deg, \$\{esc\(c\.hex\)\}/.test(appSrc)
+  && /c\.hex2\s*\?\s*`linear-gradient/.test(appSrc));
+check("没有 hex2 的颜色仍按纯色画（普通系列不受影响）",
+  /:\s*esc\(c\.hex\)/.test(appSrc));
+
+// mock 里补一份彩多屋色卡（真实数据来自 app/brand_colors_cailab.py，由生成脚本产出，
+// 这里只验前端拿到 hex2/hex3 时怎么画 —— 数据侧另有 Python 用例盯着）
+{
+  const triColors = Array.from({ length: 41 }, (_, i) =>
+    ({ name: `C${i}`, hex: `#${(0x101010 * (i + 1)).toString(16).slice(-6)}`,
+       hex2: "#B40C48", hex3: "#D82478" }));
+  state.catalog = {
+    ...(state.catalog || {}),
+    color_series: {
+      ...(state.catalog.color_series || {}),
+      "彩多屋": {
+        "三色丝绸 PLA": triColors,
+        "丝绸 PLA": [{ name: "Sunshine Gold", hex: "#E0B860" }],
+        "哑光 PLA": [{ name: "Ivory", hex: "#F0EAD6" }],
+        "PLA+": [{ name: "Red", hex: "#C02020" }],
+      },
+    },
+    material_color_series: {
+      ...(state.catalog.material_color_series || {}),
+      "PLA": [...(state.catalog.material_color_series.PLA || []), "三色丝绸 PLA", "丝绸 PLA", "哑光 PLA", "PLA+"],
+    },
+  };
+}
+const triGroups = sandbox.presetGroupsFor("彩多屋", "PLA");const tri = triGroups.find((g) => g.series === "三色丝绸 PLA");
+check("彩多屋 PLA 下能查到「三色丝绸 PLA」系列", !!tri,
+  JSON.stringify(triGroups.map((g) => g.series)));
+if (tri) {
+  const grays = tri.colors.filter((c) => c.hex === "#CCCCCC");
+  check("三色丝绸 41 色里不再有灰占位（数据侧已重取色）",
+    grays.length === 0, `gray=${grays.length}/${tri.colors.length}`);
+  check("每个颜色都带三个色（渐变三段）",
+    tri.colors.every((c) => c.hex && c.hex2 && c.hex3), JSON.stringify(tri.colors[0]));
+  const distinct = new Set(tri.colors.map((c) => `${c.hex}|${c.hex2}|${c.hex3}`));
+  check("色块彼此可区分（不是 41 块同一个颜色）",
+    distinct.size >= tri.colors.length - 2, `${distinct.size}/${tri.colors.length}`);
+  check("三色丝绸里「丝绸」系列与它各自独立（不会互相顶掉）",
+    triGroups.some((g) => g.series === "丝绸 PLA") && triGroups.some((g) => g.series === "哑光 PLA"));
+}
+
+// 源码级：生成脚本给多色系列走 _dominant_hexes（三个主色）
+const cailabSrc = fs.readFileSync(path.join(ROOT, "scripts", "build_cailab_colors.py"), "utf8");
+check("生成脚本对多色系列取三个主色（_dominant_hexes）",
+  /def _dominant_hexes\(/.test(cailabSrc) && /is_multi and url/.test(cailabSrc));
+check("三色数据带 hex2/hex3 字段",
+  /d\["hex2"\] = hex2/.test(cailabSrc));
+
+// ── 21. 自定义品牌：表单里能删、下拉里不重复 ──────────────────────
+// 用户反馈「这个自定义品牌是不是要有删除键」「爱乐酷有两个」。
+console.log("");
+console.log("── 自定义品牌删除与去重 ──");
+check("料盘表单里有「删除这个自定义品牌」入口（源码级）",
+  /id="brandDelRow"/.test(appSrc) && /function removeBrandFromForm\(\)/.test(appSrc));
+check("openSpoolDialog 里调了 syncBrandDeleteHint（写了函数不等于接上了）",
+  /renderColorPresets\(\);\s*\n\s*syncBrandDeleteHint\(\);/.test(appSrc));
+check("onBrandChoice 里也调了（换品牌时那行要跟着变）",
+  /function onBrandChoice\(\)[\s\S]{0,700}syncBrandDeleteHint\(\)/.test(appSrc));
+
+// 行为级：预设品牌不显示删除；自定义品牌才显示
+{
+  state.catalog = { ...(state.catalog || {}), preset_brands: ["拓竹", "爱酷乐", "其他"], custom_brands: ["自家作坊"] };
+  const sel = sandbox.document.getElementById("f_brand");
+  const row = sandbox.document.getElementById("brandDelRow");
+  sel.value = "拓竹";
+  sandbox.syncBrandDeleteHint();
+  check("选中预设品牌时不显示删除入口", !/removeBrandFromForm/.test(row.innerHTML), row.innerHTML);
+  sel.value = "自家作坊";
+  sandbox.syncBrandDeleteHint();
+  check("选中自定义品牌时露出删除入口，且带上品牌名",
+    /removeBrandFromForm/.test(row.innerHTML) && row.innerHTML.includes("自家作坊"), row.innerHTML);
+  check("删除入口说明了「只影响下拉候选，料盘不受影响」",
+    /只影响下拉候选/.test(row.innerHTML), row.innerHTML);
+}
+check("删除用了 confirm 二次确认（删错要能拦一下）",
+  /window\.confirm\(/.test(appSrc) && /removeBrandFromForm[\s\S]{0,600}confirm/.test(appSrc));
+
+// 下拉去重：品牌候选里同一个名字不许出现两次（爱乐酷两个的根因）
+state.spools = [
+  { id: 1, brand: "爱酷乐", name: "A" },
+  { id: 2, brand: "拓竹", name: "B" },
+  { id: 3, brand: "自家作坊", name: "C" },
+];
+state.catalog = { ...(state.catalog || {}), brands: ["拓竹", "爱酷乐", "其他", "自家作坊"] };
+const choices = sandbox.brandChoices("");
+check("品牌候选里没有重复项（同一个品牌不会出现两次）",
+  new Set(choices).size === choices.length, JSON.stringify(choices));
+check("预设顺序保持、自定义排在预设之后",
+  choices.indexOf("拓竹") < choices.indexOf("自家作坊"), JSON.stringify(choices));
+
+// ── 22. 槽位绑定：可输入关键词筛选 ───────────────────────────────
+// 用户反馈「这个绑定到哪盘料也要可以输入关键词」。
+console.log("");
+console.log("── 槽位绑定的可搜索选择器 ──");
+check("槽位弹窗用输入框 + pick-list，不再是裸 select（源码级）",
+  /id="bindSpoolSearch"/.test(appSrc) && /id="bindSpoolList"/.test(appSrc));
+check("真值仍存在隐藏 select id=bindSpool（扫码/保存链路不动）",
+  /<select id="bindSpool" hidden>/.test(appSrc));
+check("搜索框挂了 oninput（不然打字没反应）",
+  /id="bindSpoolSearch"[\s\S]{0,260}oninput="onSlotBindInput\(\)"/.test(appSrc));
+
+// 行为级
+{
+  state.spools = [
+    { id: 11, name: "拓竹 PLA 哑光 黑色", brand: "拓竹", material: "PLA", color_name: "黑色", remaining_weight: 800, archived: false },
+    { id: 12, name: "Polymaker PETG 白", brand: "Polymaker", material: "PETG", color_name: "白", remaining_weight: 500, archived: false },
+    { id: 13, name: "大简 PETG-HT 黑", brand: "大简", material: "PETG", color_name: "黑", remaining_weight: null, archived: true },
+  ];
+  const sel2 = sandbox.document.getElementById("bindSpool");
+  sel2.value = "";
+  sel2.options = [{ value: "" }, { value: "11" }, { value: "12" }];
+  state._slotBindBoundId = 0;
+
+  sandbox.renderSlotBindList("");
+  const list = sandbox.document.getElementById("bindSpoolList");
+  check("空关键字时列出全部候选，且带「— 不绑定 —」首项",
+    list.innerHTML.includes("不绑定") && list.innerHTML.includes("拓竹 PLA") && list.innerHTML.includes("Polymaker"), list.innerHTML.slice(0, 200));
+  check("归档的料盘不进候选（绑上去没意义）",
+    !list.innerHTML.includes("大简 PETG-HT"), list.innerHTML.slice(0, 300));
+
+  sandbox.renderSlotBindList("petg");
+  check("输入关键词后按子串收窄（PETG 只剩 Polymaker）",
+    list.innerHTML.includes("Polymaker") && !list.innerHTML.includes("拓竹 PLA"), list.innerHTML.slice(0, 200));
+  check("过滤后「— 不绑定 —」仍在（要能改成空槽）",
+    list.innerHTML.includes("不绑定"), list.innerHTML.slice(0, 200));
+
+  sandbox.renderSlotBindList("不存在的东西");
+  check("没有匹配时给提示而不是空列表",
+    /没有匹配的料盘/.test(list.innerHTML), list.innerHTML.slice(0, 200));
+
+  // 点选 → 真值写进隐藏 select，搜索框回填名字
+  sandbox.pickSlotBind(11);
+  check("点候选后真值写进隐藏 select", sel2.value === "11", String(sel2.value));
+  check("点候选后搜索框回填这盘料的名字（让人看清选了谁）",
+    sandbox.document.getElementById("bindSpoolSearch").value.includes("拓竹 PLA"),
+    sandbox.document.getElementById("bindSpoolSearch").value);
+  check("点候选后候选列表按空关键字重画（名字本身不会变成筛选词）",
+    sandbox.document.getElementById("bindSpoolList").innerHTML.includes("Polymaker"));
+
+  sandbox.pickSlotBind(0);
+  check("点「— 不绑定 —」把真值清空", sel2.value === "", JSON.stringify(sel2.value));
+
+  sandbox.pickSlotBind(12);
+  sandbox.refreshSlotBindPicked();
+  check("选中提示写明选了哪盘", /Polymaker/.test(sandbox.document.getElementById("bindSpoolPicked").innerHTML),
+    sandbox.document.getElementById("bindSpoolPicked").innerHTML);
+  sandbox.pickSlotBind(0);
+  sandbox.refreshSlotBindPicked();
+  check("没选中时提示保存后会变成空槽",
+    /空槽/.test(sandbox.document.getElementById("bindSpoolPicked").textContent),
+    sandbox.document.getElementById("bindSpoolPicked").textContent);
+
+  // 当前正绑着的那盘即使已归档也要在候选里（否则打开弹窗看着像绑定丢了）
+  state._slotBindBoundId = 13;
+  sandbox.renderSlotBindList("");
+  check("当前正绑着的已归档料盘仍在候选里（不许显示成「丢了」）",
+    sandbox.document.getElementById("bindSpoolList").innerHTML.includes("大简 PETG-HT"));
+  state._slotBindBoundId = 0;
+}
+
+// 扫码落地要同步选择器（隐藏 select 被填了，搜索框/列表/提示也得跟上）
+check("扫码落地后同步搜索框与候选列表（源码级）",
+  /options\.selectId === "bindSpool"[\s\S]{0,420}renderSlotBindList\(""\)/.test(appSrc));
+check("异步补拉料盘列表后也要重画选择器",
+  /fillBindSpoolSelect\(boundId\);[\s\S]{0,500}renderSlotBindList\(""\)/.test(appSrc));
 
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");

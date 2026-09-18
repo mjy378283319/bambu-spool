@@ -214,6 +214,11 @@ def catalog_index() -> dict[str, list[dict]]:
                     "en": color.get("en", ""),
                     "hex": hex_value,
                     "official": bool(color.get("official", True)),
+                    # 多色交织料（三色丝绸）：色值只是「从料饼图上取的其中一个主色」，
+                    # 不代表整盘料的颜色。**必须排除在识色匹配之外** ——
+                    # 否则拍一张红色照片会推出一盘红黑金三色料，看着像对上了、其实是错的。
+                    # 界面照样显示它（点色块能把颜色名填进去），只是不拿它去比 ΔE。
+                    "multicolor": bool(color.get("hex2")),
                     "lab": lab,
                 }
                 everything.append(entry)
@@ -274,12 +279,19 @@ def match_catalog(
     limit: int = 6,
     max_delta_e: float = 15.0,
 ) -> list[dict]:
-    """在品牌官方色卡里找最接近的颜色。"""
+    """在品牌官方色卡里找最接近的颜色。
+
+    ⚠️ 多色交织料（`multicolor`，如三色丝绸）**不参与匹配**：它们的 hex 是从料饼图
+    上取的其中一个主色，不代表整盘的颜色；让它参与的话，拍一张红色照片会推出
+    一盘红黑金三色料，看着像对上了、其实是错的。界面里它照常显示。
+    """
     lab = hex_to_lab(hex_value)
     if lab is None:
         return []
     scored = []
     for entry in _catalog_entries(material, brands):
+        if entry.get("multicolor"):
+            continue
         distance = delta_e00(lab, entry["lab"])
         if distance <= max_delta_e:
             scored.append((distance, entry))
