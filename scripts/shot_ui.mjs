@@ -637,6 +637,23 @@ async function main() {
     const priced = (window.panelDebug.state.summarySpools || [])
       .filter((s) => Number(s.price) > 0).length;
     const dr = donut ? donut.getBoundingClientRect() : null;
+    // 价格卡这一排与下面「按品牌」那张卡之间必须有留白。
+    // 用户截图反馈「这个中间都没有间距了，太难看了」—— 量的是真实的像素间隙，
+    // 不是「CSS 里有没有 margin-bottom」：卡片是 grid，margin 折进布局才作数。
+    const distEl = document.getElementById("priceDist");
+    const brandHost = document.getElementById("brandSummary");
+    const brandCard = brandHost ? brandHost.closest(".card") : null;
+    const distRect = distEl ? distEl.getBoundingClientRect() : null;
+    const brandRect = brandCard ? brandCard.getBoundingClientRect() : null;
+    const gapBeforeBrand = (distRect && brandRect)
+      ? Math.round(brandRect.top - distRect.bottom) : null;
+    // 顺势量一下卡片之间有没有横向间距（同一行相邻两张的左-右间隙）
+    const rowGaps = [];
+    for (let i = 1; i < cards.length; i += 1) {
+      const a = cards[i - 1].getBoundingClientRect();
+      const b = cards[i].getBoundingClientRect();
+      if (Math.abs(a.top - b.top) <= 2) rowGaps.push(Math.round(b.left - a.right));
+    }
     return {
       hasDonut: !!donut, arcs: arcs.length, items, bar,
       // 渲染尺寸必须真的量一遍：环形图的 width/height 写在 SVG 属性上，
@@ -650,6 +667,9 @@ async function main() {
       }, 0),
       priced,
       firstCard: cards[0] ? cards[0].innerText.replace(/\\s+/g, " ").trim() : "",
+      // 分档标签（用户要求把「40 以上」拆成 40-50 + 50 以上）
+      bands: cards.map((c) => (c.querySelector(".price-range") || {}).innerText || ""),
+      gapBeforeBrand, rowGaps,
     };
   })()`);
   console.log("库存概览：", JSON.stringify(overview));
@@ -673,6 +693,18 @@ async function main() {
   check("价格卡片有「数量 / 占比 / 查看明细」",
     overview.firstCard.includes("数量") && overview.firstCard.includes("查看明细"),
     overview.firstCard);
+  // 用户要求：「整盘价格40以上改成40-50，在增加一个50以上的」
+  check("分档标签里没有「¥40 以上」了", !overview.bands.includes("¥40 以上"),
+    JSON.stringify(overview.bands));
+  check("分档里有「¥40 - 50」", overview.bands.includes("¥40 - 50"), JSON.stringify(overview.bands));
+  check("分档里有「¥50 以上」", overview.bands.includes("¥50 以上"), JSON.stringify(overview.bands));
+  // 用户要求：「这个中间都没有间距了，太难看了修改修改」
+  check("价格卡与下面「按品牌」卡之间有留白（≥20px）",
+    overview.gapBeforeBrand !== null && overview.gapBeforeBrand >= 20,
+    `${overview.gapBeforeBrand}px`);
+  check("同一行的价格卡之间有横向间距（≥12px）",
+    overview.rowGaps.length > 0 && overview.rowGaps.every((g) => g >= 12),
+    JSON.stringify(overview.rowGaps));
 
   // 点一个材料图例 -> 只统计那种材料；再点回全部
   const filtered = await cdp.evaluate(sessionId, `(() => {
@@ -785,12 +817,13 @@ async function main() {
     const host = document.getElementById("summaryStats");
     const cards = [...document.querySelectorAll("#summaryStats .stat")];
     const labels = cards.map((c) => (c.querySelector(".label") || {}).innerText || "");
-    // 宽屏三列，卡数不是 3 的倍数就会在末行空一格 —— 那正是「不要留空」要避免的
-    const rowFull = cards.length % 3 === 0;
+    // 宽屏四列（.grid-stats.cols-4），卡数不是 4 的倍数就会在末行空一格
+    const rowFull = cards.length % 4 === 0;
     const values = cards.map((c) => (c.querySelector(".value") || {}).innerText || "");
-    // 只看均价那三张卡：另外六张里「累计打印耗材费 ¥0.00」是合法的零
-    // （还没有打印任务），拿全部九张来判会误报（实测过一次）。
-    const avgLabels = ["平均每盘单价", "平均每公斤", "整盘价格区间"];
+    // 只看均价那两张卡：另外六张里「累计打印耗材费 ¥0.00」是合法的零
+    // （还没有打印任务），拿全部八张来判会误报（实测过一次）。
+    // 口径随用户反馈变过：原先还有一张「平均每公斤」，已按反馈删掉。
+    const avgLabels = ["平均每盘单价", "整盘价格区间"];
     const avgValues = cards
       .filter((c) => avgLabels.includes((c.querySelector(".label") || {}).innerText || ""))
       .map((c) => (c.querySelector(".value") || {}).innerText || "");
@@ -799,16 +832,20 @@ async function main() {
       // 没有价格时写「未登记」，不许出现空值
       emptyValues: values.filter((v) => !v.trim()).length,
       hasAvgPerSpool: labels.includes("平均每盘单价"),
+      hasPerKg: labels.includes("平均每公斤"),
+      cols: getComputedStyle(host).gridTemplateColumns.split(" ").length,
       text: (host || {}).innerText || "",
     };
   })()`);
   console.log("汇总页均价卡：", JSON.stringify(avgCards).slice(0, 500));
   check("汇总页有「平均每盘单价」这张卡", avgCards.hasAvgPerSpool === true, JSON.stringify(avgCards.labels));
-  check("统计卡总数是 3 的倍数（宽屏三列，末行不留空位）",
-    avgCards.rowFull === true && avgCards.count >= 6, `${avgCards.count} 张`);
+  check("「平均每公斤」这张卡已按反馈删掉", avgCards.hasPerKg === false, JSON.stringify(avgCards.labels));
+  check("统计卡总数是 8 且是 4 的倍数（宽屏四列 4×2，末行不留空位）",
+    avgCards.rowFull === true && avgCards.count === 8, `${avgCards.count} 张`);
+  check("宽屏下统计网格确实是四列", avgCards.cols === 4, `${avgCards.cols} 列`);
   check("每张卡都有值（没有空白的数值位）", avgCards.emptyValues === 0, String(avgCards.emptyValues));
-  check("均价三张卡都拿到了值（不是空、也不是 ¥0.00 冒充）",
-    avgCards.avgValues.length === 3
+  check("均价两张卡都拿到了值（不是空、也不是 ¥0.00 冒充）",
+    avgCards.avgValues.length === 2
     && avgCards.avgValues.every((v) => v.trim() && !v.includes("¥0.00")),
     JSON.stringify(avgCards.avgValues));
   check("按材料表有「每盘均价」列",
@@ -1201,6 +1238,92 @@ async function main() {
     console.log(`  （跳过槽位弹窗断言：${slot.reason}）`);
   }
   await cdp.shot(sessionId, path.join(OUT, "07-slot-dialog.png"));
+
+  /* ── 槽位弹窗里的「解绑耗材」（用户要的按钮） ──
+     真绑一盘上去再重开这个弹窗，才会出现。这一步必须真绑：
+     只断言「源码里有 unbindSlotSpool」是拦不住「按钮永远不显示」的 ——
+     而那正是用户会看到的「说了要加，界面上根本没有」。 */
+  const slotUnbind = await cdp.evaluate(sessionId, `(async () => {
+    const printers = (window.panelDebug.state.printers_full || []);
+    const p = printers[0];
+    const ams = ((p.state || {}).ams || [])[0];
+    const spool = (window.panelDebug.state.spools || []).find((s) => !s.archived);
+    if (!spool) return { skipped: "没有可绑的料盘" };
+    // 走界面自己的路径绑：填下拉 → 点保存
+    openSlotDialog(p.id, ams.ams_id, 0);
+    const sel = document.getElementById("bindSpool");
+    sel.value = String(spool.id);
+    await saveBinding(p.id, ams.ams_id, 0);
+    await new Promise((r) => setTimeout(r, 900));
+    // 重开这个槽位
+    openSlotDialog(p.id, ams.ams_id, 0);
+    const btns = [...document.querySelectorAll("#modalHost button")];
+    const unbind = btns.find((b) => (b.textContent || "").includes("解绑耗材"));
+    // 量纵向间隙：弹窗里每一行都要有呼吸空间。
+    // 只截屏「看着还行」是不够的 —— inline 的 margin-top 一旦被删掉，
+    // 画面上只是「有点挤」，断言才能把它钉住。取每块自身的 rect，逐对比较。
+    const gapOf = (a, b) => {
+      const ra = document.querySelector(a), rb = document.querySelector(b);
+      if (!ra || !rb) return null;
+      return Math.round(rb.getBoundingClientRect().top - ra.getBoundingClientRect().bottom);
+    };
+    return {
+      bound: spool.name,
+      hasUnbind: !!unbind,
+      hint: (document.querySelector("#modalBody") || {}).innerText || "",
+      title: (document.querySelector("#modalHost h3") || {}).innerText || "",
+      gapHintUnbind: gapOf("#bindSpoolHint", ".slot-unbind"),
+      gapUnbindScan: gapOf(".slot-unbind", ".slot-actions"),
+      gapScanCreate: gapOf(".slot-actions", ".slot-actions + .slot-actions"),
+      hasActionsClass: document.querySelectorAll(".slot-actions").length,
+    };
+  })()`);
+  console.log("槽位弹窗解绑键：", JSON.stringify(slotUnbind).slice(0, 400));
+  if (!slotUnbind.skipped) {
+    check("槽位绑定后弹窗里出现「解绑耗材」",
+      slotUnbind.hasUnbind === true, JSON.stringify(slotUnbind));
+    // 间距（用户第 5 条反馈的原话是「这个中间都没有间距了，太难看了」）：
+    // 解绑行和它上面的说明、下面的「相机扫码」都得留出可见的空当。
+    check("解绑行与上方说明之间留了间距",
+      (slotUnbind.gapHintUnbind || 0) >= 8, `gap=${slotUnbind.gapHintUnbind}px`);
+    check("解绑行与下方「相机扫码」之间留了间距（用户反馈的挤在一起）",
+      (slotUnbind.gapUnbindScan || 0) >= 10, `gap=${slotUnbind.gapUnbindScan}px`);
+    check("「相机扫码」与「按槽位信息建料盘」之间留了间距",
+      (slotUnbind.gapScanCreate || 0) >= 10, `gap=${slotUnbind.gapScanCreate}px`);
+    check("槽位弹窗的两排按钮走 .slot-actions 类名（不是散落的 inline margin）",
+      slotUnbind.hasActionsClass === 2, `count=${slotUnbind.hasActionsClass}`);
+    check("解绑键旁边写清当前绑的是哪盘",
+      (slotUnbind.hint || "").includes("当前绑定")
+      && (slotUnbind.hint || "").includes(slotUnbind.bound || ""),
+      (slotUnbind.hint || "").slice(0, 200));
+    await cdp.shot(sessionId, path.join(OUT, "07d-slot-dialog-unbind.png"));
+    // 真点一次：解绑后按钮应当消失，且停在同一个槽位弹窗上（不被弹到料盘页）
+    const afterUnbind = await cdp.evaluate(sessionId, `(async () => {
+      const printers = (window.panelDebug.state.printers_full || []);
+      const p = printers[0];
+      const ams = ((p.state || {}).ams || [])[0];
+      const btn = [...document.querySelectorAll("#modalHost button")]
+        .find((b) => (b.textContent || "").includes("解绑耗材"));
+      btn.click();
+      await new Promise((r) => setTimeout(r, 1200));
+      const btns = [...document.querySelectorAll("#modalHost button")];
+      const P = window.panelDebug;
+      return {
+        hasUnbind: !!btns.find((b) => (b.textContent || "").includes("解绑耗材")),
+        title: (document.querySelector("#modalHost h3") || {}).innerText || "",
+        binding: (P.state.bindingMap || {})[p.id + ":" + ams.ams_id + ":0"] || null,
+      };
+    })()`);
+    console.log("解绑后：", JSON.stringify(afterUnbind));
+    check("点「解绑耗材」后按钮消失（这个槽位确实没绑定了）",
+      afterUnbind.hasUnbind === false, JSON.stringify(afterUnbind));
+    check("解绑后服务端绑定记录已清掉",
+      !afterUnbind.binding || afterUnbind.binding.spool_id == null,
+      JSON.stringify(afterUnbind.binding));
+    check("解绑后停在同一个槽位弹窗（标题还是这个槽位，没被换成料盘绑定页）",
+      /槽位/.test(afterUnbind.title) && !/绑定槽位/.test(afterUnbind.title),
+      afterUnbind.title);
+  }
   await cdp.evaluate(sessionId, `closeModal()`);
 
   /* ── 从料盘这一侧管槽位绑定（料盘行里的「绑定」按钮） ──

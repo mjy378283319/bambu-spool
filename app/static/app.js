@@ -44,6 +44,8 @@ const ICO = {
   scan: '<svg viewBox="0 0 24 24"><path d="M4 8.5V5.8c0-1 .8-1.8 1.8-1.8H8.5"/><path d="M15.5 4h2.7c1 0 1.8.8 1.8 1.8v2.7"/><path d="M20 15.5v2.7c0 1-.8 1.8-1.8 1.8h-2.7"/><path d="M8.5 20H5.8c-1 0-1.8-.8-1.8-1.8v-2.7"/><path d="M4 12h16"/></svg>',
   eye: '<svg viewBox="0 0 24 24"><path d="M2.6 12S6.2 6.6 12 6.6 21.4 12 21.4 12 17.8 17.4 12 17.4 2.6 12 2.6 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l2.5-2.5a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-2.5 2.5a3.6 3.6 0 0 0 5.1 5.1l1-1"/></svg>',
+  // 解绑用「断开的链」：左下 + 右上的两段链环中间留一道缺口，和 link 一眼能区分
+  unlink: '<svg viewBox="0 0 24 24"><path d="M9.6 5.4 8.5 4.3a3.6 3.6 0 0 0-5.1 5.1l2.5 2.5a3.6 3.6 0 0 0 5.1 0"/><path d="M14.4 18.6l1.1 1.1a3.6 3.6 0 0 0 5.1-5.1l-2.5-2.5"/><path d="M4 4l16 16"/></svg>',
   copy: '<svg viewBox="0 0 24 24"><rect x="8.6" y="8.6" width="10.8" height="10.8" rx="2"/><path d="M15.4 5.6v-.1A1.5 1.5 0 0 0 13.9 4H5.6A1.5 1.5 0 0 0 4 5.5V14a1.5 1.5 0 0 0 1.5 1.5h.1"/></svg>',
 };
 
@@ -1154,18 +1156,20 @@ function useStateTally(spools) {
 }
 
 /* ── 价格区间分布 ──────────────────────────────────────── */
-/** 固定五档（按反馈定死）：0-10 / 10-20 / 20-30 / 30-40 / 40 以上。
+/** 固定六档（按反馈定死）：0-10 / 10-20 / 20-30 / 30-40 / 40-50 / 50 以上。
  *  之前按最高价自适应步长，档位名称每次都不一样，看着费劲；
- *  现在固定档名，最后一档上不封顶，多少钱都兜得住。 */
+ *  最早最后一档是「40 以上」上不封顶，但 40+ 那一档把 42 元和 200 元的盘混在一起，
+ *  看不出「贵的到底多贵」。现在拆成 40-50 与 50 以上，最后一档仍上不封顶。 */
 const PRICE_BANDS = [
   { from: 0, to: 10, label: "¥0 - 10" },
   { from: 10, to: 20, label: "¥10 - 20" },
   { from: 20, to: 30, label: "¥20 - 30" },
   { from: 30, to: 40, label: "¥30 - 40" },
-  { from: 40, to: null, label: "¥40 以上" },
+  { from: 40, to: 50, label: "¥40 - 50" },
+  { from: 50, to: null, label: "¥50 以上" },
 ];
 
-/** 把料盘按整盘价分进固定五档。
+/** 把料盘按整盘价分进固定六档。
  *
  *  @returns {{buckets: Array, unpriced: number, priced: number}}
  */
@@ -1175,12 +1179,16 @@ function priceBuckets(spools) {
   if (!priced.length) return { buckets: [], unpriced, priced: 0 };
 
   const buckets = PRICE_BANDS.map((band) => {
-    // 左开右闭：(from, to]。价格正好等于档位边界时落在低的一档，
-    // 这样 20 元归「¥10 - 20」，不会跟「¥20 - 30」重复计数；
-    // 最后一档上不封顶：40 元（含）以上全归「¥40 以上」。
+    // 全部档位统一「左开右闭」(from, to]：价格正好等于档位边界时落在**低**的一档。
+    // 这样 20 元归「¥10 - 20」、50 元归「¥40 - 50」，相邻两档不会重复计数。
+    //
+    // 最后一档（to == null）也必须左开：写成 `p >= from` 的话，
+    // 50 元会同时落进「¥40 - 50」和「¥50 以上」（实测就是这么漏的，占比之和变成 133%）。
+    // 上不封顶只管「没有上界」，不代表「下界闭合」——
+    // 所以 50 元算 40-50 档，50.01 元才算「¥50 以上」。
     const hit = priced.filter((s) => {
       const p = Number(s.price) || 0;
-      return band.to == null ? p >= band.from : (p > band.from && p <= band.to);
+      return band.to == null ? p > band.from : (p > band.from && p <= band.to);
     });
     return {
       from: band.from,
@@ -1936,6 +1944,41 @@ async function toggleSpoolBinding(spoolId, printerId, amsId, trayId, unbind) {
   } catch (err) { toast(err.message, "err"); }
 }
 
+/** 槽位弹窗里的「解绑耗材」。
+ *
+ *  复用同一个 PUT /api/bindings（spool_id = null），但**不能**用 toggleSpoolBinding ——
+ *  它解绑后会重开「料盘绑定槽位」那个弹窗（openBindSpoolDialog）。
+ *  从槽位弹窗点解绑，人还在槽位页等着看结果，弹窗却被换成另一盘料的绑定页，
+ *  等于点一下就被弹到别处去了。这里解绑完重开的是**同一个槽位**的弹窗。
+ *
+ *  expectedSpoolId 是从弹窗渲染那一刻就定下来的：解绑前再核一次当前绑定是否还是它，
+ *  避免「弹窗开着的时候别处改了这个槽位」→ 把后来绑上去的那盘料误删。 */
+async function unbindSlotSpool(printerId, amsId, trayId, expectedSpoolId) {
+  const binding = (S.bindingMap || {})[`${printerId}:${amsId}:${trayId}`];
+  const nowId = binding ? binding.spool_id : null;
+  if (nowId == null) {
+    toast("这个槽位已经没绑料盘了", "ok");
+    openSlotDialog(printerId, amsId, trayId);
+    return;
+  }
+  if (expectedSpoolId != null && nowId !== expectedSpoolId) {
+    toast("这个槽位的绑定刚被改过，请重新确认", "err");
+    openSlotDialog(printerId, amsId, trayId);
+    return;
+  }
+  try {
+    await api("/api/bindings", {
+      method: "PUT",
+      body: JSON.stringify({ printer_id: printerId, ams_id: amsId, tray_id: trayId, spool_id: null }),
+    });
+    await loadBindings();
+    if (S.status) await loadStatus();
+    const spool = spoolById(expectedSpoolId);
+    toast(`已解绑${spool ? `「${spool.name}」` : ""}，料盘数据不受影响`, "ok");
+    openSlotDialog(printerId, amsId, trayId);   // 刷新同一个槽位的弹窗
+  } catch (err) { toast(err.message, "err"); }
+}
+
 function usageSourceLabel(source) {
   const map = { auto: "自动扣重", manual: "手动补录", calibrate: "称重校准",
                 correction: "纠错调整", adjust: "手动调整" };
@@ -2091,6 +2134,17 @@ function openSlotDialog(printerId, amsId, trayId) {
   const options = bindCandidates(boundId)
     .map((s) => spoolOptionHtml(s, s.id === boundId)).join("");
 
+  // 解绑按钮只在「这个槽位确实绑着料盘」时出现。没绑定却摆一个「解绑耗材」，
+  // 点了什么也不会发生，只会让人怀疑是不是坏了。
+  const boundSpool = boundId ? spoolById(boundId) : null;
+  const unbindRow = boundId
+    ? `<div class="slot-unbind">
+        <button class="sm danger" onclick="unbindSlotSpool(${printerId},${amsId},${trayId},${boundId})">${
+          ICO.unlink}解绑耗材</button>
+        <span class="small muted">当前绑定：<b>${esc(boundSpool ? boundSpool.name : `#${boundId}`)}</b></span>
+      </div>`
+    : "";
+
   openModal(title, `
     <div class="row" style="margin-bottom:12px;gap:14px">
       <span class="swatch" style="background:${esc(tray ? tray.color : "#000")};width:24px;height:24px"></span>
@@ -2105,15 +2159,16 @@ function openSlotDialog(printerId, amsId, trayId) {
     <label class="field"><span>绑定到哪盘料</span>
       <select id="bindSpool"><option value="">— 不绑定 —</option>${options}</select></label>
     <p class="hint" id="bindSpoolHint"></p>
-    <div class="row">
+    ${unbindRow}
+    <div class="slot-actions">
       <button class="sm primary" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
         ${ICO.scan}相机扫码
       </button>
     </div>
-    <div class="row" style="margin-top:8px">
+    <div class="slot-actions">
       <button class="sm" onclick="quickCreateSpoolFromSlot(${printerId},${amsId},${trayId})">按槽位信息建料盘</button>
     </div>
-    <div class="row" style="margin-top:14px">
+    <div class="slot-qr">
       <img src="/api/labels/slot/${printerId}/${amsId}/${trayId}.png" alt="槽位二维码"
            style="width:72px;height:72px;border:1px solid var(--border);border-radius:6px" />
       <div class="small muted">这是该槽位的二维码，打印出来贴在槽位上。
@@ -3002,8 +3057,10 @@ function summaryPriceStats(spools) {
   };
 }
 
-/** 均价三张卡。凑成 9 张（宽屏 3×3）是刻意的：grid-stats 在 ≥980px 是三列，
- *  6 张卡再加 1 张会在末行空出一格 —— 那正是「不要留空」要避免的样子。
+/** 均价两张卡。加上前面 6 张固定卡凑成 8 张（宽屏 4×2，刚好两行整）——
+ *  数量是刻意的：grid-stats 在 ≥980px 是四列，末行不留空位。
+ *  （原先「平均每公斤」那张按用户反馈删了：不同规格的盘按满盘净重折算，
+ *  口径虽然可比，但日常看盘单价已经够用，多一张反而要多解释一句。）
  *  一条价格都没有时不画数字，改写成「去哪儿登记」，卡里照样有内容。 */
 function priceStatCards() {
   const ps = summaryPriceStats(S.summarySpools);
@@ -3019,12 +3076,9 @@ function priceStatCards() {
     card("平均每盘单价",
       ps.perSpool == null ? word("未登记") : `¥${ps.perSpool.toFixed(2)}`,
       pricedSub),
-    card("平均每公斤",
-      ps.perKg == null ? word("未登记") : `¥${ps.perKg.toFixed(2)}<small> /kg</small>`,
-      "按满盘净重折算，不同规格可直接比"),
     card("整盘价格区间",
       ps.min == null ? word("未登记") : `¥${ps.min.toFixed(0)} - ${ps.max.toFixed(0)}`,
-      "最便宜 / 最贵的一盘"),
+      `${ps.priced ? `${ps.priced} 盘已登记，` : ""}最便宜 / 最贵的一盘`),
   ].join("");
 }
 
@@ -4105,6 +4159,8 @@ window.panelDebug = {
   SUMMARY_DRILL_FIELDS, summaryPriceStats, priceStatCards, summaryTable,
   // 品牌分布卡与打印记录行内操作（跳转料盘 / 更改料盘）
   renderBrandDist, BRAND_BAR_COLORS, jobRowActions,
+  // 槽位绑定：下拉候选、槽位弹窗的解绑入口（解绑要重开同一个槽位弹窗，别跳到料盘页）
+  fillBindSpoolSelect, unbindSlotSpool,
   // 全局状态也放出来：候选列表这类函数读 S，自测要能塞数据进去
   state: S,
 };

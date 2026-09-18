@@ -457,8 +457,8 @@ check("三种状态都有标签与对应标签页",
   ["unused", "in_use", "empty"].every((k) => USE_STATE_META[k]
     && USE_STATE_META[k].label && USE_STATE_META[k].color && USE_STATE_META[k].tab));
 
-// ── 9. 价格区间分档（固定五档） ────────────────────────────────
-console.log("== 价格区间分布（固定五档、不重不漏） ==");
+// ── 9. 价格区间分档（固定六档） ────────────────────────────────
+console.log("== 价格区间分布（固定六档、不重不漏） ==");
 
 const emptyBuckets = priceBuckets([]);
 check("没有料盘 -> 没有档", emptyBuckets.buckets.length === 0, JSON.stringify(emptyBuckets));
@@ -466,27 +466,39 @@ const noPrice = priceBuckets([{ price: 0 }, { price: 0 }]);
 check("全都没登记价格 -> 没有档，但记下未登记数量",
   noPrice.buckets.length === 0 && noPrice.unpriced === 2, JSON.stringify(noPrice));
 
-const EXPECTED_BANDS = ["¥0 - 10", "¥10 - 20", "¥20 - 30", "¥30 - 40", "¥40 以上"];
+// 用户反馈：原来的「¥40 以上」把 42 元和 200 元混在一档里，看不出「贵的到底多贵」，
+// 所以拆成 40-50 与 50 以上两档（最后一档仍上不封顶）。
+const EXPECTED_BANDS = ["¥0 - 10", "¥10 - 20", "¥20 - 30", "¥30 - 40", "¥40 - 50", "¥50 以上"];
 const p10 = priceBuckets([
   { price: 45 }, { price: 50 }, { price: 12 }, { price: 0 },
 ]);
-check("固定五档：0-10 / 10-20 / 20-30 / 30-40 / 40以上",
-  p10.buckets.length === 5 && p10.buckets.every((b, i) => b.label === EXPECTED_BANDS[i]),
+check("固定六档：0-10 / 10-20 / 20-30 / 30-40 / 40-50 / 50以上",
+  p10.buckets.length === 6 && p10.buckets.every((b, i) => b.label === EXPECTED_BANDS[i]),
   JSON.stringify(p10.buckets.map((b) => b.label)));
 check("未登记价格的盘不计入档内", p10.buckets.reduce((s, b) => s + b.count, 0) === 3,
   String(p10.buckets.reduce((s, b) => s + b.count, 0)));
 check("未登记数量单独给出（界面要提一句）", p10.unpriced === 1, String(p10.unpriced));
-// 左开右闭：正好 50 元归「¥40 以上」，12 元归「¥10 - 20」
-check("边界价落对档（45 与 50 同在「¥40 以上」，12 在「¥10 - 20」）",
-  p10.buckets.find((b) => b.label === "¥40 以上").count === 2
+// 左开右闭：正好 50 元归「¥40 - 50」，12 元归「¥10 - 20」
+check("边界价落对档（45 与 50 同在「¥40 - 50」，12 在「¥10 - 20」）",
+  p10.buckets.find((b) => b.label === "¥40 - 50").count === 2
   && p10.buckets.find((b) => b.label === "¥10 - 20").count === 1, JSON.stringify(p10.buckets));
 check("每一档的占比之和约为 100%",
   Math.abs(p10.buckets.reduce((s, b) => s + b.percent, 0) - 100) < 0.01);
 
 const hi = priceBuckets([{ price: 1200 }]);
-check("单盘 1200 元也只出固定五档", hi.buckets.length === 5, String(hi.buckets.length));
-check("最后一档「¥40 以上」兜住最高价",
+check("单盘 1200 元也只出固定六档", hi.buckets.length === 6, String(hi.buckets.length));
+check("最后一档「¥50 以上」兜住最高价",
   hi.buckets[hi.buckets.length - 1].count === 1, JSON.stringify(hi.buckets.map((b) => b.label)));
+
+// 40-50 与 50 以上必须真的分得开，而且 50 只能落一档（左开右闭：50 归 40-50）
+const split = priceBuckets([{ price: 49.99 }, { price: 50 }, { price: 88 }]);
+check("40-50 与 50 以上确实拆开了（49.99 / 50 都在 40-50，88 在 50 以上）",
+  split.buckets.find((b) => b.label === "¥40 - 50").count === 2
+  && split.buckets.find((b) => b.label === "¥50 以上").count === 1,
+  JSON.stringify(split.buckets.map((b) => `${b.label}=${b.count}`)));
+check("边界价 50 只落一档（不会被 40-50 和 50 以上重复计数）",
+  split.buckets.reduce((s, b) => s + b.count, 0) === 3,
+  JSON.stringify(split.buckets.map((b) => `${b.label}=${b.count}`)));
 
 // 覆盖面：任意价格都必须落进恰好一档
 let covered = true;
@@ -887,19 +899,21 @@ const psEmpty = summaryPriceStats([{ price: 0, initial_weight: 1000 }]);
 check("一条价格都没有时数值是 null（交给调用方填文案，不许拿 0 冒充）",
   psEmpty.perSpool === null && psEmpty.perKg === null && psEmpty.priced === 0);
 
-// 「不要留空」：没有价格时三张卡都得有内容，不能是个空格子
+// 「不要留空」：没有价格时两张卡都得有内容，不能是个空格子
 const cardsNone = priceStatCards();
 const valueHtmls = [...cardsNone.matchAll(/<div class="value">([\s\S]*?)<\/div>/g)].map((m) => m[1]);
-check("没登记价格时均价卡也不留空（三张卡的值都不是空串）",
-  valueHtmls.length === 3 && valueHtmls.every((v) => v.trim().length > 0),
+check("没登记价格时均价卡也不留空（两张卡的值都不是空串）",
+  valueHtmls.length === 2 && valueHtmls.every((v) => v.trim().length > 0),
   JSON.stringify(valueHtmls));
 check("没登记价格时写「未登记」并说明去哪儿补",
   cardsNone.includes("未登记") && cardsNone.includes("料盘库存"));
-check("有三张均价卡（6 + 3 = 9 张，宽屏 3×3 正好铺满，末行不留空位）",
-  (cardsNone.match(/class="stat/g) || []).length === 3,
+check("有两张均价卡（6 + 2 = 8 张，宽屏 4×2 正好两行，末行不留空位）",
+  (cardsNone.match(/class="stat/g) || []).length === 2,
   String((cardsNone.match(/class="stat/g) || []).length));
+check("均价卡里不再有「平均每公斤」（按反馈删掉了）",
+  !/平均每公斤/.test(cardsNone));
 
-// 真跑一次 renderSummary，数一数 stat 卡总数：宽屏三列，卡数不是 3 的倍数就会空一格
+// 真跑一次 renderSummary，数一数 stat 卡总数：宽屏四列，卡数不是 4 的倍数就会空一格
 state.stats = {
   spool_count: 4, archived_count: 0, price_total: 600, used_total: 1500,
   remaining_total: 2500, used_value: 300, stock_value: 300, print_cost_total: 12.5,
@@ -910,10 +924,20 @@ state.summarySpools = [
   { price: 300, initial_weight: 1000 }, { price: 0, initial_weight: 1000 },
 ];
 sandbox.renderSummary();
-const statCount = (sandbox.document.getElementById("summaryStats").innerHTML.match(/class="stat/g) || []).length;
-check("汇总页统计卡总数是 3 的倍数（宽屏三列排，末行不留空位）",
-  statCount === 9 && statCount % 3 === 0, `共 ${statCount} 张`);
-check("统计卡里出现「平均每盘单价」", /平均每盘单价/.test(sandbox.document.getElementById("summaryStats").innerHTML));
+const summaryHost = sandbox.document.getElementById("summaryStats");
+const statCount = (summaryHost.innerHTML.match(/class="stat/g) || []).length;
+check("汇总页统计卡总数是 8 张（宽屏四列 4×2，末行不留空位）",
+  statCount === 8 && statCount % 4 === 0, `共 ${statCount} 张`);
+// 8 张要排成两行得靠四列；容器类名写在 index.html 里（沙箱不解析 HTML，直接读文件）。
+// 少了 cols-4 就会退回全局三列 → 3+3+2，末行空一格，正是「不要留空」要避免的。
+const indexHtml = fs.readFileSync(path.join(ROOT, "app", "static", "index.html"), "utf8");
+check("汇总页统计容器带 cols-4（四列的开关，缺了它 8 张会排成 3+3+2）",
+  /class="grid-stats cols-4"\s+id="summaryStats"/.test(indexHtml),
+  (indexHtml.match(/<div class="[^"]*grid-stats[^"]*"[^>]*>/g) || []).join(" | "));
+check("CSS 里定义了 .grid-stats.cols-4 的四列规则",
+  /\.grid-stats\.cols-4\s*\{[^}]*repeat\(4,/.test(
+    fs.readFileSync(path.join(ROOT, "app", "static", "style.css"), "utf8")));
+check("统计卡里出现「平均每盘单价」", /平均每盘单价/.test(summaryHost.innerHTML));
 state.stats = null;
 state.spools = [];
 state.summarySpools = [];
@@ -950,6 +974,84 @@ check("没有扣重流水时不弹改绑窗（弹了也改不动）",
   sandbox.document.getElementById("modalHost").innerHTML === "SENTINEL",
   sandbox.document.getElementById("modalHost").innerHTML.slice(0, 120));
 sandbox.closeModal();
+state.spools = [];
+
+// ── 17b. 槽位弹窗里的「解绑耗材」 ────────────────────────────────
+// 用户对着「AMS · 槽位 1」那个弹窗说「在这个界面增加一个解绑耗材按钮」。
+// 两个最容易写错的地方：
+//   ① 槽位没绑料盘时也摆一个「解绑耗材」→ 点了什么都不发生，像是坏了；
+//   ② 复用 toggleSpoolBinding 解绑 → 它解完会 openBindSpoolDialog（另一盘料的绑定页），
+//      人还在槽位页等着，弹窗却被换成别的，等于点一下就被弹走了。
+console.log("");
+console.log("── 槽位弹窗：解绑耗材 ──");
+
+// 造一台只有 AMS 0 / 槽位 1 的机器，并让该槽位绑在料盘 1 上
+state.printers_full = [{
+  id: 5, name: "P2S", model: "P2S", serial: "01P00A000000001", online: true,
+  state: {
+    ams: [{ ams_id: 0, name: "AMS A", trays: [
+      { tray_id: 0, label: "PLA 黑", color: "#111111", remain: 80, has_rfid: false },
+    ] }],
+  },
+}];
+state.bindingMap = { "5:0:0": { spool_id: 1, spool: { id: 1, name: "A 盘" } } };
+state.spools = [{ id: 1, name: "A 盘", archived: false, remaining_weight: 500 }];
+
+sandbox.openSlotDialog(5, 0, 0);
+let slotHtml = sandbox.document.getElementById("modalHost").innerHTML;
+check("槽位弹窗标题是「AMS A · 槽位 A1」（AMS 名 + 槽位字母+号，别写成 AMS 0）",
+  /<h3>AMS A\s*·\s*槽位\s*A1<\/h3>/.test(slotHtml), slotHtml.slice(0, 200));
+check("已绑定时出现「解绑耗材」按钮",
+  /解绑耗材/.test(slotHtml), slotHtml.slice(0, 400));
+check("点它调的是 unbindSlotSpool(打印机, ams, 槽位, 当前料盘id) —— 不是 toggleSpoolBinding",
+  /unbindSlotSpool\(5,0,0,1\)/.test(slotHtml) && !/toggleSpoolBinding/.test(slotHtml),
+  (slotHtml.match(/onclick="[^"]*[Bb]ind[^"]*"/g) || []).join(" "));
+check("旁边写清当前绑的是哪盘（点之前能核对）",
+  /当前绑定/.test(slotHtml) && /A 盘/.test(slotHtml));
+check("槽位弹窗仍保留了「保存绑定」", /saveBinding\(5,0,0\)/.test(slotHtml));
+
+// 解绑成功后必须重开**同一个槽位**的弹窗，而不是跳去料盘页
+let bindCalls = [];
+const origFetch = sandbox.fetch;
+sandbox.fetch = async (url, opts) => {
+  bindCalls.push({ url, body: opts && opts.body ? JSON.parse(opts.body) : null });
+  return { ok: true, status: 200, json: async () => ({}) };
+};
+// 解绑时还会顺带 loadBindings / loadStatus（刷新界面上的槽位标记），
+// 所以只挑出发往 /api/bindings 且带 body 的那一次来判。
+const putCalls = () => bindCalls.filter((c) => c.url === "/api/bindings" && c.body);
+state.bindingMap = { "5:0:0": { spool_id: 1, spool: { id: 1, name: "A 盘" } } };
+await sandbox.unbindSlotSpool(5, 0, 0, 1);
+check("解绑打的是 PUT /api/bindings 且 spool_id 为 null",
+  putCalls().length === 1 && putCalls()[0].body.spool_id === null,
+  JSON.stringify(bindCalls));
+check("请求带上了槽位三件套（printer/ams/tray）",
+  putCalls().length === 1 && putCalls()[0].body.printer_id === 5
+  && putCalls()[0].body.ams_id === 0 && putCalls()[0].body.tray_id === 0,
+  JSON.stringify(bindCalls));
+// 解绑前把 bindingMap 清空，模拟服务端已生效；重开弹窗时应当不再有解绑按钮
+state.bindingMap = {};
+slotHtml = sandbox.document.getElementById("modalHost").innerHTML;
+check("解绑后重开的是同一个槽位弹窗（标题还是 AMS A · 槽位 A1，没被换成料盘绑定页）",
+  /<h3>AMS A\s*·\s*槽位\s*A1<\/h3>/.test(slotHtml)
+  && !/绑定槽位 ·/.test(slotHtml), slotHtml.slice(0, 200));
+check("解绑后弹窗里不再有「解绑耗材」（没绑定了就不该摆这个键）",
+  !/解绑耗材/.test(slotHtml), slotHtml.slice(0, 400));
+
+// 已经没绑定时再点一次：不该发请求，只提示
+bindCalls = [];
+await sandbox.unbindSlotSpool(5, 0, 0, 1);
+check("槽位已解绑时重复点不重复发请求", putCalls().length === 0, JSON.stringify(bindCalls));
+
+// 弹窗开着的时候别处改了这个槽位 → 不许误删后来绑上去的那盘
+bindCalls = [];
+state.bindingMap = { "5:0:0": { spool_id: 2, spool: { id: 2, name: "B 盘" } } };
+await sandbox.unbindSlotSpool(5, 0, 0, 1);   // 弹窗里记的还是料盘 1
+check("绑定已被改成别的盘时不误删（不发请求）", putCalls().length === 0, JSON.stringify(bindCalls));
+sandbox.fetch = origFetch;
+sandbox.closeModal();
+state.printers_full = [];
+state.bindingMap = {};
 state.spools = [];
 
 // ── 18. 打印记录列表行内的「耗材 / 绑定」两个键 ──────────────────
