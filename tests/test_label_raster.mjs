@@ -225,6 +225,18 @@ function testEscPosJob() {
     Array.from(legacyTwo.slice(8, 23)).join(",") === Array.from(legacyTwo.slice(23, 38)).join(","),
     Array.from(legacyTwo.slice(23, 38)).join(","));
 
+  // auto 模式：完全不发走纸指令，标签模式下固件自己按间隙走（FF 仍串位机的对比档）
+  const autoJob = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "auto" });
+  check("auto 模式 = 纯位图 20 字节（无 FF、无 ESC d）", autoJob.length === 20, String(autoJob.length));
+  check("auto 模式不含走纸指令",
+    !Array.from(autoJob).includes(0x0c) && autoJob[20] === undefined,
+    Array.from(autoJob.slice(18)).join(","));
+  const autoTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "auto" });
+  check("auto 模式两份 = 2+6+2×12 = 32，报文逐字节相同",
+    autoTwo.length === 32 &&
+      Array.from(autoTwo.slice(8, 20)).join(",") === Array.from(autoTwo.slice(20, 32)).join(","),
+    String(autoTwo.length));
+
   check("份数 0 兜底成 1 份",
     buildEscPosJob(raster, { copies: 0, feed: 3 }).length === 24,
     String(buildEscPosJob(raster, { copies: 0, feed: 3 }).length));
@@ -498,12 +510,34 @@ function testBleErrors() {
     bleErrorHint(new Error("没有可发送的字节")) === "没有可发送的字节");
 }
 
+/* ── 8. 写入提速与掉链防护（源码级断言）────────────────────── */
+// 逐包等确认 12KB 要 65 秒（用户实测）→ 应答写入必须流水线连发；
+// 无应答写入这台机器发一半掉链路 → 必须每包前查链路、断了报人话。
+function testWritePipeline() {
+  console.log("== 写入流水线与掉链防护 ==");
+  const src = fs.readFileSync(SRC, "utf8");
+  check("应答写入用流水线（有在途窗口常量）", /INFLIGHT_ACK\s*=\s*\d/.test(src));
+  check("流水线写入不逐包 await（有 Promise 聚合）",
+    /const pending = new Set\(\)/.test(src) && /st\.char\.writeValue\(chunk\)/.test(src));
+  check("无应答写入每包前查链路",
+    /无应答写入：串行 [\s\S]{0,200}gatt\.connected/.test(src) ||
+      (src.indexOf("writeValueWithoutResponse(chunk)") > -1 &&
+       /发到第 " \+ sent \+ " 字节时蓝牙链路已断开/.test(src)));
+  check("掉链报错给「切回应答写入」的指引",
+    /切回「应答写入」重打/.test(src));
+  check("间隙学习回执窗口 ≥3 秒（学习要走纸 2~3 秒，900ms 抓不到 OK）",
+    /间隙学习（GS setL）", 3000\)/.test(src));
+  check("打印作业回执窗口 ≥2 秒（finished 在打完才来）",
+    /\), 2000\s*\n\s*\);/.test(src) || /, 2000\s*\);/.test(src));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testMm2dot();
   testPackRaster();
   testEscPosJob();
   testBleErrors();
+  testWritePipeline();
   await testDialogHtml();
   await testRenderedLayout();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);

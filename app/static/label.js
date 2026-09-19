@@ -389,7 +389,11 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
    *            下一张标签的起点。之前用固定行数 ESC d，标签 240 点 + 2 行
    *            远小于「标签+间隙」的真实节距（50×30 纸约 264 点），每张少走
    *            20 多点、误差逐张累积 —— 第 2 张开始串位、第 3 张更严重，
-   *            就是这么来的。FF 走纸每张都重新对齐间隙，多张永远不串。
+   *            就是这么来的。
+   *  - "auto"  完全不发走纸指令：标签纸模式（setp 01）下固件每打完一张
+   *            位图自己按间隙走纸。汉印自家 App 就是这个走法；实测 FF 定位
+   *            仍串位的机器值得切这档对比 —— 有些固件的 FF 会多走/少走
+   *            一点，而固件自己的自动定位永远和间隙学习结果一致。
    *  - "lines" 旧行为：每张后发 ESC d n 固定行数（协议不吃 FF 时的兜底，
    *            多张会累积串位，单张不受影响）。 */
   function buildEscPosJob(raster, cfg) {
@@ -400,7 +404,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
     const feedLines = Math.max(0, cfg.feed | 0) & 0xff;
-    const gapMode = cfg.feedMode !== "lines";
+    const gapMode = cfg.feedMode !== "lines" && cfg.feedMode !== "auto"; // 缺省 = gap
+    const autoMode = cfg.feedMode === "auto";
     for (let c = 0; c < copies; c++) {
       parts.push(
         Uint8Array.from([
@@ -410,7 +415,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         ])
       );
       parts.push(raster.bytes);
-      if (gapMode) {
+      if (autoMode) {
+        // 固件自动定位：什么都不发（最后一张的过撕纸口走纸也交给固件）
+      } else if (gapMode) {
         // FF：打印缓冲并按间隙走纸到下一张标签起点（每张都对齐，不累积误差）
         parts.push(Uint8Array.from([0x0c]));
         if (c === copies - 1 && feedLines > 0) {
@@ -555,12 +562,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
     // 写入方式可在界面切换（cfg.writeMode）：
-    // - 应答写入（默认）：每个包都有链路层确认，通道堵了会立刻报错并触发
-    //   下面的减包重发；此前的「无应答写入」没有流控，Windows 蓝牙栈发送
-    //   缓冲一满就静默丢包 —— 界面显示已全部发出、打印机却没收全，
-    //   正是「发送成功却打不出」的元凶之一。
-    // - 无应答写入：汉印自家 App 的走法，个别固件只认这个；每包之间固定
-    //   等 20ms 给打印机留消化时间。
+    // - 应答写入（默认）：每个包都有链路层确认，不丢数据。但「发一个等一个」
+    //   12KB 要 60 多秒（实测 65 秒）—— 每包一次来回、连接间隔占大头。
+    //   改成流水线：链路上同时挂 6 个包在途，吞吐翻几倍，确认还在。
+    // - 无应答写入：汉印自家 App 的走法，但这台 HM-T260LR 实测撑不住 ——
+   //   发到一半链路直接被掐、只打出小半张。保留但加掉链检测：断了立刻
+   //   停，报人话，不再傻发完 12KB 黑洞。
     const mode = pickWriteMode();
     let useNoResp = mode.noResp;
     st.lastMode = mode.label;
@@ -568,40 +575,109 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     let sent = 0;
     st.lastSent = 0;
     const parts = [];
+    const INFLIGHT_ACK = 6; // 应答写入的流水线深度：在途包数
+
     while (sent < bytes.length) {
-      const end = Math.min(sent + size, bytes.length);
-      const chunk = bytes.subarray(sent, end);
-      try {
-        if (useNoResp) await st.char.writeValueWithoutResponse(chunk);
-        else await st.char.writeValue(chunk);
-      } catch (err) {
-        // 单包太大：先减半重试（20 字节以内就不再减）
-        if (size > 20) {
-          size = Math.max(20, Math.floor(size / 2));
-          st.chunk = size;
-          parts.push("分包降到 " + size + " 字节重试");
-          continue;
+      if (useNoResp) {
+        // 无应答写入：串行 + 20ms 节拍 + 每包前查链路。
+        if (st.device && st.device.gatt && !st.device.gatt.connected) {
+          st.dirty = true;
+          throw new Error(
+            "发到第 " + sent + " 字节时蓝牙链路已断开（无应答写入发太快会丢数据，" +
+            "这台机器实测撑不住）——切回「应答写入」重打"
+          );
         }
-        // 20 字节的应答写入还被拒（个别固件根本不吃 Write 命令）：
-        // 自动降级到无应答写入，同一包重发——应答失败意味着没写进去，重发安全。
-        if (!useNoResp && st.char.properties.writeWithoutResponse) {
-          useNoResp = true;
-          st.lastMode = "无应答写入（应答失败自动切换）";
-          parts.push("应答写入被拒，已自动切到无应答写入");
-          continue;
+        const end = Math.min(sent + size, bytes.length);
+        const chunk = bytes.subarray(sent, end);
+        try {
+          await st.char.writeValueWithoutResponse(chunk);
+        } catch (err) {
+          if (size > 20) {
+            size = Math.max(20, Math.floor(size / 2));
+            st.chunk = size;
+            parts.push("分包降到 " + size + " 字节重试");
+            continue;
+          }
+          if (isLinkError(err)) st.dirty = true;
+          throw err;
         }
-        // 链路级失败（Chrome 报 GATT operation failed 那种）留个脏标记，
-        // 下次动手前必重建链路；这里不吞错，交给上层决定要不要重发。
-        if (isLinkError(err)) st.dirty = true;
-        throw err;
+        sent = end;
+        st.lastSent = sent;
+        st.lastUseAt = Date.now();
+        if (onProgress) onProgress(sent, bytes.length);
+        // 无应答写入没有流控，节奏太快打印机会丢数据（Windows 蓝牙栈缓冲一满
+        // 就报 GATT operation failed，所以按 20ms 走，别贪快）
+        await sleep(20);
+        continue;
       }
-      sent = end;
-      st.lastSent = sent;
-      st.lastUseAt = Date.now();
-      if (onProgress) onProgress(sent, bytes.length);
-      // 无应答写入没有流控，节奏太快打印机会丢数据（Windows 蓝牙栈缓冲一满
-      // 就报 GATT operation failed，所以按 20ms 走，别贪快）
-      if (useNoResp) await sleep(20);
+
+      // 应答写入：一次流水线 pass 把 [sent, 末尾) 全发出去。
+      // 失败处理沿用旧语义：包太大减半重试；20 字节也被拒切无应答写入；
+      // 链路级失败标脏并抛给上层。
+      const outcome = await new Promise((resolve) => {
+        let ends = [];
+        let ok = [];
+        let failed = null;
+        let launched = 0;
+        let ackedN = 0;
+        const pending = new Set();
+
+        const build = () => {
+          ends = [];
+          for (let o = sent; o < bytes.length; o += size) ends.push(Math.min(o + size, bytes.length));
+          ok = new Array(ends.length).fill(false);
+        };
+        const drain = () => {
+          while (ackedN < ok.length && ok[ackedN]) {
+            ackedN++;
+            st.lastSent = ends[ackedN - 1];
+            st.lastUseAt = Date.now();
+            if (onProgress) onProgress(st.lastSent, bytes.length);
+          }
+        };
+        const finish = () => {
+          if (ackedN >= ends.length) return resolve({ done: true });
+          if (failed && pending.size === 0) return resolve({ fail: failed, ends: ends });
+        };
+        const pump = () => {
+          while (launched < ends.length && !failed && pending.size < INFLIGHT_ACK) {
+            const i = launched++;
+            const start = i === 0 ? sent : ends[i - 1];
+            const chunk = bytes.subarray(start, ends[i]);
+            const p = Promise.resolve()
+              .then(() => st.char.writeValue(chunk))
+              .then(
+                () => { pending.delete(p); ok[i] = true; drain(); finish(); },
+                (err) => { pending.delete(p); if (!failed) failed = { index: i, err }; finish(); }
+              );
+            pending.add(p);
+          }
+        };
+        build();
+        pump();
+      });
+
+      if (outcome.done) break;
+      const failStart = outcome.fail.index === 0 ? sent : outcome.ends[outcome.fail.index - 1];
+      if (size > 20) {
+        // 单包太大：从失败那包起减半重试
+        sent = failStart;
+        size = Math.max(20, Math.floor(size / 2));
+        st.chunk = size;
+        parts.push("分包降到 " + size + " 字节重试");
+        continue;
+      }
+      if (st.char.properties.writeWithoutResponse) {
+        // 20 字节的应答写入还被拒（个别固件根本不吃 Write 命令）：
+        // 切无应答写入，从最后确认成功的字节继续——应答失败意味着没写进去。
+        useNoResp = true;
+        st.lastMode = "无应答写入（应答失败自动切换）";
+        sent = failStart;
+        parts.push("应答写入被拒，已自动切到无应答写入");
+        continue;
+      }
+      if (isLinkError(outcome.fail.err)) st.dirty = true;
+      throw outcome.fail.err;
     }
     return parts;
   }
@@ -636,11 +712,11 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     return notices;
   }
 
-  async function bleSendRaw(bytes, label) {
+  async function bleSendRaw(bytes, label, settle) {
     if (!LABEL.ble.char) throw new Error("蓝牙未连接");
     let notices = null;
     try {
-      notices = await bleCaptureReceipts(() => bleWriteAll(bytes));
+      notices = await bleCaptureReceipts(() => bleWriteAll(bytes), settle);
     } catch (err) {
       bleLogFail(label || "原始指令", bytesToHex(bytes), err);
       throw err;
@@ -845,10 +921,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           try {
             // 打印也订阅通知抓回执：打印机收到/拒收数据多半会说一声，
             // 「发送了却没打」时回执（或没有回执）就是第一手线索。
+            // settle 2 秒：发完只是发完，机器还要打几秒，"finished" 回执
+            // 在打完才来，900ms 的窗口抓不到（表现为成功却「无回执」）。
             notes = await bleCaptureReceipts(() =>
               bleWriteAll(job, (sent, total) => {
                 labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-              })
+              }), 2000
             );
             secs = ((Date.now() - started) / 1000).toFixed(1);
             break;
@@ -938,7 +1016,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       // 官方知识库：1d 73 65 74 4c = GS "setL"，间隙/黑标学习。
       // 学习完成后打印机会停在「间隙对齐打印头」的位置，不会倒回上一张 ——
       // 这是刻意的：那个停位就是下一张标签的起点，接着打印正好从这走。
-      await bleSendRaw(parseHex("1D 73 65 74 4C"), "间隙学习（GS setL）");
+      // settle 给 3 秒：学习要走 2~3 秒纸，回执（OK）在走完纸后才发，
+      // 默认 900ms 的窗口早就关了，表现为「没有应答」（用户实测踩过）。
+      await bleSendRaw(parseHex("1D 73 65 74 4C"), "间隙学习（GS setL）", 3000);
       toast("已下发间隙学习指令，机器会走一段纸做定位（停在间隙属正常）", "ok");
       // 等学习动作走完（约 2~3 秒），再发一个 FF 让它走到下一张标签起点；
       // 顺带当 FF 支持度的探针：走整张标签 = 认 FF，串位修复就靠它。
@@ -1123,12 +1203,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           '<label class="field"><span>份数</span><input type="number" id="labelCopies" min="1" max="50" value="' +
             cfg.copies + '" onchange="labelPickCopies(this.value)" /></label>' +
           '<label class="field"><span>走纸方式</span><select id="labelFeedMode" onchange="labelPickFeedMode(this.value)">' +
-            '<option value="gap"' + (cfg.feedMode !== "lines" ? " selected" : "") + '>按间隙定位（多张不串位，推荐）</option>' +
+            '<option value="gap"' + (cfg.feedMode === "gap" || !cfg.feedMode ? " selected" : "") + '>按间隙定位（每张后发 FF）</option>' +
+            '<option value="auto"' + (cfg.feedMode === "auto" ? " selected" : "") + '>打印机自动定位（不发走纸指令，FF 仍串位时选这档）</option>' +
             '<option value="lines"' + (cfg.feedMode === "lines" ? " selected" : "") + '>固定行数（旧行为，多张会累积串位）</option>' +
           "</select></label>" +
           '<label class="field"><span>写入方式</span><select id="labelWriteMode" onchange="labelPickWriteMode(this.value)">' +
             '<option value="ack"' + (cfg.writeMode !== "fast" ? " selected" : "") + '>应答写入（每包有确认，推荐）</option>' +
-            '<option value="fast"' + (cfg.writeMode === "fast" ? " selected" : "") + '>无应答写入（汉印 App 同款走法）</option>' +
+            '<option value="fast"' + (cfg.writeMode === "fast" ? " selected" : "") + '>无应答写入（HM-T260LR 实测掉链路打一半，别选）</option>' +
           "</select></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
@@ -1146,11 +1227,15 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "（官方知识库的校准指令 <code>1D 73 65 74 4C</code> 也是 ESC/POS 派生，所以这套大概率可用）。" +
       "多张打印的走纸默认「按间隙定位」：每张位图后发 <code>FF（0x0C）</code>，机器按间隙学习结果" +
       "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
+      "若实测 FF 仍串位，切「打印机自动定位」：不发任何走纸指令，标签模式下固件每打完一张自己按间隙走" +
+      "（汉印 App 就是这个走法）。" +
       "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
       "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完；" +
-      "若固件拒绝应答写入会自动切到无应答写入。分包固定 20 字节（这台机器的链路 MTU " +
-      "协商不到大值，包大了会被静默截断——之前「只打出标签头一条」就是它），" +
-      "所以每张标签发送约需 6~15 秒，属正常速度别当卡死。" +
+      "且用流水线连发（在途 6 包），一张 50×30 标签十几秒内发完，比逐包等确认快几倍。" +
+      "无应答写入这台机器实测撑不住（发一半掉链路只打小半张），留着只给「固件拒收应答写入」的机器用。" +
+      "分包固定 20 字节（这台机器的链路 MTU " +
+      "协商不到大值，包大了会被静默截断——之前「只打出标签头一条」就是它）。" +
+      "打印出来<b>发虚/不清楚</b>先把「浓度」往上加 1~2 档；串位时半张打在衬纸上，看起来也会像不清楚。" +
       "打印机闲置一会儿会自己断链，而 Windows 上 Chrome 的 <code>gatt.connected</code> 还报真，" +
       "这时第一包写入就抛 <code>GATT operation failed for unknown reason</code>（界面却仍显示" +
       "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>每次打印前会自动重建一次链路</b>" +
@@ -1242,7 +1327,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
   function labelPickFeedMode(value) {
     const cfg = loadCfg();
-    cfg.feedMode = value === "lines" ? "lines" : "gap";
+    cfg.feedMode = value === "lines" ? "lines" : value === "auto" ? "auto" : "gap";
     saveCfg();
   }
 
