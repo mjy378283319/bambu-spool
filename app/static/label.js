@@ -159,7 +159,11 @@
   /* ── 配置 ───────────────────────────────────────────────── */
 
   function defaultCfg() {
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap", writeMode: "ack", showAll: false };
+    // writePipe = 同时在途的写入包数。默认 1 = 最稳的老行为（发一个等一个，
+    // 12KB 约 60 秒但几乎不掉链路）；这台 HM-T260LR 实测并发一上去就掉链路，
+    // 所以提速是可选的（4 / 8），且失败会自动降级回 1。
+    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap",
+      writeMode: "ack", writePipe: 1, showAll: false };
   }
 
   function loadCfg() {
@@ -390,12 +394,16 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
    *            远小于「标签+间隙」的真实节距（50×30 纸约 264 点），每张少走
    *            20 多点、误差逐张累积 —— 第 2 张开始串位、第 3 张更严重，
    *            就是这么来的。
+   *  - "page"  页模式（官方手册写明的方式）：ESC L 进页模式 → 位图进页缓冲
+   *            → ESC FF 一次性打印并把「有标纸」走到下一个打印起始位置。
+   *            ⚠️ 关键：汉印 PPTII-A 手册对 FF 的原文是——有标纸下 FF 只在
+   *            **页模式**才走到下一张起点，**标准模式下 FF 等价于 LF（只走
+   *            一行）**。我们之前在标准模式下发裸 FF，等于没走纸，这就是
+   *            0.12.1 以来「按间隙定位」一直串位的真因。
    *  - "auto"  完全不发走纸指令：标签纸模式（setp 01）下固件每打完一张
-   *            位图自己按间隙走纸。汉印自家 App 就是这个走法；实测 FF 定位
-   *            仍串位的机器值得切这档对比 —— 有些固件的 FF 会多走/少走
-   *            一点，而固件自己的自动定位永远和间隙学习结果一致。
-   *  - "lines" 旧行为：每张后发 ESC d n 固定行数（协议不吃 FF 时的兜底，
-   *            多张会累积串位，单张不受影响）。 */
+   *            位图自己按间隙走纸（汉印 App 大概率走的这路）。page 档不出
+   *            纸时切这档。
+   *  - "lines" 旧行为：每张后发 ESC d n 固定行数（兜底，多张会累积串位）。 */
   function buildEscPosJob(raster, cfg) {
     const parts = [];
     parts.push(Uint8Array.from([0x1b, 0x40])); // ESC @ 复位
@@ -404,9 +412,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
     const feedLines = Math.max(0, cfg.feed | 0) & 0xff;
-    const gapMode = cfg.feedMode !== "lines" && cfg.feedMode !== "auto"; // 缺省 = gap
-    const autoMode = cfg.feedMode === "auto";
+    const mode = cfg.feedMode || "gap";
+    const gapMode = mode !== "lines" && mode !== "auto" && mode !== "page"; // 缺省 = gap
+    const autoMode = mode === "auto";
+    const pageMode = mode === "page";
     for (let c = 0; c < copies; c++) {
+      // 页模式：每份都是「进页模式 → 位图进页缓冲 → ESC FF 打印并走到下一张」
+      if (pageMode) parts.push(Uint8Array.from([0x1b, 0x4c])); // ESC L
       parts.push(
         Uint8Array.from([
           0x1d, 0x76, 0x30, 0x00, // GS v 0 m=0 光栅位图
@@ -415,7 +427,10 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         ])
       );
       parts.push(raster.bytes);
-      if (autoMode) {
+      if (pageMode) {
+        // ESC FF（1B 0C）：有标纸下打印整页并走到下一个打印起始位置
+        parts.push(Uint8Array.from([0x1b, 0x0c]));
+      } else if (autoMode) {
         // 固件自动定位：什么都不发（最后一张的过撕纸口走纸也交给固件）
       } else if (gapMode) {
         // FF：打印缓冲并按间隙走纸到下一张标签起点（每张都对齐，不累积误差）
@@ -562,9 +577,10 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
     // 写入方式可在界面切换（cfg.writeMode）：
-    // - 应答写入（默认）：每个包都有链路层确认，不丢数据。但「发一个等一个」
+    // - 应答写入（默认）：每个包都有链路层确认，不丢数据。「发一个等一个」
     //   12KB 要 60 多秒（实测 65 秒）—— 每包一次来回、连接间隔占大头。
-    //   改成流水线：链路上同时挂 6 个包在途，吞吐翻几倍，确认还在。
+    //   可以把在途包数（cfg.writePipe）调大来提速，但这台机器并发一高就
+    //   掉链路，所以默认 1，且任一包失败就自动降回 1 重发（不再整单炸掉）。
     // - 无应答写入：汉印自家 App 的走法，但这台 HM-T260LR 实测撑不住 ——
    //   发到一半链路直接被掐、只打出小半张。保留但加掉链检测：断了立刻
    //   停，报人话，不再傻发完 12KB 黑洞。
@@ -575,7 +591,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     let sent = 0;
     st.lastSent = 0;
     const parts = [];
-    const INFLIGHT_ACK = 6; // 应答写入的流水线深度：在途包数
+    // 在途包数：默认 1（老行为，最稳）。调大提速，但并发掉链路的机器
+    // 会在下面自动降回 1。
+    let pipe = Math.max(1, Math.min(8, (loadCfg().writePipe | 0) || 1));
 
     while (sent < bytes.length) {
       if (useNoResp) {
@@ -640,7 +658,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           if (failed && pending.size === 0) return resolve({ fail: failed, ends: ends });
         };
         const pump = () => {
-          while (launched < ends.length && !failed && pending.size < INFLIGHT_ACK) {
+          while (launched < ends.length && !failed && pending.size < pipe) {
             const i = launched++;
             const start = i === 0 ? sent : ends[i - 1];
             const chunk = bytes.subarray(start, ends[i]);
@@ -665,6 +683,15 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         size = Math.max(20, Math.floor(size / 2));
         st.chunk = size;
         parts.push("分包降到 " + size + " 字节重试");
+        continue;
+      }
+      // 并发写入掉链路：自动降回串行（老行为）重发，别整单判死。
+      // 这台机器实测在途 2 包以上就 GATT failed，提速只能是可选项。
+      if (pipe > 1) {
+        pipe = 1;
+        try { loadCfg().writePipe = 1; } catch (e) { /* 配置没落盘就算了 */ }
+        sent = failStart;
+        parts.push("并发写入失败，已降级为逐包串行重发");
         continue;
       }
       if (st.char.properties.writeWithoutResponse) {
@@ -904,11 +931,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       try {
         labelProgress("正在连接蓝牙…");
         await bleConnect(cfg.showAll);
-        // 打印是重活：50×30 标签 12KB、按 20 字节分包要发十几秒，值得先花
-        // 1 秒把链路重建一遍 —— 僵尸连接下第一包就报 GATT 失败，白等一场
-        // 不如先清干净。重连不会重置打印机，间隙学习结果还在。
-        labelProgress("正在重建蓝牙链路…");
-        await bleRefreshLink(true);
+        // 0.12.8 是「每次打印都强制断开重连」，实测反而多一次失败机会：
+        // 用户截图里就有重建成功仅 11 秒后第一包又断的情况。僵尸连接是
+        // 闲置/上轮失败才有的，所以这里只在那种情况下重建（force=false）。
+        // 真在发送第一步断了，下面还有自动重连重发兜底。
+        labelProgress("正在检查蓝牙链路…");
+        await bleRefreshLink(false);
         labelProgress("正在渲染标签…");
         const canvas = await labelCanvas();
         const raster = packRaster(canvas, cfg.density);
@@ -1013,13 +1041,18 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     try {
       await bleConnect(loadCfg().showAll);
       await bleRefreshLink(false);
-      // 官方知识库：1d 73 65 74 4c = GS "setL"，间隙/黑标学习。
+      // 官方知识库（HM-T260 问题 04「多走纸或无法定位到缝标」）给的处置是：
+      // **先设置纸张类型，再做校准学习** —— 顺序不能反，学习才学得对。
+      // 所以这里一帧里先发 setp 01（标签纸），紧接着 setL（学习）。
       // 学习完成后打印机会停在「间隙对齐打印头」的位置，不会倒回上一张 ——
       // 这是刻意的：那个停位就是下一张标签的起点，接着打印正好从这走。
       // settle 给 3 秒：学习要走 2~3 秒纸，回执（OK）在走完纸后才发，
       // 默认 900ms 的窗口早就关了，表现为「没有应答」（用户实测踩过）。
-      await bleSendRaw(parseHex("1D 73 65 74 4C"), "间隙学习（GS setL）", 3000);
-      toast("已下发间隙学习指令，机器会走一段纸做定位（停在间隙属正常）", "ok");
+      await bleSendRaw(
+        parseHex("1D 73 65 74 70 01 1D 73 65 74 4C"),
+        "间隙学习（先 setp 01 标签纸 → 再 setL 学习）", 3000
+      );
+      toast("已下发纸张类型+间隙学习，机器会走 3 张纸做定位（停在间隙属正常）", "ok");
       // 等学习动作走完（约 2~3 秒），再发一个 FF 让它走到下一张标签起点；
       // 顺带当 FF 支持度的探针：走整张标签 = 认 FF，串位修复就靠它。
       await sleep(2500);
@@ -1203,9 +1236,15 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           '<label class="field"><span>份数</span><input type="number" id="labelCopies" min="1" max="50" value="' +
             cfg.copies + '" onchange="labelPickCopies(this.value)" /></label>' +
           '<label class="field"><span>走纸方式</span><select id="labelFeedMode" onchange="labelPickFeedMode(this.value)">' +
-            '<option value="gap"' + (cfg.feedMode === "gap" || !cfg.feedMode ? " selected" : "") + '>按间隙定位（每张后发 FF）</option>' +
-            '<option value="auto"' + (cfg.feedMode === "auto" ? " selected" : "") + '>打印机自动定位（不发走纸指令，FF 仍串位时选这档）</option>' +
+            '<option value="page"' + (cfg.feedMode === "page" ? " selected" : "") + '>页模式 + ESC FF（官方手册写法，先试这档）</option>' +
+            '<option value="auto"' + (cfg.feedMode === "auto" ? " selected" : "") + '>打印机自动定位（不发走纸指令）</option>' +
+            '<option value="gap"' + (cfg.feedMode === "gap" || !cfg.feedMode ? " selected" : "") + '>裸 FF（老行为，标准模式下 FF=走一行，会串位）</option>' +
             '<option value="lines"' + (cfg.feedMode === "lines" ? " selected" : "") + '>固定行数（旧行为，多张会累积串位）</option>' +
+          "</select></label>" +
+          '<label class="field"><span>写入并发</span><select id="labelWritePipe" onchange="labelPickWritePipe(this.value)">' +
+            '<option value="1"' + ((cfg.writePipe | 0) !== 4 && (cfg.writePipe | 0) !== 8 ? " selected" : "") + '>1 包（最稳，老版行为，约 60 秒）</option>' +
+            '<option value="4"' + ((cfg.writePipe | 0) === 4 ? " selected" : "") + '>4 包（提速，掉链路会自动降级）</option>' +
+            '<option value="8"' + ((cfg.writePipe | 0) === 8 ? " selected" : "") + '>8 包（最快，多数机器扛不住）</option>' +
           "</select></label>" +
           '<label class="field"><span>写入方式</span><select id="labelWriteMode" onchange="labelPickWriteMode(this.value)">' +
             '<option value="ack"' + (cfg.writeMode !== "fast" ? " selected" : "") + '>应答写入（每包有确认，推荐）</option>' +
@@ -1227,19 +1266,24 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "（官方知识库的校准指令 <code>1D 73 65 74 4C</code> 也是 ESC/POS 派生，所以这套大概率可用）。" +
       "多张打印的走纸默认「按间隙定位」：每张位图后发 <code>FF（0x0C）</code>，机器按间隙学习结果" +
       "自己走到下一张起点，不会像固定行数那样每张少走一段、越打越串。" +
-      "若实测 FF 仍串位，切「打印机自动定位」：不发任何走纸指令，标签模式下固件每打完一张自己按间隙走" +
-      "（汉印 App 就是这个走法）。" +
+      "⚠️ 汉印 PPTII-A 手册写明：<b>有标纸下 FF 只在「页模式」才走到下一张起点，标准模式下 FF 等价于 LF" +
+      "（只走一行）</b>——所以老版本在标准模式下发裸 FF 根本没走纸，串位就是这么来的。定位请按序试：" +
+      "① 走纸方式选「页模式 + ESC FF」（官方写法）；② 选「打印机自动定位」（不发走纸指令，固件自己走）；" +
+      "③ 都串位就先在机器上<b>手动做一次定位学习</b>：就绪状态长按走纸键 3 秒，指示灯闪 2 下松开，" +
+      "机器会走 3 张纸完成学习（比发指令可靠）。" +
       "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
-      "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完；" +
-      "且用流水线连发（在途 6 包），一张 50×30 标签十几秒内发完，比逐包等确认快几倍。" +
+      "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完。" +
+      "默认逐包串行（在途 1 包）最稳、12KB 约 60 秒；想提速把「写入并发」调到 4/8，" +
+      "一旦掉链路会<b>自动降级回串行重发</b>，不会变成打不了。" +
       "无应答写入这台机器实测撑不住（发一半掉链路只打小半张），留着只给「固件拒收应答写入」的机器用。" +
       "分包固定 20 字节（这台机器的链路 MTU " +
       "协商不到大值，包大了会被静默截断——之前「只打出标签头一条」就是它）。" +
       "打印出来<b>发虚/不清楚</b>先把「浓度」往上加 1~2 档；串位时半张打在衬纸上，看起来也会像不清楚。" +
       "打印机闲置一会儿会自己断链，而 Windows 上 Chrome 的 <code>gatt.connected</code> 还报真，" +
       "这时第一包写入就抛 <code>GATT operation failed for unknown reason</code>（界面却仍显示" +
-      "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>每次打印前会自动重建一次链路</b>" +
-      "（约 1 秒，不会重置打印机），断了还会自动重连重发一次；面板上也有「重建链路」按钮可手动清。" +
+      "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>打印前只在闲置超过 8 秒" +
+      "或上次写入失败时才重建链路</b>（约 1 秒，不会重置打印机），第一包就断还会自动重连重发一次；" +
+      "面板上也有「重建链路」按钮可手动清。" +
       "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
       "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
       "② 打印机开关机一次再连（清掉它那头僵死的旧连接，比重启电脑快）；" +
@@ -1327,7 +1371,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
   function labelPickFeedMode(value) {
     const cfg = loadCfg();
-    cfg.feedMode = value === "lines" ? "lines" : value === "auto" ? "auto" : "gap";
+    cfg.feedMode =
+      value === "lines" || value === "auto" || value === "page" ? value : "gap";
     saveCfg();
   }
 
@@ -1336,6 +1381,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     cfg.writeMode = value === "fast" ? "fast" : "ack";
     saveCfg();
     renderBlePanel();
+  }
+
+  function labelPickWritePipe(value) {
+    const cfg = loadCfg();
+    const n = parseInt(value, 10) || 1;
+    cfg.writePipe = n === 4 || n === 8 ? n : 1;
+    saveCfg();
   }
 
   function labelPickShowAll(checked) {
@@ -1378,6 +1430,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelPickCopies,
     labelPickFeedMode,
     labelPickWriteMode,
+    labelPickWritePipe,
     labelPickShowAll,
   });
 })();

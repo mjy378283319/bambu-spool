@@ -75,7 +75,8 @@ const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintBle",
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity", "labelPickCopies", "labelPickFeedMode", "labelPickShowAll",
+  "labelPickDensity",
+  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -236,6 +237,23 @@ function testEscPosJob() {
     autoTwo.length === 32 &&
       Array.from(autoTwo.slice(8, 20)).join(",") === Array.from(autoTwo.slice(20, 32)).join(","),
     String(autoTwo.length));
+
+  // 页模式（官方手册写法）：ESC L 进页模式 → 位图 → ESC FF 打印并走到下一张起点。
+  // 手册白纸黑字：有标纸下 FF 只在页模式才定位，标准模式下 FF ≡ LF（只走一行）
+  // —— 老版本在标准模式下发裸 FF 正是串位的根因。
+  const pageJob = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "page" });
+  check("page 模式以 ESC L（1B 4C）进页模式",
+    pageJob[8] === 0x1b && pageJob[9] === 0x4c, `${pageJob[8]},${pageJob[9]}`);
+  check("page 模式位图后接 ESC FF（1B 0C）——不是裸 FF",
+    pageJob[22] === 0x1b && pageJob[23] === 0x0c, `${pageJob[22]},${pageJob[23]}`);
+  check("page 模式单份 = 2+6+2+12+2 = 24 字节", pageJob.length === 24, String(pageJob.length));
+  const pageTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "page" });
+  check("page 模式两份各带一次进页模式+ESC FF（不累积串位）",
+    pageTwo.length === 40 &&
+      pageTwo[8] === 0x1b && pageTwo[9] === 0x4c &&
+      pageTwo[22] === 0x1b && pageTwo[23] === 0x0c &&
+      pageTwo[24] === 0x1b && pageTwo[25] === 0x4c,
+    String(pageTwo.length));
 
   check("份数 0 兜底成 1 份",
     buildEscPosJob(raster, { copies: 0, feed: 3 }).length === 24,
@@ -510,23 +528,28 @@ function testBleErrors() {
     bleErrorHint(new Error("没有可发送的字节")) === "没有可发送的字节");
 }
 
-/* ── 8. 写入提速与掉链防护（源码级断言）────────────────────── */
-// 逐包等确认 12KB 要 65 秒（用户实测）→ 应答写入必须流水线连发；
-// 无应答写入这台机器发一半掉链路 → 必须每包前查链路、断了报人话。
+/* ── 8. 写入并发与掉链防护（源码级断言）────────────────────── */
+// 并发提速是把双刃剑：这台 HM-T260LR 在途 2 包以上就掉链路（0.12.9 把
+// 默认设成 6，结果从「慢但能打」变成「打不了」）。所以默认必须是 1，
+// 且并发失败要能自动降级回串行。
 function testWritePipeline() {
-  console.log("== 写入流水线与掉链防护 ==");
+  console.log("== 写入并发与掉链防护 ==");
   const src = fs.readFileSync(SRC, "utf8");
-  check("应答写入用流水线（有在途窗口常量）", /INFLIGHT_ACK\s*=\s*\d/.test(src));
-  check("流水线写入不逐包 await（有 Promise 聚合）",
-    /const pending = new Set\(\)/.test(src) && /st\.char\.writeValue\(chunk\)/.test(src));
+  check("并发默认值 = 1（最稳，老版行为）",
+    /writePipe:\s*1/.test(src) || /writePipe\s*=\s*1/.test(src));
+  check("并发可调但仍受夹取上限", /Math\.max\(1,\s*Math\.min\(8,/.test(src));
+  check("并发失败自动降级回串行重发", /并发写入失败，已降级为逐包串行重发/.test(src));
+  check("写入仍是应答写入（有 writeValue）", /st\.char\.writeValue\(chunk\)/.test(src));
   check("无应答写入每包前查链路",
     /无应答写入：串行 [\s\S]{0,200}gatt\.connected/.test(src) ||
       (src.indexOf("writeValueWithoutResponse(chunk)") > -1 &&
        /发到第 " \+ sent \+ " 字节时蓝牙链路已断开/.test(src)));
   check("掉链报错给「切回应答写入」的指引",
     /切回「应答写入」重打/.test(src));
-  check("间隙学习回执窗口 ≥3 秒（学习要走纸 2~3 秒，900ms 抓不到 OK）",
-    /间隙学习（GS setL）", 3000\)/.test(src));
+  // 官方 FAQ：定位不准要「先设置纸张类型，再做校准学习」，顺序反了学习无效
+  check("间隙学习回执窗口 ≥3 秒（学习要走纸 2~3 秒，900ms 抓不到 OK）", /3000\s*\n?\s*\)/.test(src));
+  check("间隙学习先发 setp 01 再发 setL（官方顺序）",
+    /1D 73 65 74 70 01 1D 73 65 74 4C/.test(src));
   check("打印作业回执窗口 ≥2 秒（finished 在打完才来）",
     /\), 2000\s*\n\s*\);/.test(src) || /, 2000\s*\);/.test(src));
 }
