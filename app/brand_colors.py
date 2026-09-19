@@ -1910,7 +1910,7 @@ R3D_HS_PLA_PRO_SILK: list[dict] = [
     _c('丝绸黑', 'Silk Black', '#343338'),
     _c('丝绸铜', 'Silk Copper', '#A85430'),
     _c('丝绸橙', 'Silk Orange', '#D55301'),
-    _c('丝绸青铜', 'Silk Bronze', '#485126'),
+    _c('丝绸青铜', 'Silk Bronze', '#B87333'),
     _c('丝绸草绿', 'Silk Grass Green', '#D9DAD5'),
     _c('丝绸粉紫', 'Silk Pink Purple', '#C29DC8'),
     _c('丝绸浅粉', 'Silk Light Pink', '#DADBD5'),
