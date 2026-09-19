@@ -470,11 +470,40 @@ async function testRenderedLayout() {
     log2.texts.map((t) => t.text).join(" | "));
 }
 
+/* ── 7. 蓝牙报错翻译 ────────────────────────────────────────── */
+// 「GATT operation failed for unknown reason」是 Windows 上链路断掉时的兜底
+// 文案（设备断了、写不进去，Chrome 都归到这句）。它曾经原样弹给用户看 ——
+// 用户截图里那句英文就是这么来的。这里钉住：链路错误要认得出来、要翻成
+// 能照做的人话，而且不许把别的错误也吞成人话。
+function testBleErrors() {
+  console.log("== 蓝牙报错翻译 ==");
+  const { isLinkError, bleErrorHint } = sandbox.labelDebug || {};
+  check("isLinkError 已导出", typeof isLinkError === "function");
+  check("bleErrorHint 已导出", typeof bleErrorHint === "function");
+  if (typeof isLinkError !== "function" || typeof bleErrorHint !== "function") return;
+
+  check("认得出 GATT operation failed",
+    isLinkError(new Error("GATT operation failed for unknown reason")) === true);
+  check("认得出服务断连",
+    isLinkError(new Error("GATT Server is disconnected. Cannot perform GATT operations.")) === true);
+  check("普通错误不当链路错误",
+    isLinkError(new Error("没有可发送的字节")) === false);
+
+  const hint = bleErrorHint(new Error("GATT operation failed for unknown reason"));
+  check("链路错误翻成中文并给出处置步骤",
+    /链路/.test(hint) && /汉码 App/.test(hint) && !/GATT operation failed/.test(hint), hint.slice(0, 50));
+  check("未连接单独一条提示",
+    /连接打印机/.test(bleErrorHint(new Error("蓝牙未连接"))), bleErrorHint(new Error("蓝牙未连接")));
+  check("无关错误原样透出（不吞）",
+    bleErrorHint(new Error("没有可发送的字节")) === "没有可发送的字节");
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testMm2dot();
   testPackRaster();
   testEscPosJob();
+  testBleErrors();
   await testDialogHtml();
   await testRenderedLayout();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);

@@ -132,6 +132,30 @@
     return typeof navigator !== "undefined" && !!navigator.bluetooth;
   }
 
+  /* ── 蓝牙报错翻译 ───────────────────────────────────────── */
+
+  /** 链路级错误。Chrome for Windows 把「设备已断/写不进去」几乎都归到这个
+   *  兜底文案上：GATT operation failed for unknown reason。它不代表指令错，
+   *  所以不能像以前那样原样抛给用户看（截图上那句英文就是这么来的）。 */
+  function isLinkError(err) {
+    const m = String((err && err.message) || err || "");
+    return /GATT operation failed|GATT Server is disconnected|NetworkError|no longer connected|not connected|disconnected/i.test(m);
+  }
+
+  /** 把底层报错翻成「照着做就能好」的中文。 */
+  function bleErrorHint(err) {
+    const m = String((err && err.message) || err || "");
+    if (/GATT operation failed|GATT Server is disconnected|no longer connected/i.test(m)) {
+      return "蓝牙链路断了（打印机闲置会自动断开，或被手机汉码 App 抢连）。" +
+        "已经连着重建过连接，直接再点一次「蓝牙打印」即可；若反复失败按顺序试：" +
+        "① 关掉手机上的汉码 App；② 打印机开关机一次；③ 点「连接打印机」重新连。";
+    }
+    if (/not connected|未连接/i.test(m)) {
+      return "蓝牙还没连上，先点「连接打印机」。";
+    }
+    return m;
+  }
+
   /* ── 配置 ───────────────────────────────────────────────── */
 
   function defaultCfg() {
@@ -511,6 +535,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         }
       });
     }
+    st.lastUseAt = Date.now();
+    st.dirty = false;
     return st;
   }
 
@@ -540,6 +566,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     st.lastMode = mode.label;
     let size = st.chunk;
     let sent = 0;
+    st.lastSent = 0;
     const parts = [];
     while (sent < bytes.length) {
       const end = Math.min(sent + size, bytes.length);
@@ -563,12 +590,18 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           parts.push("应答写入被拒，已自动切到无应答写入");
           continue;
         }
+        // 链路级失败（Chrome 报 GATT operation failed 那种）留个脏标记，
+        // 下次动手前必重建链路；这里不吞错，交给上层决定要不要重发。
+        if (isLinkError(err)) st.dirty = true;
         throw err;
       }
       sent = end;
+      st.lastSent = sent;
+      st.lastUseAt = Date.now();
       if (onProgress) onProgress(sent, bytes.length);
-      // 无应答写入没有流控，节奏太快打印机会丢数据
-      if (useNoResp) await sleep(15);
+      // 无应答写入没有流控，节奏太快打印机会丢数据（Windows 蓝牙栈缓冲一满
+      // 就报 GATT operation failed，所以按 20ms 走，别贪快）
+      if (useNoResp) await sleep(20);
     }
     return parts;
   }
@@ -589,18 +622,29 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         notices.push("（订阅通知失败：" + err.message + "）");
       }
     }
-    await action();
-    if (st.notify) await sleep(settle == null ? 900 : settle);
-    if (st.notify && handler) {
-      try { st.notify.stopNotifications(); } catch (err) { /* 就算了吧 */ }
-      st.notify.removeEventListener("characteristicvaluechanged", handler);
+    try {
+      await action();
+      if (st.notify) await sleep(settle == null ? 900 : settle);
+    } finally {
+      // 失败时也得退订。以前 action 抛错就直接跳出函数，订阅留着不撤，
+      // 下一次动作的回执里会混进上一轮的残留，越查越乱。
+      if (st.notify && handler) {
+        try { st.notify.stopNotifications(); } catch (err) { /* 就算了吧 */ }
+        st.notify.removeEventListener("characteristicvaluechanged", handler);
+      }
     }
     return notices;
   }
 
   async function bleSendRaw(bytes, label) {
     if (!LABEL.ble.char) throw new Error("蓝牙未连接");
-    const notices = await bleCaptureReceipts(() => bleWriteAll(bytes));
+    let notices = null;
+    try {
+      notices = await bleCaptureReceipts(() => bleWriteAll(bytes));
+    } catch (err) {
+      bleLogFail(label || "原始指令", bytesToHex(bytes), err);
+      throw err;
+    }
     LABEL.probeLog.unshift({
       at: new Date().toLocaleTimeString("zh-CN"),
       what: label || "原始指令",
@@ -620,8 +664,101 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     }
     LABEL.ble = {
       device: null, server: null, char: null, notify: null,
-      chunk: 20, services: [], writes: [],
+      chunk: 20, services: [], writes: [], lastUseAt: 0, dirty: false, lastSent: 0,
     };
+  }
+
+  /** 记一行到收发记录。失败也要记 —— 之前只有成功的动作才进日志，出问题时
+   *  日志里最新一条还是上一次成功，根本看不出是哪一步炸的（用户的截图就是
+   *  这种情况：面板报 GATT 失败，记录里却全是成功的打印）。 */
+  function bleLog(what, sent, recv, bad) {
+    LABEL.probeLog.unshift({
+      at: new Date().toLocaleTimeString("zh-CN"),
+      what: what,
+      sent: sent,
+      recv: recv,
+      bad: !!bad,
+    });
+    LABEL.probeLog = LABEL.probeLog.slice(0, 8);
+    renderBlePanel();
+  }
+
+  function bleLogFail(what, sent, err) {
+    bleLog(what, sent, "失败：" + ((err && err.message) || err), true);
+  }
+
+  // 打印机闲置一会儿会自己断开，而 Windows 上 Chrome 的 gatt.connected 常常
+  // 还报 true。这时第一包写进去就抛「GATT operation failed for unknown
+  // reason」，界面照旧显示「已连接」—— 以前遇到这种只能重启电脑，因为只有
+  // 重建链路能清掉它。阈值取 8 秒：一次打印动辄十几秒，宁可多花 1 秒重连。
+  const LINK_IDLE_MS = 8000;
+
+  /** 重建蓝牙链路：disconnect → connect → 重新枚举写特征。
+   *  force=true 时不管闲置多久都重建（打印前的保险）。 */
+  async function bleRefreshLink(force) {
+    const st = LABEL.ble;
+    if (!st.device) throw new Error("蓝牙未连接");
+    const idle = Date.now() - (st.lastUseAt || 0);
+    if (!force && !st.dirty && idle < LINK_IDLE_MS) return false;
+    const dev = st.device;
+    const why = st.dirty ? "上次写入失败" : "闲置 " + Math.round(idle / 1000) + " 秒";
+    try {
+      try {
+        if (dev.gatt && dev.gatt.connected) dev.gatt.disconnect();
+      } catch (e) {
+        /* 本来就已经断了，继续 */
+      }
+      // 断开的打印机要过一会儿才重新广播，150ms 就急着连回去会撞
+      // 「connection failed」。给两次机会、退让着来，比一次就判死强。
+      let last = null;
+      for (const wait of [300, 900]) {
+        await sleep(wait);
+        try {
+          await bleSetup(dev);
+          bleLog("重建蓝牙链路（" + why + "）", "disconnect → connect → 重枚举特征", "已连接");
+          return true;
+        } catch (e) {
+          last = e;
+        }
+      }
+      throw last || new Error("重建连接失败");
+    } catch (err) {
+      // 重建都失败，说明这头真的连不上（多半被手机汉码 App 占着）：把状态
+      // 清干净，别留一个看起来「已连接」的假象。
+      bleDisconnect();
+      renderBlePanel();
+      throw new Error(
+        "重建蓝牙连接失败（多半被手机上的汉码 App 占着）：关掉它，或把打印机开关机一次，" +
+        "再点「连接打印机」。"
+      );
+    }
+  }
+
+  /** 蓝牙动作互斥。两个 GATT 操作叠在一起时 Chrome 给的就是那句
+   *  「GATT operation failed for unknown reason」—— 打印还没发完又去点
+   *  查询/校准，看到的正是它。 */
+  async function withBleLock(fn) {
+    if (LABEL.busy) {
+      toast("上一个蓝牙动作还没结束，等它发完再点", "err");
+      return null;
+    }
+    LABEL.busy = true;
+    setBleButtons(true);
+    try {
+      return await fn();
+    } finally {
+      LABEL.busy = false;
+      setBleButtons(false);
+    }
+  }
+
+  /** 只切按钮的 disabled，不重建面板 —— 整块重建会把「原始指令」输入框里
+   *  刚敲的十六进制冲掉。 */
+  function setBleButtons(disabled) {
+    const host = document.getElementById("labelBlePanel");
+    if (!host || typeof host.querySelectorAll !== "function") return;
+    const list = host.querySelectorAll("button");
+    for (let i = 0; i < list.length; i++) list[i].disabled = !!disabled;
   }
 
   /* ── 对外动作 ───────────────────────────────────────────── */
@@ -685,69 +822,119 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
   }
 
   async function labelPrintBle() {
-    if (LABEL.busy) return;
-    LABEL.busy = true;
-    try {
+    return withBleLock(async () => {
       const cfg = loadCfg();
-      labelProgress("正在连接蓝牙…");
-      await bleConnect(cfg.showAll);
-      labelProgress("正在渲染标签…");
-      const canvas = await labelCanvas();
-      const raster = packRaster(canvas, cfg.density);
-      const job = buildEscPosJob(raster, cfg);
-      const started = Date.now();
-      // 打印也订阅通知抓回执：打印机收到/拒收数据多半会说一声，
-      // 「发送了却没打」时回执（或没有回执）就是第一手线索。
-      const notes = await bleCaptureReceipts(() =>
-        bleWriteAll(job, (sent, total) => {
-          labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-        })
-      );
-      const secs = ((Date.now() - started) / 1000).toFixed(1);
-      const mode = LABEL.ble.lastMode || "应答写入";
-      LABEL.probeLog.unshift({
-        at: new Date().toLocaleTimeString("zh-CN"),
-        what: "打印作业（" + mode + "）",
-        sent: job.length + " 字节 · 分包 " + LABEL.ble.chunk,
-        recv: notes.length ? notes.join(" | ") : "无回执",
-      });
-      LABEL.probeLog = LABEL.probeLog.slice(0, 8);
-      labelProgress(
-        "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节（" + mode + "）" +
-        (notes.length ? "；回执 " + notes.join(" | ") : "；无回执")
-      );
-      toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
-      renderBlePanel();
-    } catch (err) {
-      labelProgress("失败：" + err.message);
-      toast(err.message, "err");
-    } finally {
-      LABEL.busy = false;
-    }
+      let job = null;
+      try {
+        labelProgress("正在连接蓝牙…");
+        await bleConnect(cfg.showAll);
+        // 打印是重活：50×30 标签 12KB、按 20 字节分包要发十几秒，值得先花
+        // 1 秒把链路重建一遍 —— 僵尸连接下第一包就报 GATT 失败，白等一场
+        // 不如先清干净。重连不会重置打印机，间隙学习结果还在。
+        labelProgress("正在重建蓝牙链路…");
+        await bleRefreshLink(true);
+        labelProgress("正在渲染标签…");
+        const canvas = await labelCanvas();
+        const raster = packRaster(canvas, cfg.density);
+        job = buildEscPosJob(raster, cfg);
+
+        let notes = [];
+        let secs = "0.0";
+        for (let attempt = 0; ; attempt++) {
+          const started = Date.now();
+          try {
+            // 打印也订阅通知抓回执：打印机收到/拒收数据多半会说一声，
+            // 「发送了却没打」时回执（或没有回执）就是第一手线索。
+            notes = await bleCaptureReceipts(() =>
+              bleWriteAll(job, (sent, total) => {
+                labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
+              })
+            );
+            secs = ((Date.now() - started) / 1000).toFixed(1);
+            break;
+          } catch (err) {
+            // 连第一包都没出去就断链：打印机那头什么都没收到，整份重发是干净的。
+            // 超过 5% 就不自动重发了 —— 机器里已经存了半张位图，重发会打出
+            // 一张残缺标签，得不偿失，交给用户决定。
+            const early = (LABEL.ble.lastSent || 0) < job.length * 0.05;
+            if (attempt === 0 && early && isLinkError(err)) {
+              bleLogFail("打印中断（0 字节，自动重试 1 次）", "0 / " + job.length + " 字节", err);
+              labelProgress("链路断了，正在重连并重发…");
+              await sleep(400);
+              try {
+                await bleRefreshLink(true);
+              } catch (e2) {
+                /* 重建也失败：按原错误报出去，人话提示比这条更贴切 */
+              }
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        const mode = LABEL.ble.lastMode || "应答写入";
+        LABEL.probeLog.unshift({
+          at: new Date().toLocaleTimeString("zh-CN"),
+          what: "打印作业（" + mode + "）",
+          sent: job.length + " 字节 · 分包 " + LABEL.ble.chunk,
+          recv: notes.length ? notes.join(" | ") : "无回执",
+        });
+        LABEL.probeLog = LABEL.probeLog.slice(0, 8);
+        labelProgress(
+          "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节（" + mode + "）" +
+          (notes.length ? "；回执 " + notes.join(" | ") : "；无回执")
+        );
+        toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
+        renderBlePanel();
+      } catch (err) {
+        const hint = bleErrorHint(err);
+        // 失败也进记录：不然面板报错、日志里最新一条还是上次成功，无从定位
+        bleLogFail(
+          "打印作业",
+          (job ? (LABEL.ble.lastSent || 0) + " / " + job.length + " 字节" : "—"),
+          err
+        );
+        labelProgress("失败：" + hint);
+        toast(hint, "err");
+      }
+    });
   }
 
   async function labelBleProbe() {
-    try {
-      await bleConnect(loadCfg().showAll);
-      if (!LABEL.ble.notify) {
-        LABEL.probeLog.unshift({
-          at: new Date().toLocaleTimeString("zh-CN"),
-          what: "状态查询",
-          sent: "10 04 04",
-          recv: "该设备没有可通知的特征，无法读回执",
-        });
-      } else {
-        await bleSendRaw(parseHex("10 04 04"), "状态查询 DLE EOT 4");
+    return withBleLock(async () => {
+      try {
+        await bleConnect(loadCfg().showAll);
+        await bleRefreshLink(false);
+        if (!LABEL.ble.notify) {
+          bleLog("状态查询", "10 04 04", "该设备没有可通知的特征，无法读回执");
+        } else {
+          await bleSendRaw(parseHex("10 04 04"), "状态查询 DLE EOT 4");
+        }
+        renderBlePanel();
+      } catch (err) {
+        toast(bleErrorHint(err), "err");
       }
-      renderBlePanel();
-    } catch (err) {
-      toast(err.message, "err");
-    }
+    });
+  }
+
+  /** 手动重建链路：僵尸连接（界面显示已连接、写入全进黑洞）的解法。 */
+  async function labelBleReconnect() {
+    return withBleLock(async () => {
+      try {
+        await bleConnect(loadCfg().showAll);
+        await bleRefreshLink(true);
+        toast("已重建蓝牙链路（僵尸连接清掉了）", "ok");
+      } catch (err) {
+        toast(bleErrorHint(err), "err");
+      }
+    });
   }
 
   async function labelBleCalibrate() {
+    return withBleLock(async () => {
     try {
       await bleConnect(loadCfg().showAll);
+      await bleRefreshLink(false);
       // 官方知识库：1d 73 65 74 4c = GS "setL"，间隙/黑标学习。
       // 学习完成后打印机会停在「间隙对齐打印头」的位置，不会倒回上一张 ——
       // 这是刻意的：那个停位就是下一张标签的起点，接着打印正好从这走。
@@ -761,23 +948,32 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       }
       renderBlePanel();
     } catch (err) {
-      toast(err.message, "err");
+      toast(bleErrorHint(err), "err");
     }
+    });
   }
 
   async function labelBleRaw() {
     const box = document.getElementById("labelRawHex");
     if (!box) return;
+    // 先把输入框里的字节解析出来再进锁：锁会重绘面板，输入框是新的空元素，
+    // 解析放后面会变成「点了发送却说没有可发送的字节」。
+    const bytes = parseHex(box.value);
+    if (!bytes.length) {
+      toast("没有可发送的字节", "err");
+      return;
+    }
+    return withBleLock(async () => {
     try {
       await bleConnect(loadCfg().showAll);
-      const bytes = parseHex(box.value);
-      if (!bytes.length) throw new Error("没有可发送的字节");
+      await bleRefreshLink(false);
       await bleSendRaw(bytes, "手动原始指令");
       renderBlePanel();
       toast("已发送 " + bytes.length + " 字节", "ok");
     } catch (err) {
-      toast(err.message, "err");
+      toast(bleErrorHint(err), "err");
     }
+    });
   }
 
   function labelBleDisconnect() {
@@ -822,14 +1018,21 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       )
       .join("");
 
+    // 失败行标红：否则一眼扫过去分不清「发成功但没出纸」和「根本没发出去」
     const logRows = LABEL.probeLog
       .map(
         (r) =>
-          "<li><b>" + esc(r.at) + "</b> " + esc(r.what) +
+          "<li><b" + (r.bad ? ' style="color:var(--red)"' : "") + ">" + esc(r.at) + "</b> " +
+          '<span' + (r.bad ? ' style="color:var(--red)"' : "") + ">" + esc(r.what) + "</span>" +
           '<div class="tiny muted">发送：' + esc(r.sent) + "</div>" +
-          '<div class="tiny muted">回执：' + esc(r.recv) + "</div></li>"
+          '<div class="tiny' + (r.bad ? "" : " muted") + '"' +
+            (r.bad ? ' style="color:var(--red)"' : "") + ">回执：" + esc(r.recv) + "</div></li>"
       )
       .join("");
+
+    // 动作进行中把按钮禁掉：两个 GATT 操作叠在一起，Chrome 报的就是
+    // 「GATT operation failed for unknown reason」（点太快时的经典死法）。
+    const dis = LABEL.busy ? " disabled" : "";
 
     host.innerHTML =
       '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">' +
@@ -841,8 +1044,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         "</span>" +
         '<span class="spacer"></span>' +
         (connected
-          ? '<button class="sm" onclick="labelBleDisconnect()">断开</button>'
-          : '<button class="sm" onclick="labelBleConnect()">连接打印机</button>') +
+          ? '<button class="sm" onclick="labelBleDisconnect()"' + dis + ">断开</button>"
+          : '<button class="sm" onclick="labelBleConnect()"' + dis + ">连接打印机</button>") +
       "</div>" +
       (connected
         ? '<div class="small muted" style="margin-top:6px">写特征 <code>' + esc(st.char.uuid) +
@@ -850,12 +1053,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
           " · 分包 " + st.chunk + " 字节 · 服务 " + st.services.length + " 个</div>"
         : "") +
       '<div class="label-ble-tests">' +
-        '<button class="sm" onclick="labelBleProbe()">查询状态（不耗纸）</button>' +
-        '<button class="sm" onclick="labelBleCalibrate()">间隙学习（走一段纸）</button>' +
+        '<button class="sm" onclick="labelBleProbe()"' + dis + ">查询状态（不耗纸）</button>" +
+        '<button class="sm" onclick="labelBleReconnect()"' + dis + ">重建链路（治僵尸连接）</button>" +
+        '<button class="sm" onclick="labelBleCalibrate()"' + dis + ">间隙学习（走一段纸）</button>" +
       "</div>" +
       '<label class="field" style="margin-top:10px"><span>原始指令（十六进制）</span>' +
         '<input id="labelRawHex" placeholder="例如 1B 40" /></label>' +
-      '<button class="sm" onclick="labelBleRaw()">发送原始指令</button>' +
+      '<button class="sm" onclick="labelBleRaw()"' + dis + ">发送原始指令</button>" +
       (svcRows ? '<details class="label-diag"><summary>发现的服务与特征</summary><ul>' + svcRows + "</ul></details>" : "") +
       (logRows ? '<details class="label-diag" open><summary>收发记录</summary><ul>' + logRows + "</ul></details>" : "");
   }
@@ -947,12 +1151,17 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "若固件拒绝应答写入会自动切到无应答写入。分包固定 20 字节（这台机器的链路 MTU " +
       "协商不到大值，包大了会被静默截断——之前「只打出标签头一条」就是它），" +
       "所以每张标签发送约需 6~15 秒，属正常速度别当卡死。" +
+      "打印机闲置一会儿会自己断链，而 Windows 上 Chrome 的 <code>gatt.connected</code> 还报真，" +
+      "这时第一包写入就抛 <code>GATT operation failed for unknown reason</code>（界面却仍显示" +
+      "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>每次打印前会自动重建一次链路</b>" +
+      "（约 1 秒，不会重置打印机），断了还会自动重连重发一次；面板上也有「重建链路」按钮可手动清。" +
       "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
       "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
       "② 打印机开关机一次再连（清掉它那头僵死的旧连接，比重启电脑快）；" +
-      "③ 把「写入方式」切到无应答写入再打；" +
-      "④ 点「查询状态」看「收发记录」：有回执说明链路通，可调浓度或换尺寸重试；" +
-      "完全没回执则是指令集不匹配，可以用「原始指令」手工试协议。</p>";
+      "③ 报 GATT 失败说明是链路问题而不是指令问题，先切回「应答写入」再试" +
+      "（无应答写入没有流控，发太快 Windows 会直接掐链路）；" +
+      "④ 点「查询状态」看「收发记录」：<b>失败也会记进去并标红</b>，有回执说明链路通、" +
+      "可调浓度或换尺寸重试；完全没回执则是指令集不匹配，可以用「原始指令」手工试协议。</p>";
 
     openModal(
       "标签打印",
@@ -1054,7 +1263,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, isLinkError, bleErrorHint };
 
   Object.assign(window, {
     openLabelDialog,
@@ -1062,6 +1271,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelDownload,
     labelPrintBle,
     labelBleProbe,
+    labelBleReconnect,
     labelBleCalibrate,
     labelBleRaw,
     labelBleDisconnect,
@@ -1071,7 +1281,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         renderBlePanel();
         toast("蓝牙已连接", "ok");
       } catch (err) {
-        toast(err.message, "err");
+        toast(bleErrorHint(err), "err");
       }
     },
     labelA4,
