@@ -75,8 +75,7 @@ const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintBle",
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity",
-  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickTune", "labelPickLegacy", "labelPickShowAll",
+  "labelPickDensity", "labelPickCopies", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -88,9 +87,6 @@ function testExports() {
   check("mm2dot 可调用", typeof mm2dot === "function");
   check("packRaster 可调用", typeof packRaster === "function");
   check("buildEscPosJob 可调用", typeof buildEscPosJob === "function");
-  check("renderLabel 可调用", typeof sandbox.labelDebug.renderLabel === "function");
-  check("layoutOf 可调用", typeof sandbox.labelDebug.layoutOf === "function");
-  check("qrBoxFor 可调用", typeof sandbox.labelDebug.qrBoxFor === "function");
   const missing = REQUIRED_HANDLERS.filter((n) => typeof sandbox[n] !== "function");
   check(`onclick 处理器全部导出（${REQUIRED_HANDLERS.length} 个）`, missing.length === 0,
     "缺失：" + missing.join(","));
@@ -180,7 +176,6 @@ function testEscPosJob() {
     widthDots: 16,
   };
 
-  // 默认「按间隙定位」：每张位图后 FF（0x0C），最后一张再 ESC d n 送过撕纸口
   const job = buildEscPosJob(raster, { copies: 1, feed: 3 });
   const head = Array.from(job.slice(0, 8));
   check("以 ESC @ 复位开头", head[0] === 0x1b && head[1] === 0x40, head.join(","));
@@ -195,91 +190,31 @@ function testEscPosJob() {
   check("位图数据紧随其后（不丢不改）",
     Array.from(job.slice(16, 20)).join(",") === "170,187,204,221",
     Array.from(job.slice(16, 20)).join(","));
-  check("位图后接 FF（0x0C）按间隙走纸",
-    job[20] === 0x0c, "0x" + job[20].toString(16));
-  check("最后一张再 ESC d 3 送过撕纸口",
-    job[21] === 0x1b && job[22] === 0x64 && job[23] === 3,
-    `${job[21]},${job[22]},${job[23]}`);
-  check("单份长度 = 2+6+8+4+1+3 = 24", job.length === 24, String(job.length));
+  check("以 ESC d 3 走纸收尾",
+    job[20] === 0x1b && job[21] === 0x64 && job[22] === 3,
+    `${job[20]},${job[21]},${job[22]}`);
+  check("单份长度 = 2+6+8+4+3 = 23", job.length === 23, String(job.length));
 
   const two = buildEscPosJob(raster, { copies: 2, feed: 3 });
-  check("两份 = 2+6+2×(8+4+1)+3 = 37", two.length === 37, String(two.length));
-  check("第一张位图后就是 FF（串位修复的关键：每张按间隙对齐）",
-    two[20] === 0x0c && two[21] === 0x1d && two[22] === 0x76,
-    Array.from(two.slice(19, 24)).join(","));
-  check("第二份仍是完整光栅报文",
-    two[21] === 0x1d && two[22] === 0x76 && two[23] === 0x30 && two[24] === 0x00 &&
-      two[25] === 0x02 && two[27] === 0x02,
-    Array.from(two.slice(21)).join(","));
-  check("收尾 = 位图 + FF + ESC d 3",
-    two[33] === 0x0c && two[34] === 0x1b && two[35] === 0x64 && two[36] === 3,
-    Array.from(two.slice(33)).join(","));
+  check("两份 = 2+6+2×(8+4+3) = 38", two.length === 38, String(two.length));
+  // 第 2 份从第 23 字节开始（2 复位 + 6 标签模式 + 15 第一份）
+  check("两份的第二份仍是完整报文",
+    two[23] === 0x1d && two[24] === 0x76 && two[25] === 0x30 && two[26] === 0x00 &&
+      two[27] === 0x02 && two[29] === 0x02 && two[37] === 3,
+    Array.from(two.slice(23)).join(","));
+  check("两份逐字节相同（除长度翻倍）",
+    Array.from(two.slice(8, 23)).join(",") === Array.from(two.slice(23, 38)).join(","),
+    Array.from(two.slice(23, 38)).join(","));
 
-  // 旧行为兜底：feedMode="lines" 时保持历史报文（每张后 ESC d 固定行数）
-  const legacy = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "lines" });
-  check("lines 模式 = 旧行为 23 字节", legacy.length === 23, String(legacy.length));
-  check("lines 模式以 ESC d 3 收尾（没有 FF）",
-    legacy[20] === 0x1b && legacy[21] === 0x64 && legacy[22] === 3,
-    `${legacy[20]},${legacy[21]},${legacy[22]}`);
-  const legacyTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "lines" });
-  check("lines 模式两份逐字节相同（除长度翻倍）",
-    Array.from(legacyTwo.slice(8, 23)).join(",") === Array.from(legacyTwo.slice(23, 38)).join(","),
-    Array.from(legacyTwo.slice(23, 38)).join(","));
-
-  // auto 模式：完全不发走纸指令，标签模式下固件自己按间隙走（FF 仍串位机的对比档）
-  const autoJob = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "auto" });
-  check("auto 模式 = 纯位图 20 字节（无 FF、无 ESC d）", autoJob.length === 20, String(autoJob.length));
-  check("auto 模式不含走纸指令",
-    !Array.from(autoJob).includes(0x0c) && autoJob[20] === undefined,
-    Array.from(autoJob.slice(18)).join(","));
-  const autoTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "auto" });
-  check("auto 模式两份 = 2+6+2×12 = 32，报文逐字节相同",
-    autoTwo.length === 32 &&
-      Array.from(autoTwo.slice(8, 20)).join(",") === Array.from(autoTwo.slice(20, 32)).join(","),
-    String(autoTwo.length));
-
-  // 页模式（官方手册写法）：ESC L 进页模式 → 位图 → ESC FF 打印并走到下一张起点。
-  // 手册白纸黑字：有标纸下 FF 只在页模式才定位，标准模式下 FF ≡ LF（只走一行）
-  // —— 老版本在标准模式下发裸 FF 正是串位的根因。
-  const pageJob = buildEscPosJob(raster, { copies: 1, feed: 3, feedMode: "page" });
-  check("page 模式以 ESC L（1B 4C）进页模式",
-    pageJob[8] === 0x1b && pageJob[9] === 0x4c, `${pageJob[8]},${pageJob[9]}`);
-  check("page 模式位图后接 ESC FF（1B 0C）——不是裸 FF",
-    pageJob[22] === 0x1b && pageJob[23] === 0x0c, `${pageJob[22]},${pageJob[23]}`);
-  check("page 模式单份 = 2+6+2+12+2 = 24 字节", pageJob.length === 24, String(pageJob.length));
-  const pageTwo = buildEscPosJob(raster, { copies: 2, feed: 3, feedMode: "page" });
-  check("page 模式两份各带一次进页模式+ESC FF（不累积串位）",
-    pageTwo.length === 40 &&
-      pageTwo[8] === 0x1b && pageTwo[9] === 0x4c &&
-      pageTwo[22] === 0x1b && pageTwo[23] === 0x0c &&
-      pageTwo[24] === 0x1b && pageTwo[25] === 0x4c,
-    String(pageTwo.length));
-
-  check("份数 0 兜底成 1 份",
-    buildEscPosJob(raster, { copies: 0, feed: 3 }).length === 24,
-    String(buildEscPosJob(raster, { copies: 0, feed: 3 }).length));
+  check("份数 0 兜底成 1 份", buildEscPosJob(raster, { copies: 0 }).length === 23,
+    String(buildEscPosJob(raster, { copies: 0 }).length));
   check("份数超上限夹到 50",
-    buildEscPosJob(raster, { copies: 999, feed: 3 }).length === 2 + 6 + 50 * 13 + 3,
-    String(buildEscPosJob(raster, { copies: 999, feed: 3 }).length));
-  check("feed 缺省按 0（不崩，也不发 ESC d）", buildEscPosJob(raster, {}).length === 21);
-  // 走纸微调：固件定位不准时由用户手动补点行，默认 0 必须完全不加指令
-  check("tune 缺省 0 = 不加任何指令（老行为字节数不变）",
-    buildEscPosJob(raster, { copies: 2, feed: 2 }).length ===
-      buildEscPosJob(raster, { copies: 2, feed: 2, tune: 0 }).length);
-  const tuned = buildEscPosJob(raster, { copies: 1, feed: 2, tune: 6 });
-  const plain = buildEscPosJob(raster, { copies: 1, feed: 2 });
-  check("tune 6 = 末尾多一组 ESC d 6（3 字节）",
-    tuned.length === plain.length + 3 && tuned[tuned.length - 1] === 6 &&
-      tuned[tuned.length - 3] === 0x1b && tuned[tuned.length - 2] === 0x64,
-    `${tuned.length} vs ${plain.length}`);
-  check("tune 超上限夹到 255（ESC d 只收 1 字节行数）",
-    buildEscPosJob(raster, { copies: 1, tune: 999 }).slice(-1)[0] === 255);
-  check("tune 负数夹成 0（不发出负数行数）",
-    buildEscPosJob(raster, { copies: 1, tune: -8 }).length === 21,
-    String(buildEscPosJob(raster, { copies: 1, tune: -8 }).length));
-  check("feed 负数夹成 0（同样省掉 ESC d）",
-    buildEscPosJob(raster, { copies: 1, feed: -5 }).length === 21,
-    String(buildEscPosJob(raster, { copies: 1, feed: -5 }).length));
+    buildEscPosJob(raster, { copies: 999 }).length === 2 + 6 + 50 * 15,
+    String(buildEscPosJob(raster, { copies: 999 }).length));
+  check("feed 缺省按 0（不崩）", buildEscPosJob(raster, {}).length === 23);
+  check("feed 负数夹成 0",
+    buildEscPosJob(raster, { copies: 1, feed: -5 })[22] === 0,
+    String(buildEscPosJob(raster, { copies: 1, feed: -5 })[22]));
 
   // 403 点宽（50mm @ 203dpi）时行宽高字节仍要为 0，不能溢出成 0x00 0x00 之外的值
   const wide = buildEscPosJob(
@@ -328,8 +263,6 @@ async function testDialogHtml() {
   check("含尺寸预设", html.includes("50×30 mm"));
   check("含 dpi 选项", html.includes('value="203"') && html.includes('value="300"'));
   check("含浓度与份数", html.includes('id="labelDensity"') && html.includes('id="labelCopies"'));
-  check("含走纸方式选项（默认按间隙定位）",
-    html.includes('id="labelFeedMode"') && html.includes("按间隙定位") && html.includes("固定行数"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
   check("含预览挂点", html.includes('id="labelPreviewHost"'));
   check("提示语提到 T260LR 蓝牙方案", html.includes("T260LR"));
@@ -356,239 +289,12 @@ async function testDialogHtml() {
   }
 }
 
-/* ── 5. 版式与二维码倍率（桩 canvas / Image，真跑 renderLabel） ──── */
-// 二维码必须 1:1 贴进 1 位位图：一旦缩放，模块边界糊成灰边就扫不出来。
-// 所以倍率只能是整数；这里用桩把 drawImage / fillText 的实际坐标记下来，
-// 直接验「二维码多大、贴在哪、有没有压到文字」，比对着预览图目测可靠。
-const MODULES = 33; // 服务端 X-QR-Modules 的实测值（已含静区）
-
-function fakeImage() {
-  const img = { naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null, _src: "" };
-  Object.defineProperty(img, "src", {
-    get: () => img._src,
-    set: (value) => {
-      img._src = value;
-      const m = /box=(\d+)/.exec(value);
-      const box = m ? Number(m[1]) : 4;
-      // 服务端就是按「模块数 × 整数倍率」出图的
-      img.naturalWidth = MODULES * box;
-      img.naturalHeight = MODULES * box;
-      setTimeout(() => img.onload && img.onload(), 0);
-    },
-  });
-  return img;
-}
-
-function fakeContext(log) {
-  const ctx = {
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    textBaseline: "",
-    fillRect: (x, y, w, h) => log.fills.push({ x, y, w, h }),
-    strokeRect: () => { log.strokes += 1; },
-    fillText: (text, x, y) => log.texts.push({ text, x, y, width: ctx.measureText(text).width, size: ctx._size }),
-    drawImage: (img, x, y) => log.images.push({ x, y, w: img.naturalWidth, h: img.naturalHeight, src: img.src }),
-    measureText: (text) => {
-      const size = ctx._size || 16;
-      let width = 0;
-      for (const ch of String(text)) width += /[\u2e80-\uffff]/.test(ch) ? size : size * 0.55;
-      return { width };
-    },
-  };
-  Object.defineProperty(ctx, "font", {
-    get: () => ctx._font || "",
-    set: (value) => {
-      ctx._font = value;
-      const m = /(\d+(?:\.\d+)?)px/.exec(value);
-      ctx._size = m ? parseFloat(m[1]) : 16;
-    },
-  });
-  return ctx;
-}
-
-async function testRenderedLayout() {
-  console.log("== 实际渲染版式（50×30 @203dpi） ==");
-  const log = { fills: [], texts: [], images: [], strokes: 0 };
-  sandbox.Image = function Image() { return fakeImage(); };
-  sandbox.document.createElement = () => ({
-    width: 0,
-    height: 0,
-    style: {},
-    getContext: () => fakeContext(log),
-  });
-
-  const spool = {
-    id: 3, name: "魔创 PLA 天蓝色", brand: "魔创", material: "PLA", finish: "普通",
-    color_name: "天蓝色", color_hex: "#147DB5", location: "",
-    remaining_weight: 218, initial_weight: 1000, remaining_percent: 22, is_low: true,
-  };
-  const cfg = { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, showAll: false };
-  const canvas = await sandbox.labelDebug.renderLabel(spool, cfg);
-
-  check("画布 = 标签实际点数 400×240", canvas.width === 400 && canvas.height === 240,
-    `${canvas.width}×${canvas.height}`);
-
-  check("只贴了一张图（二维码），没有别的图片元素", log.images.length === 1, String(log.images.length));
-  const qr = log.images[0] || { x: 0, y: 0, w: 0, h: 0, src: "" };
-  check("二维码是正方形", qr.w === qr.h, `${qr.w}×${qr.h}`);
-  check("二维码 1:1 贴入（未缩放 = 服务端出图尺寸）", qr.w === MODULES * Math.round(qr.w / MODULES) && qr.w > 0,
-    String(qr.w));
-  check("二维码至少占标签宽度 45%", qr.w / canvas.width >= 0.45,
-    `${((qr.w / canvas.width) * 100).toFixed(0)}%`);
-  check("二维码不超出标签高度", qr.h <= canvas.height, String(qr.h));
-  const padMm = Math.max(1.1, 50 * 0.032);
-  const padDots = Math.round(mm2dot(padMm, 203));
-  check("二维码贴在右侧（留出左边距）", qr.x === canvas.width - padDots - qr.w, String(qr.x));
-  check("二维码自上边距开始，占满整列", qr.y === padDots, String(qr.y));
-
-  const boxes = log.images.concat().map((i) => /box=(\d+)/.exec(i.src)).map((m) => (m ? Number(m[1]) : 0));
-  check("只按整数倍率取图", boxes.every((b) => Number.isInteger(b) && b >= 1), boxes.join(","));
-
-  check("画了文字", log.texts.length >= 4, String(log.texts.length));
-  check("名字从最左边距开始（色块已移除）",
-    log.texts.length > 0 && Math.abs(log.texts[0].x - mm2dot(padMm, 203)) < 0.5,
-    log.texts.length ? String(log.texts[0].x) : "无文字");
-  // 四行结构（0.3.6 定稿）：品牌 / 类型·外观 / 名字（剥掉品牌材料后的颜色名）/ 余量
-  const texts = log.texts.map((t) => t.text);
-  check("第一行 = 品牌", texts[0] === "魔创", texts.join(" | "));
-  check("第二行 = 类型（普通外观不写）", texts[1] === "PLA", texts.join(" | "));
-  check("第三行 = 名字剥掉品牌材料后剩下的颜色名", texts[2] === "天蓝色", texts.join(" | "));
-  check("第四行 = 余量 + 总量（一行写完）", texts[3] === "余 218 g / 1000 g", texts.join(" | "));
-  const overflow = log.texts.filter((t) => t.x + t.width > qr.x - 1);
-  check("文字都让开了二维码", overflow.length === 0,
-    overflow.map((t) => `${t.text}@${Math.round(t.x + t.width)}>${qr.x}`).join(","));
-  check("整串名字不再作为标题出现（不跟前三行重复）",
-    !texts.some((t) => t.includes("魔创 PLA")), texts.join(" | "));
-  check("页脚带编号与色值，但不重复颜色名",
-    texts.some((t) => t.includes("#3") && t.includes("#147DB5") && !t.includes("天蓝色")),
-    texts.join(" | "));
-  const allText = texts.join(" | ");
-  check("百分比与「偏低」标记已移除", !allText.includes("%") && !allText.includes("偏低"), allText);
-  check("没有画色块（fillRect 只有铺白底）", log.fills.length <= 1 && log.strokes === 0,
-    `fills=${log.fills.length} strokes=${log.strokes}`);
-
-  // 纵向不留大片空白：各行基线均分，末行与页脚之间也不能空出一大块
-  // （页脚是最后画的一行，单独固定在底部，不参与均分）
-  const ys = log.texts.slice(0, log.texts.length - 1).map((t) => t.y);
-  const gaps = ys.slice(1).map((y, i) => y - ys[i]);
-  check("各行基线均匀分布（相邻间距差 ≤ 2px）",
-    Math.max(...gaps) - Math.min(...gaps) <= 2,
-    gaps.map((g) => Math.round(g)).join(","));
-  const gapToFoot = mm2dot(cfg.hMm * 0.91, 203) - ys[ys.length - 1];
-  const stepDots = ys[1] - ys[0];
-  check("末行到页脚的空隙不超过行距（不成一大块空白）", gapToFoot <= stepDots + 2,
-    `${Math.round(gapToFoot)} vs ${Math.round(stepDots)}`);
-
-  // 名字是手动起的（不含品牌/材料/颜色）时：前三行照写、名字原样保留、页脚补颜色名
-  const log3 = { fills: [], texts: [], images: [], strokes: 0 };
-  sandbox.document.createElement = () => ({
-    width: 0,
-    height: 0,
-    style: {},
-    getContext: () => fakeContext(log3),
-  });
-  const bareSpool = Object.assign({}, spool, { name: "我的第 3 盘料", finish: "丝绸" });
-  await sandbox.labelDebug.renderLabel(bareSpool, cfg);
-  const bareTexts = log3.texts.map((t) => t.text).join(" | ");
-  check("手动名字原样当第三行（不被剥坏）",
-    log3.texts.some((t) => t.text === "我的第 3 盘料"), bareTexts);
-  check("第二行带外观（PLA · 丝绸）",
-    log3.texts.some((t) => t.text === "PLA · 丝绸"), bareTexts);
-  check("手动名字不含颜色名时页脚补上（#3 · 天蓝色 · #147DB5）",
-    log3.texts.some((t) => t.text.includes("#3") && t.text.includes("天蓝色") && t.text.includes("#147DB5")),
-    bareTexts);
-
-  // 二维码放大到近半张标签后，文字列只剩 ~21mm —— 长名字必须靠缩字号整串放下，
-  // 一旦被截成「Polymaker PETG …」就白瞎了一行。
-  const log2 = { fills: [], texts: [], images: [], strokes: 0 };
-  sandbox.document.createElement = () => ({
-    width: 0,
-    height: 0,
-    style: {},
-    getContext: () => fakeContext(log2),
-  });
-  const longSpool = Object.assign({}, spool, { name: "Polymaker PETG 黑色" });
-  await sandbox.labelDebug.renderLabel(longSpool, cfg);
-  check("长名字不被截断（缩到 62% 下限仍放得下）",
-    log2.texts.some((t) => t.text === longSpool.name),
-    log2.texts.map((t) => t.text).join(" | "));
-}
-
-/* ── 7. 蓝牙报错翻译 ────────────────────────────────────────── */
-// 「GATT operation failed for unknown reason」是 Windows 上链路断掉时的兜底
-// 文案（设备断了、写不进去，Chrome 都归到这句）。它曾经原样弹给用户看 ——
-// 用户截图里那句英文就是这么来的。这里钉住：链路错误要认得出来、要翻成
-// 能照做的人话，而且不许把别的错误也吞成人话。
-function testBleErrors() {
-  console.log("== 蓝牙报错翻译 ==");
-  const { isLinkError, bleErrorHint } = sandbox.labelDebug || {};
-  check("isLinkError 已导出", typeof isLinkError === "function");
-  check("bleErrorHint 已导出", typeof bleErrorHint === "function");
-  if (typeof isLinkError !== "function" || typeof bleErrorHint !== "function") return;
-
-  check("认得出 GATT operation failed",
-    isLinkError(new Error("GATT operation failed for unknown reason")) === true);
-  check("认得出服务断连",
-    isLinkError(new Error("GATT Server is disconnected. Cannot perform GATT operations.")) === true);
-  check("普通错误不当链路错误",
-    isLinkError(new Error("没有可发送的字节")) === false);
-
-  const hint = bleErrorHint(new Error("GATT operation failed for unknown reason"));
-  check("链路错误翻成中文并给出处置步骤",
-    /链路/.test(hint) && /汉码 App/.test(hint) && !/GATT operation failed/.test(hint), hint.slice(0, 50));
-  check("未连接单独一条提示",
-    /连接打印机/.test(bleErrorHint(new Error("蓝牙未连接"))), bleErrorHint(new Error("蓝牙未连接")));
-  check("无关错误原样透出（不吞）",
-    bleErrorHint(new Error("没有可发送的字节")) === "没有可发送的字节");
-}
-
-/* ── 8. 写入并发与掉链防护（源码级断言）────────────────────── */
-// 并发提速是把双刃剑：这台 HM-T260LR 在途 2 包以上就掉链路（0.12.9 把
-// 默认设成 6，结果从「慢但能打」变成「打不了」）。所以默认必须是 1，
-// 且并发失败要能自动降级回串行。
-function testWritePipeline() {
-  console.log("== 写入并发与掉链防护 ==");
-  const src = fs.readFileSync(SRC, "utf8");
-  check("并发默认值 = 1（最稳，老版行为）",
-    /writePipe:\s*1/.test(src) || /writePipe\s*=\s*1/.test(src));
-  check("并发可调但仍受夹取上限", /Math\.max\(1,\s*Math\.min\(8,/.test(src));
-  check("并发失败自动降级回串行重发", /并发写入失败，已降级为逐包串行重发/.test(src));
-  check("写入仍是应答写入（有 writeValue）", /st\.char\.writeValue\(chunk\)/.test(src));
-  check("无应答写入每包前查链路",
-    /无应答写入：串行 [\s\S]{0,200}gatt\.connected/.test(src) ||
-      (src.indexOf("writeValueWithoutResponse(chunk)") > -1 &&
-       /发到第 " \+ sent \+ " 字节时蓝牙链路已断开/.test(src)));
-  check("掉链报错给「切回应答写入」的指引",
-    /切回「应答写入」重打/.test(src));
-  // 官方 FAQ：定位不准要「先设置纸张类型，再做校准学习」，顺序反了学习无效
-  check("间隙学习回执窗口 ≥3 秒（学习要走纸 2~3 秒，900ms 抓不到 OK）", /3000\s*\n?\s*\)/.test(src));
-  check("间隙学习先发 setp 01 再发 setL（官方顺序）",
-    /1D 73 65 74 70 01 1D 73 65 74 4C/.test(src));
-  check("打印作业回执窗口 ≥2 秒（finished 在打完才来）",
-    /\), 2000\s*\n\s*\);/.test(src) || /, 2000\s*\);/.test(src));
-  // 经典发送模式（首版 e78914a 同款）：用户实测首版能打，现行方案打不动 →
-  // 必须能一键切回首版发送路径：182 大包、无应答优先、不重建、不抓回执。
-  check("经典模式开关存在并持久化（cfg.legacy + labelPickLegacy）",
-    /cfg\.legacy = !!checked/.test(src) && /legacy: false/.test(src));
-  check("经典模式用首版的 182 字节大包", /legacy \? 182 : st\.chunk/.test(src));
-  check("经典模式优先无应答写入（特征支持就选它）",
-    /if \(cfg\.legacy\) \{\s*\n\s*return \{\s*\n\s*noResp: canFast \|\| !canAck,/.test(src));
-  check("经典模式打印前不重建链路（首版没有这一步）",
-    /if \(!cfg\.legacy\) \{\s*\n\s*labelProgress\("正在重建蓝牙链路/.test(src));
-  check("经典模式打印不订阅通知抓回执",
-    /if \(cfg\.legacy\) \{\s*\n\s*await send\(\);\s*\n\s*notes = \[\];/.test(src));
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testMm2dot();
   testPackRaster();
   testEscPosJob();
-  testBleErrors();
-  testWritePipeline();
   await testDialogHtml();
-  await testRenderedLayout();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {
     console.log("失败项：", FAILED);
