@@ -162,8 +162,11 @@
     // writePipe = 同时在途的写入包数。默认 1 = 最稳的老行为（发一个等一个，
     // 12KB 约 60 秒但几乎不掉链路）；这台 HM-T260LR 实测并发一上去就掉链路，
     // 所以提速是可选的（4 / 8），且失败会自动降级回 1。
+    // tune = 每张之后额外补走的点行数（0 = 不补）。固件 FF/自动定位走纸量
+    // 不准时，用它把偏移量手动拨回来：多张越打越往上跑（内容顶到上一张）
+    // 说明每张少走了纸 → 调大；越打越往下（标签间空隙变大）说明走多了 → 调小。
     return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap",
-      writeMode: "ack", writePipe: 1, showAll: false };
+      writeMode: "ack", writePipe: 1, tune: 0, showAll: false };
   }
 
   function loadCfg() {
@@ -412,6 +415,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
 
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
     const feedLines = Math.max(0, cfg.feed | 0) & 0xff;
+    const tuneLines = Math.max(0, Math.min(255, cfg.tune | 0));
     const mode = cfg.feedMode || "gap";
     const gapMode = mode !== "lines" && mode !== "auto" && mode !== "page"; // 缺省 = gap
     const autoMode = mode === "auto";
@@ -443,6 +447,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         // ESC d n：固定行数走纸（旧行为）
         parts.push(Uint8Array.from([0x1b, 0x64, feedLines]));
       }
+      // 走纸微调：固件定位不准时由用户手动补/扣点行（默认 0 = 不加指令）
+      if (tuneLines > 0) parts.push(Uint8Array.from([0x1b, 0x64, tuneLines]));
     }
     return concatBytes(parts);
   }
@@ -1241,6 +1247,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
             '<option value="gap"' + (cfg.feedMode === "gap" || !cfg.feedMode ? " selected" : "") + '>裸 FF（老行为，标准模式下 FF=走一行，会串位）</option>' +
             '<option value="lines"' + (cfg.feedMode === "lines" ? " selected" : "") + '>固定行数（旧行为，多张会累积串位）</option>' +
           "</select></label>" +
+          '<label class="field"><span>走纸微调（点行）</span><input type="number" id="labelTune" min="0" max="255" value="' +
+            (cfg.tune | 0) + '" onchange="labelPickTune(this.value)" /></label>' +
           '<label class="field"><span>写入并发</span><select id="labelWritePipe" onchange="labelPickWritePipe(this.value)">' +
             '<option value="1"' + ((cfg.writePipe | 0) !== 4 && (cfg.writePipe | 0) !== 8 ? " selected" : "") + '>1 包（最稳，老版行为，约 60 秒）</option>' +
             '<option value="4"' + ((cfg.writePipe | 0) === 4 ? " selected" : "") + '>4 包（提速，掉链路会自动降级）</option>' +
@@ -1269,9 +1277,15 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "⚠️ 汉印 PPTII-A 手册写明：<b>有标纸下 FF 只在「页模式」才走到下一张起点，标准模式下 FF 等价于 LF" +
       "（只走一行）</b>——所以老版本在标准模式下发裸 FF 根本没走纸，串位就是这么来的。定位请按序试：" +
       "① 走纸方式选「页模式 + ESC FF」（官方写法）；② 选「打印机自动定位」（不发走纸指令，固件自己走）；" +
-      "③ 都串位就先在机器上<b>手动做一次定位学习</b>：就绪状态长按走纸键 3 秒，指示灯闪 2 下松开，" +
-      "机器会走 3 张纸完成学习（比发指令可靠）。" +
-      "间隙学习后机器停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
+      "③ 仍串位再做一次<b>定位学习</b>：这台 <b>HM-T260LR 只有电源键，没有走纸键</b>" +
+      "（长按电源键 3 秒是开关机，不是学习），所以只能走这两条路 ——" +
+      "（a）手机装「汉码」App 连上机器，在 App 里做<b>标签学习</b>（官方最推荐，指示灯白灯闪烁时" +
+      "官方也要求先这么做）；（b）点本面板的「间隙学习」按钮，我们会按官方 FAQ 的顺序" +
+      "先发 <code>1D 73 65 74 70 01</code>（设标签纸）再发 <code>1D 73 65 74 4C</code>（学习）——" +
+      "官方 FAQ 问题 04 明确：只发学习不设纸张类型，学习是无效的。" +
+      "学习时机器会走 3 张纸，停在间隙位置不倒回是正常设计 —— 停位就是下一张的起点，接着打正好。" +
+      "④ 学习完还差一点点，就用「<b>走纸微调</b>」手动补：多张越打越往上跑（内容顶到上一张）说明每张" +
+      "少走了纸，把微调往大调（先试 4~8 点行）；越打越往下、标签间空隙越来越大说明走多了，调小。" +
       "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完。" +
       "默认逐包串行（在途 1 包）最稳、12KB 约 60 秒；想提速把「写入并发」调到 4/8，" +
       "一旦掉链路会<b>自动降级回串行重发</b>，不会变成打不了。" +
@@ -1376,6 +1390,12 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     saveCfg();
   }
 
+  function labelPickTune(value) {
+    const cfg = loadCfg();
+    cfg.tune = Math.max(0, Math.min(255, parseInt(value, 10) || 0));
+    saveCfg();
+  }
+
   function labelPickWriteMode(value) {
     const cfg = loadCfg();
     cfg.writeMode = value === "fast" ? "fast" : "ack";
@@ -1429,6 +1449,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelPickDensity,
     labelPickCopies,
     labelPickFeedMode,
+    labelPickTune,
     labelPickWriteMode,
     labelPickWritePipe,
     labelPickShowAll,

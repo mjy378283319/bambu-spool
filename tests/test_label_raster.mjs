@@ -76,7 +76,7 @@ const REQUIRED_HANDLERS = [
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity",
-  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickShowAll",
+  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickTune", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -262,6 +262,21 @@ function testEscPosJob() {
     buildEscPosJob(raster, { copies: 999, feed: 3 }).length === 2 + 6 + 50 * 13 + 3,
     String(buildEscPosJob(raster, { copies: 999, feed: 3 }).length));
   check("feed 缺省按 0（不崩，也不发 ESC d）", buildEscPosJob(raster, {}).length === 21);
+  // 走纸微调：固件定位不准时由用户手动补点行，默认 0 必须完全不加指令
+  check("tune 缺省 0 = 不加任何指令（老行为字节数不变）",
+    buildEscPosJob(raster, { copies: 2, feed: 2 }).length ===
+      buildEscPosJob(raster, { copies: 2, feed: 2, tune: 0 }).length);
+  const tuned = buildEscPosJob(raster, { copies: 1, feed: 2, tune: 6 });
+  const plain = buildEscPosJob(raster, { copies: 1, feed: 2 });
+  check("tune 6 = 末尾多一组 ESC d 6（3 字节）",
+    tuned.length === plain.length + 3 && tuned[tuned.length - 1] === 6 &&
+      tuned[tuned.length - 3] === 0x1b && tuned[tuned.length - 2] === 0x64,
+    `${tuned.length} vs ${plain.length}`);
+  check("tune 超上限夹到 255（ESC d 只收 1 字节行数）",
+    buildEscPosJob(raster, { copies: 1, tune: 999 }).slice(-1)[0] === 255);
+  check("tune 负数夹成 0（不发出负数行数）",
+    buildEscPosJob(raster, { copies: 1, tune: -8 }).length === 21,
+    String(buildEscPosJob(raster, { copies: 1, tune: -8 }).length));
   check("feed 负数夹成 0（同样省掉 ESC d）",
     buildEscPosJob(raster, { copies: 1, feed: -5 }).length === 21,
     String(buildEscPosJob(raster, { copies: 1, feed: -5 }).length));
