@@ -76,7 +76,7 @@ const REQUIRED_HANDLERS = [
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity",
-  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickTune", "labelPickShowAll",
+  "labelPickWritePipe", "labelPickCopies", "labelPickFeedMode", "labelPickTune", "labelPickLegacy", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -567,6 +567,17 @@ function testWritePipeline() {
     /1D 73 65 74 70 01 1D 73 65 74 4C/.test(src));
   check("打印作业回执窗口 ≥2 秒（finished 在打完才来）",
     /\), 2000\s*\n\s*\);/.test(src) || /, 2000\s*\);/.test(src));
+  // 经典发送模式（首版 e78914a 同款）：用户实测首版能打，现行方案打不动 →
+  // 必须能一键切回首版发送路径：182 大包、无应答优先、不重建、不抓回执。
+  check("经典模式开关存在并持久化（cfg.legacy + labelPickLegacy）",
+    /cfg\.legacy = !!checked/.test(src) && /legacy: false/.test(src));
+  check("经典模式用首版的 182 字节大包", /legacy \? 182 : st\.chunk/.test(src));
+  check("经典模式优先无应答写入（特征支持就选它）",
+    /if \(cfg\.legacy\) \{\s*\n\s*return \{\s*\n\s*noResp: canFast \|\| !canAck,/.test(src));
+  check("经典模式打印前不重建链路（首版没有这一步）",
+    /if \(!cfg\.legacy\) \{\s*\n\s*labelProgress\("正在重建蓝牙链路/.test(src));
+  check("经典模式打印不订阅通知抓回执",
+    /if \(cfg\.legacy\) \{\s*\n\s*await send\(\);\s*\n\s*notes = \[\];/.test(src));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

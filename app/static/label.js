@@ -165,8 +165,13 @@
     // tune = 每张之后额外补走的点行数（0 = 不补）。固件 FF/自动定位走纸量
     // 不准时，用它把偏移量手动拨回来：多张越打越往上跑（内容顶到上一张）
     // 说明每张少走了纸 → 调大；越打越往下（标签间空隙变大）说明走多了 → 调小。
+    // legacy = 经典发送模式（首版 e78914a 同款，那版用户实测能完整打出来）：
+    // 182 字节大包 + 无应答写入（特征支持就选它）+ 每包 12ms + 打印前不重建
+    // 链路 + 不订阅通知抓回执。后来的「20 字节 + 应答写入 + 抓回执」是修
+    // 别的 bug 时换上的，这台机器上反而打不动了 —— 所以做成开关让用户一键
+    // 回到能打的发送路径。
     return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, feedMode: "gap",
-      writeMode: "ack", writePipe: 1, tune: 0, showAll: false };
+      writeMode: "ack", writePipe: 1, tune: 0, legacy: false, showAll: false };
   }
 
   function loadCfg() {
@@ -569,12 +574,20 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
   }
 
   /** 实际用哪种写入：cfg.writeMode "ack"=应答写入（默认），"fast"=无应答写入。
+   *  经典模式（cfg.legacy）下跟首版一致：特征支持无应答就用无应答。
    *  特征不支持所选方式时自动退到另一种。返回 {noResp, label}。 */
   function pickWriteMode() {
     const st = LABEL.ble;
-    const wantFast = loadCfg().writeMode === "fast";
+    const cfg = loadCfg();
     const canFast = !!st.char.properties.writeWithoutResponse;
     const canAck = !!st.char.properties.write;
+    if (cfg.legacy) {
+      return {
+        noResp: canFast || !canAck,
+        label: "经典模式（首版·" + (canFast || !canAck ? "无应答" : "应答") + "写入）",
+      };
+    }
+    const wantFast = cfg.writeMode === "fast";
     const noResp = wantFast ? (canFast || !canAck) : (!canAck && canFast);
     return { noResp, label: noResp ? "无应答写入" : "应答写入" };
   }
@@ -591,9 +604,11 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
    //   发到一半链路直接被掐、只打出小半张。保留但加掉链检测：断了立刻
    //   停，报人话，不再傻发完 12KB 黑洞。
     const mode = pickWriteMode();
+    const legacy = !!loadCfg().legacy;
     let useNoResp = mode.noResp;
     st.lastMode = mode.label;
-    let size = st.chunk;
+    // 首版分包 182（太大被拒时自动减半），现行方案恒 20
+    let size = legacy ? 182 : st.chunk;
     let sent = 0;
     st.lastSent = 0;
     const parts = [];
@@ -629,9 +644,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         st.lastSent = sent;
         st.lastUseAt = Date.now();
         if (onProgress) onProgress(sent, bytes.length);
-        // 无应答写入没有流控，节奏太快打印机会丢数据（Windows 蓝牙栈缓冲一满
-        // 就报 GATT operation failed，所以按 20ms 走，别贪快）
-        await sleep(20);
+        // 无应答写入没有流控：经典模式跟首版一致按 12ms 走；现行方案 20ms
+        await sleep(legacy ? 12 : 20);
         continue;
       }
 
@@ -937,12 +951,16 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       try {
         labelProgress("正在连接蓝牙…");
         await bleConnect(cfg.showAll);
-        // 0.12.8 是「每次打印都强制断开重连」，实测反而多一次失败机会：
-        // 用户截图里就有重建成功仅 11 秒后第一包又断的情况。僵尸连接是
-        // 闲置/上轮失败才有的，所以这里只在那种情况下重建（force=false）。
-        // 真在发送第一步断了，下面还有自动重连重发兜底。
-        labelProgress("正在检查蓝牙链路…");
-        await bleRefreshLink(false);
+        // 经典模式跟首版一致：连上就直接写，不做打印前重建。
+        // 现行方案每次打印前都强制重建链路（0.12.8 的做法，那次实测能完整
+        // 打出 12020 字节并收到 QOKQ 回执）。0.12.10 改成「闲置 >8 秒才重建」
+        // 后用户实测「一打印就掉蓝牙、发到 0%」—— 因为刚连上时闲置计时归零，
+        // 僵尸链路躲过了检查，第一包写进去就炸。重建约 1 秒，不重置打印机。
+        if (!cfg.legacy) {
+          labelProgress("正在重建蓝牙链路（防僵尸连接）…");
+          await bleRefreshLink(true);
+          await sleep(300); // 刚重连完缓冲一下再开写
+        }
         labelProgress("正在渲染标签…");
         const canvas = await labelCanvas();
         const raster = packRaster(canvas, cfg.density);
@@ -953,28 +971,37 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
         for (let attempt = 0; ; attempt++) {
           const started = Date.now();
           try {
-            // 打印也订阅通知抓回执：打印机收到/拒收数据多半会说一声，
+            // 经典模式跟首版一致：直接写完就收工，不订阅通知抓回执
+            //（订阅本身也是 GATT 操作，首版没有这一步）。
+            // 现行方案订阅通知抓回执：打印机收到/拒收数据多半会说一声，
             // 「发送了却没打」时回执（或没有回执）就是第一手线索。
             // settle 2 秒：发完只是发完，机器还要打几秒，"finished" 回执
             // 在打完才来，900ms 的窗口抓不到（表现为成功却「无回执」）。
-            notes = await bleCaptureReceipts(() =>
+            const send = () =>
               bleWriteAll(job, (sent, total) => {
                 labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-              }), 2000
-            );
+              });
+            if (cfg.legacy) {
+              await send();
+              notes = [];
+            } else {
+              notes = await bleCaptureReceipts(send, 2000);
+            }
             secs = ((Date.now() - started) / 1000).toFixed(1);
             break;
           } catch (err) {
             // 连第一包都没出去就断链：打印机那头什么都没收到，整份重发是干净的。
-            // 超过 5% 就不自动重发了 —— 机器里已经存了半张位图，重发会打出
-            // 一张残缺标签，得不偿失，交给用户决定。
+            // 给两次机会（每次都强制重建链路）；超过 5% 就不自动重发了 ——
+            // 机器里已经存了半张位图，重发会打出一张残缺标签，交给用户决定。
             const early = (LABEL.ble.lastSent || 0) < job.length * 0.05;
-            if (attempt === 0 && early && isLinkError(err)) {
-              bleLogFail("打印中断（0 字节，自动重试 1 次）", "0 / " + job.length + " 字节", err);
-              labelProgress("链路断了，正在重连并重发…");
+            if (attempt < 2 && early && isLinkError(err)) {
+              bleLogFail("打印中断（发到 " + (LABEL.ble.lastSent || 0) + " 字节，自动重试）",
+                "0 / " + job.length + " 字节", err);
+              labelProgress("链路断了，正在重连并重发（第 " + (attempt + 1) + " 次）…");
               await sleep(400);
               try {
                 await bleRefreshLink(true);
+                await sleep(300);
               } catch (e2) {
                 /* 重建也失败：按原错误报出去，人话提示比这条更贴切 */
               }
@@ -1258,6 +1285,10 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
             '<option value="ack"' + (cfg.writeMode !== "fast" ? " selected" : "") + '>应答写入（每包有确认，推荐）</option>' +
             '<option value="fast"' + (cfg.writeMode === "fast" ? " selected" : "") + '>无应答写入（HM-T260LR 实测掉链路打一半，别选）</option>' +
           "</select></label>" +
+          '<label class="field check"><input type="checkbox" id="labelLegacy"' +
+            (cfg.legacy ? " checked" : "") + ' onchange="labelPickLegacy(this.checked)" />' +
+            "<span><b>经典发送模式（首版同款）</b>：182 字节大包 · 无应答写入 · " +
+            "打印前不重建链路 · 不抓回执 —— 最初那版能打就是这套参数，现在打不动就勾上它</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -1287,6 +1318,9 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "④ 学习完还差一点点，就用「<b>走纸微调</b>」手动补：多张越打越往上跑（内容顶到上一张）说明每张" +
       "少走了纸，把微调往大调（先试 4~8 点行）；越打越往下、标签间空隙越来越大说明走多了，调小。" +
       "写入方式默认「应答写入」：每个数据包都有链路确认，堵了会报错而不是假装发完。" +
+      "如果现在怎么都打不动、一打印就掉蓝牙，勾上「<b>经典发送模式（首版同款）</b>」：" +
+      "它复刻最初能打那版的发送参数（182 字节大包 · 无应答写入 · 打印前不重建链路 · 不抓回执），" +
+      "只是渲染与走纸仍用新版 —— 定位改进照样生效。" +
       "默认逐包串行（在途 1 包）最稳、12KB 约 60 秒；想提速把「写入并发」调到 4/8，" +
       "一旦掉链路会<b>自动降级回串行重发</b>，不会变成打不了。" +
       "无应答写入这台机器实测撑不住（发一半掉链路只打小半张），留着只给「固件拒收应答写入」的机器用。" +
@@ -1295,8 +1329,8 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
       "打印出来<b>发虚/不清楚</b>先把「浓度」往上加 1~2 档；串位时半张打在衬纸上，看起来也会像不清楚。" +
       "打印机闲置一会儿会自己断链，而 Windows 上 Chrome 的 <code>gatt.connected</code> 还报真，" +
       "这时第一包写入就抛 <code>GATT operation failed for unknown reason</code>（界面却仍显示" +
-      "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>打印前只在闲置超过 8 秒" +
-      "或上次写入失败时才重建链路</b>（约 1 秒，不会重置打印机），第一包就断还会自动重连重发一次；" +
+      "「已连接」）—— 这就是以前「非得重启电脑」的僵尸连接。现在<b>每次打印前都强制重建一次链路</b>" +
+      "（约 1 秒，不会重置打印机；0.12.8~0.12.9 能完整打出来靠的就是它），第一包就断还会自动重连重发最多 2 次；" +
       "面板上也有「重建链路」按钮可手动清。" +
       "<b>发送成功却不出纸</b>时按顺序试：① 这台机器只允许一个蓝牙连接，先把手机上的" +
       "汉码 App 彻底关掉、关掉其他占着打印机的页面，再点「连接打印机」；" +
@@ -1396,6 +1430,13 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     saveCfg();
   }
 
+  function labelPickLegacy(checked) {
+    const cfg = loadCfg();
+    cfg.legacy = !!checked;
+    saveCfg();
+    renderBlePanel();
+  }
+
   function labelPickWriteMode(value) {
     const cfg = loadCfg();
     cfg.writeMode = value === "fast" ? "fast" : "ack";
@@ -1450,6 +1491,7 @@ function drawText(ctx, dpi, text, xMm, baseMm, sizeMm, opt) {
     labelPickCopies,
     labelPickFeedMode,
     labelPickTune,
+    labelPickLegacy,
     labelPickWriteMode,
     labelPickWritePipe,
     labelPickShowAll,
