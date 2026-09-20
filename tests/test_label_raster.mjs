@@ -317,7 +317,8 @@ function testEscPosJob() {
  * 这两条是「为什么汉印发得动、我们发不动」的直接对策：
  *   汉码官方每张只发 3475 字节（私有压缩位图），而且拆成 22 条 10 行的 GS v 0（每条 520 字节）；
  *   我们原来是 12000 字节一整坨未压缩位图 —— 50mm 宽、218 行满幅，纯白行占七成体积。
- *   空白行用 ESC J 走纸跳过（3 字节换 52 字节），作业体积掉到 1/3，逼近官方量级。
+ *   空白行用 ESC J 走纸跳过（3 字节换 52 字节）。实测一份 50×30（二维码占右上约四成高）
+ *   从 11351 字节降到 5082 字节 —— 逼近官方压缩流的 3473 字节/份。
  */
 function testRasterCommands() {
   console.log("== 分带与空白跳过 ==");
@@ -498,7 +499,7 @@ async function testDialogHtml() {
   check("含底部留白字段（多张连打不串位的关键参数）", html.includes('id="labelFootMargin"'));
   check("含「打印前复位」开关（真机实测不发则打不出来）", html.includes('id="labelResetFirst"'));
   check("含「官方同款分带」开关", html.includes('id="labelBandRows"'));
-  check("含「空白行不传数据」开关（体积压到 1/3）", html.includes('id="labelBlankSkip"'));
+  check("含「空白行不传数据」开关（12KB → 5KB 上下）", html.includes('id="labelBlankSkip"'));
   check("含导出作业与对齐标签两个诊断按钮",
     html.includes("labelExportJob") && html.includes("labelBleAlign"));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",
