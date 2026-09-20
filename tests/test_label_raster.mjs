@@ -67,6 +67,19 @@ vm.runInContext(fs.readFileSync(SRC, "utf8"), sandbox, { filename: "label.js" })
 
 const { mm2dot, packRaster, buildEscPosJob, rasterCommands, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
 
+/* ── 0.12.22：默认流必须 = 0.12.19 已验证形态 ─────────────── */
+function testDefaultCfgSafe() {
+  console.log("== 默认配置安全（0.12.22） ==");
+  const cfg = sandbox.labelDebug.loadCfg();
+  check("默认 bandRows=0（不分带，回已验证形态）", cfg.bandRows === 0, JSON.stringify(cfg));
+  check("默认 blankSkip=false（不发 ESC J，断链头号嫌疑）", cfg.blankSkip === false);
+  check("默认 pipeline=false（并发 GATT 断链，0.12.21 定案）", cfg.pipeline === false);
+  check("默认 resetFirst=true（不发复位实测打不出来）", cfg.resetFirst === true);
+  const src = fs.readFileSync(SRC, "utf8");
+  check("旧存档迁移：cfgRev 不一致时强制重置三个实验开关",
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 2;/.test(src));
+}
+
 /* ── 报文解析器 ──────────────────────────────────────────────
  * 把作业字节流按指令顺序解出来。它同时是「结构自检」：
  * 只要出现一个解析不了的字节，就说明报文被切错了（位图数据长度写错、段边界算错…）。
@@ -536,6 +549,7 @@ async function testDialogHtml() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
+  testDefaultCfgSafe();
   testMm2dot();
   testPackRaster();
   testEscPosJob();

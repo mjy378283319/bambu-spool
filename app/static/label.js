@@ -134,6 +134,10 @@
 
   /* ── 配置 ───────────────────────────────────────────────── */
 
+  // cfgRev：改「实验性发送开关」的默认值时 +1。旧存档 rev 不一致时这些开关会被
+  // 强制重置成本版默认 —— 不然用户曾经勾过的「断链组合」会被 localStorage 永远沿用。
+  const CFG_REV = 2;
+
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
     // 2.75mm 是对齐汉码官方抓包的取值（50×30 标签只发 218 行 = 27.28mm）。
@@ -142,22 +146,19 @@
     //   发复位才打得出来（代价是第一张位置略偏）。虽然官方抓包流里 1b 40 出现 0 次，
     //   但官方 App 在打印前一定做过自己的初始化/定位，浏览器直连没有那一步，
     //   所以这里以真机实测为准。想回到「不发」把开关去掉即可。
-    // bandRows = 光栅分带行数：官方抓包是 22 个 GS v 0 块、每块 10 行（21×10 + 8 = 218 行），
-    //   不是一整块 218 行。分带后单条指令的载荷从 ~11KB 降到 520 字节，
-    //   与官方同构，打印机不必一次收满整张才动。0 = 不分带（旧行为）。
-    // blankSkip = 空白行不传数据，改用 ESC J 走纸跳过（见 rasterCommands）。
-    //   空白行在光栅里就是一串 0x00，占体积却没内容；跳过能把 50×30 的作业从 ~12KB 压到 5KB 上下
-    //   （实测样例 5082 字节/张）—— 已经接近官方压缩流的 3475 字节/张，这是「汉印发得动、
-    //   我们发不动」的关键差距。注意二维码那几十行整行都有墨、跳不掉，所以到不了官方量级。
+    // bandRows / blankSkip / pipeline = 0.12.20 引入的三个实验性发送优化，0.12.22 起
+    //   **全部默认关**（默认流 = 0.12.19 已验证能打完整张的形态：一条 218 行整块、
+    //   无 GS P、无 ESC J）：
+    //   ① pipeline（6 包在途流水线）→ 一点打印立刻断链（并发 GATT，0.12.21 定案）；
+    //   ② blankSkip（空白行 ESC J 跳过，连带 GS P）→ 流水线关掉后仍断链的头号嫌疑：
+    //     汉印固件若不认 ESC J / GS P，解析错位后会把后面的位图数据当指令头、
+    //     读出天文数字的长度 → 固件崩 → BLE 掉线（用户导出的 8718B 作业两者都有）；
+    //   ③ bandRows（分带）对齐官方 22 块结构、嫌疑最小，但一并回退保证默认流 =
+    //     已验证形态；三个开关都留在面板上供逐个 A/B 二分定位。
     return {
       wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1,
-      footMargin: 2.75, resetFirst: true, bandRows: 10, blankSkip: true,
-      // pipeline = 应答写入流水线连发（6 包在途）。默认 **关**：
-      //   0.12.20 真机实测「一点蓝牙打印就断链」——这台机器/Windows BLE 容不下并发
-      //   GATT 操作（0.12.8 定案：打印中再点查询就掐链路），流水线等于打印内部自己
-      //   开了 6 路并发 writeValue，正好撞枪口；而 0.12.19 逐包等确认能正常打出单张。
-      //   代价是慢（每包往返 ~80ms，9.7KB 约 54 包 ≈ 5 秒），留着开关给固件容忍的机器提速。
-      pipeline: false, showAll: false,
+      footMargin: 2.75, resetFirst: true, bandRows: 0, blankSkip: false,
+      pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
 
@@ -169,6 +170,13 @@
       if (raw) Object.assign(cfg, JSON.parse(raw));
     } catch (err) {
       /* 配置坏了就用默认值 */
+    }
+    if (cfg.cfgRev !== CFG_REV) {
+      // 旧版存档：实验开关强制回本版默认（面板仍可手动勾回去做 A/B）
+      cfg.bandRows = 0;
+      cfg.blankSkip = false;
+      cfg.pipeline = false;
+      cfg.cfgRev = CFG_REV;
     }
     LABEL.cfg = cfg;
     return cfg;
@@ -1138,10 +1146,10 @@
             "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBandRows"' +
             (cfg.bandRows > 0 ? " checked" : "") + ' onchange="labelPickBandRows(this.checked)" />' +
-            "<span>官方同款分带（每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
+            "<span>官方同款分带（实验，默认关；每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBlankSkip"' +
             (cfg.blankSkip !== false ? " checked" : "") + ' onchange="labelPickBlankSkip(this.checked)" />' +
-            "<span>空白行不传数据（ESC J 跳过；只有纯白行省得掉，实测省三到五成）</span></label>" +
+            "<span>空白行不传数据（实验，默认关；ESC J 跳过 —— 本机实测会断链，勾了自负）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelPipeline"' +
             (cfg.pipeline ? " checked" : "") + ' onchange="labelPickPipeline(this.checked)" />' +
             "<span>流水线连发（快，但本机实测一点打印就断链，默认关）</span></label>" +
