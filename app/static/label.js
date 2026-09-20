@@ -137,7 +137,9 @@
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
     // 2.75mm 是对齐汉码官方抓包的取值（50×30 标签只发 218 行 = 27.28mm）。
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, footMargin: 2.75, showAll: false };
+    // resetFirst = 正常首发生成是否也发 ESC @ 复位。默认 false（对齐汉码官方抓包：
+    // 官方流里一次复位都不发）；勾上用于 A/B 排查「第一张偏移」。
+    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, footMargin: 2.75, resetFirst: false, showAll: false };
   }
 
   function loadCfg() {
@@ -377,10 +379,16 @@
     return { bytes: out, widthDots: w, heightDots: h, bytesPerRow };
   }
 
-  /** 组装 ESC/POS 作业：初始化 → 标签纸模式 → 光栅 → 走纸。 */
-  function buildEscPosJob(raster, cfg) {
+  /** 组装 ESC/POS 作业：（可选复位）→ 标签纸模式 → 光栅 → 走纸。
+   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认不发）。 */
+  function buildEscPosJob(raster, cfg, opts) {
     const parts = [];
-    parts.push(Uint8Array.from([0x1b, 0x40])); // ESC @ 复位
+    // ESC @ 复位：汉码官方「打印到文件」抓包（10685 字节，sha1 2e284c0c…）里 `1b 40`
+    //   出现 **0 次** —— 官方流第一个字节就是 GS "setp" 01，全程不复位。
+    //   复位会让固件放弃当前纸位、重新做标签检测，实测会让**第一张**偏，所以默认不发。
+    //   但发送中断后打印机里可能留着半份位图，整份重发前必须复位清掉 → 那时传 { reset: true }。
+    const reset = opts && "reset" in opts ? !!opts.reset : !!(cfg && cfg.resetFirst);
+    if (reset) parts.push(Uint8Array.from([0x1b, 0x40]));
     // GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式
     parts.push(Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]));
 
@@ -687,7 +695,8 @@
         await sendJob(job);
       } catch (err) {
         // 发送中途链路断了（Windows 僵尸连接 / 蓝牙掉线）→ 强制真实断开、保留设备引用，
-        // 走无感重连后整份重发一次。ESC @ 会在打印机端复位，整份重发是安全的。
+        // 走无感重连后整份重发一次。重发这一份显式带 ESC @（{ reset: true }）：
+        // 打印机里可能留着断链前的半份位图，先复位清掉才不会打出残张。
         labelProgress("发送中断，正在重建链路重试…");
         const dev = LABEL.ble.device;
         try {
@@ -701,7 +710,7 @@
         await bleConnect(cfg.showAll);
         const canvas2 = await labelCanvas();
         const raster2 = packRaster(canvas2, cfg.density);
-        await sendJob(buildEscPosJob(raster2, cfg));
+        await sendJob(buildEscPosJob(raster2, cfg, { reset: true }));
       }
       toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
       renderBlePanel();
@@ -911,6 +920,9 @@
           '<label class="field"><span>底部留白 mm</span><input type="number" id="labelFootMargin" min="0" max="8" step="0.25" value="' +
             (cfg.footMargin == null ? 2.75 : cfg.footMargin) +
             '" onchange="labelPickFootMargin(this.value)" /></label>' +
+          '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
+            (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
+            "<span>打印前复位打印机（发 ESC @，默认关；第一张偏时用来做对比）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -1015,6 +1027,13 @@
     labelRefresh();
   }
 
+  /** 打印前是否发 ESC @ 复位：默认关（对齐汉码官方流）；勾上 = 旧行为，用于 A/B 对比。 */
+  function labelPickResetFirst(checked) {
+    const cfg = loadCfg();
+    cfg.resetFirst = !!checked;
+    saveCfg();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -1033,6 +1052,7 @@
     labelDownload,
     labelPrintBle,
     labelPickFootMargin,
+    labelPickResetFirst,
     labelBleProbe,
     labelBleCalibrate,
     labelBleRaw,
