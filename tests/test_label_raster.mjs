@@ -65,7 +65,7 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(SRC, "utf8"), sandbox, { filename: "label.js" });
 
-const { mm2dot, packRaster, buildEscPosJob } = sandbox.labelDebug || {};
+const { mm2dot, packRaster, buildEscPosJob, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
 
 /* ── 1. 暴露面 ─────────────────────────────────────────────── */
 // label.js 里所有 onclick/onchange 会碰到的函数，一个都不能少。
@@ -75,7 +75,7 @@ const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintBle",
   "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity", "labelPickCopies", "labelPickShowAll",
+  "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -224,6 +224,57 @@ function testEscPosJob() {
   check("403 点宽 → 行宽 51 字节（0x33 0x00）", wide[12] === 51 && wide[13] === 0, `${wide[12]},${wide[13]}`);
 }
 
+/* ── 4b. 底部留白 / 光栅高度 ───────────────────────────────── */
+// 这一层钉的是「多张连打不串位」的物理前提：不能把整张标签打满。
+// 依据：汉码官方「打印到文件」抓包（50×30mm ×3 份）每份恰好 22 个 GS v 0 块、
+//       行数合计 218 行（21×10 + 1×8）= 27.28mm，底部留 22 行 ≈ 2.75mm。
+//       打满 240 行的头会停在标签边缘/缝里，结尾 FF 的间隙定位就失准 → 逐张累积偏移。
+function testFootMargin() {
+  console.log("== 底部留白与光栅高度 ==");
+  check("effHeightMm(30, 2.75) = 27.25", effHeightMm(30, 2.75) === 27.25, String(effHeightMm(30, 2.75)));
+  check("50×30 留白 2.75mm @203dpi → 218 行（对齐汉码官方抓包）",
+    rasterRowsFor(30, 2.75, 203) === 218, String(rasterRowsFor(30, 2.75, 203)));
+  check("留白 0 → 满幅 240 行（旧行为，会串位）",
+    rasterRowsFor(30, 0, 203) === 240, String(rasterRowsFor(30, 0, 203)));
+  check("留白 0 与留白 2.75 相差正好 22 行",
+    rasterRowsFor(30, 0, 203) - rasterRowsFor(30, 2.75, 203) === 22,
+    String(rasterRowsFor(30, 0, 203) - rasterRowsFor(30, 2.75, 203)));
+  check("300dpi 下同一留白同样成立（27.25mm → 322 行）",
+    rasterRowsFor(30, 2.75, 300) === 322, String(rasterRowsFor(30, 2.75, 300)));
+
+  // 兜底：脏配置不能让画布变成 0 高或负数（0 高的 canvas 会让整条打印链路静默失败）
+  check("留白为 undefined 视作 0", effHeightMm(30, undefined) === 30, String(effHeightMm(30, undefined)));
+  check("留白为 null 视作 0", effHeightMm(30, null) === 30, String(effHeightMm(30, null)));
+  check("留白为 NaN 视作 0", effHeightMm(30, NaN) === 30, String(effHeightMm(30, NaN)));
+  check("留白为负数夹成 0", effHeightMm(30, -5) === 30, String(effHeightMm(30, -5)));
+  check("留白大于标签高 → 有效高度下限 6mm", effHeightMm(30, 999) === 6, String(effHeightMm(30, 999)));
+  check("高度为 0 也不崩（下限 6mm）", effHeightMm(0, 0) === 6, String(effHeightMm(0, 0)));
+  check("光栅行数恒 ≥ 8（脏配置下仍可打印）",
+    rasterRowsFor(30, 999, 203) >= 8, String(rasterRowsFor(30, 999, 203)));
+  check("光栅行数恒为整数", Number.isInteger(rasterRowsFor(30, 2.75, 203)));
+
+  // 留白必须真的作用到报文里：同等份数下，留白越大报文越短
+  const rows218 = rasterRowsFor(30, 2.75, 203);
+  const rows240 = rasterRowsFor(30, 0, 203);
+  const jobSmall = buildEscPosJob(
+    { bytes: new Uint8Array(2 * rows218), bytesPerRow: 2, heightDots: rows218, widthDots: 16 },
+    { copies: 2 }
+  );
+  const jobBig = buildEscPosJob(
+    { bytes: new Uint8Array(2 * rows240), bytesPerRow: 2, heightDots: rows240, widthDots: 16 },
+    { copies: 2 }
+  );
+  check("留白后的两份报文确实更短（每份少 22 行×2 字节）",
+    jobBig.length - jobSmall.length === 2 * 22 * 2,
+    `${jobBig.length} vs ${jobSmall.length}`);
+  check("留白后每份仍以 FF 收尾", jobSmall[8 + 8 + 2 * rows218] === 0x0c,
+    String(jobSmall[8 + 8 + 2 * rows218]));
+  check("行数字段写进报文（218 = 0xDA 0x00）",
+    jobSmall[14] === 0xda && jobSmall[15] === 0x00, `${jobSmall[14]},${jobSmall[15]}`);
+  check("报文长度 = 2+6+2×(8+2×218+1)（数据无隐藏裁剪）",
+    jobSmall.length === 2 + 6 + 2 * (8 + 2 * rows218 + 1), String(jobSmall.length));
+}
+
 /* ── 5. 对话框装配 ─────────────────────────────────────────── */
 // 把 openModal 换成一个「记下来就抛」的桩：这样 openLabelDialog 会在拼完
 // body/footer 之后立刻停下，不用去桩 canvas / Image（那才是不必要的负担）。
@@ -263,6 +314,7 @@ async function testDialogHtml() {
   check("含尺寸预设", html.includes("50×30 mm"));
   check("含 dpi 选项", html.includes('value="203"') && html.includes('value="300"'));
   check("含浓度与份数", html.includes('id="labelDensity"') && html.includes('id="labelCopies"'));
+  check("含底部留白字段（多张连打不串位的关键参数）", html.includes('id="labelFootMargin"'));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
   check("含预览挂点", html.includes('id="labelPreviewHost"'));
   check("提示语提到 T260LR 蓝牙方案", html.includes("T260LR"));
@@ -294,6 +346,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testMm2dot();
   testPackRaster();
   testEscPosJob();
+  testFootMargin();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {

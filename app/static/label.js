@@ -135,7 +135,9 @@
   /* ── 配置 ───────────────────────────────────────────────── */
 
   function defaultCfg() {
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, feed: 2, showAll: false };
+    // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
+    // 2.75mm 是对齐汉码官方抓包的取值（50×30 标签只发 218 行 = 27.28mm）。
+    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, footMargin: 2.75, showAll: false };
   }
 
   function loadCfg() {
@@ -172,6 +174,20 @@
       top: hMm * 0.155,  // 第一行文字基线
       foot: hMm * 0.91,  // 页脚基线（固定在最下面，不参与均分）
     };
+  }
+
+  /** 有效内容高度（mm）= 标签高 − 底部留白。
+   *  留白的意义见 buildEscPosJob：多张连打要不串位，就不能把整张标签打满。 */
+  function effHeightMm(hMm, footMarginMm) {
+    const h = Number(hMm) || 0;
+    const m = Math.max(0, Number(footMarginMm) || 0);
+    return Math.max(6, h - m);
+  }
+
+  /** 光栅高度（点）。50×30 标签 + 留白 2.75mm → 218 行，与汉码官方抓包逐行一致。
+   *  抽成纯函数是为了让测试能钉住这个数（改留白/尺寸时不会悄悄跑偏）。 */
+  function rasterRowsFor(hMm, footMarginMm, dpi) {
+    return Math.max(8, Math.round(mm2dot(effHeightMm(hMm, footMarginMm), dpi)));
   }
 
   /** 写字：超宽先缩字号，还超就截断加省略号。返回最终画出的文本。
@@ -259,11 +275,15 @@
     return Math.max(1, Math.floor(targetDots / modules));
   }
 
-  /** 画一张料盘标签。返回 canvas（尺寸 = 标签实际点数）。 */
+  /** 画一张料盘标签。返回 canvas（尺寸 = 标签实际点数，高度已扣掉底部留白）。 */
   async function renderLabel(spool, cfg) {
     const dpi = cfg.dpi;
     const wDots = Math.max(8, Math.round(mm2dot(cfg.wMm, dpi)));
-    const hDots = Math.max(8, Math.round(mm2dot(cfg.hMm, dpi)));
+    // 关键：画布高度 = 标签高 − 底部留白，版式也按这个有效高度排版。
+    // 打满整张会让打印头停在标签边缘/间隙里，结尾 FF 的间隙定位就失准 →
+    // 多张连打逐张累积偏移（用户报的「第二张起越打越偏」）。详见 buildEscPosJob。
+    const hEff = effHeightMm(cfg.hMm, cfg.footMargin);
+    const hDots = rasterRowsFor(cfg.hMm, cfg.footMargin, dpi);
     const canvas = document.createElement("canvas");
     canvas.width = wDots;
     canvas.height = hDots;
@@ -272,7 +292,7 @@
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, wDots, hDots);
 
-    const L = layoutOf(cfg.wMm, cfg.hMm);
+    const L = layoutOf(cfg.wMm, hEff);
 
     // 二维码：服务端按整数倍模块出图，这里 1:1 贴上去，绝不缩放。
     // 先用 box=4 探出模块数（模块数只跟内容/静区有关，跟 box 无关），
@@ -314,18 +334,18 @@
     ].filter((r) => String(r.text == null ? "" : r.text).trim());
 
     const topBase = L.top;
-    const bottomBase = L.foot - cfg.hMm * 0.115; // 最后一行与页脚之间留一行字高的空
+    const bottomBase = L.foot - hEff * 0.115; // 最后一行与页脚之间留一行字高的空
     const n = rows.length;
     rows.forEach((row, i) => {
       const y = n > 1 ? topBase + ((bottomBase - topBase) * i) / (n - 1) : topBase;
-      drawText(ctx, dpi, String(row.text), textX, y, cfg.hMm * row.size,
+      drawText(ctx, dpi, String(row.text), textX, y, hEff * row.size,
         { bold: !!row.bold, maxMm: textMax });
     });
 
     // 页脚：编号 + 色值；颜色名只在名字里没写时才补上（否则又是重复）
     const foot = ["#" + spool.id, ...dedupeAgainst(name, [spool.color_name])];
     if (spool.color_hex) foot.push(String(spool.color_hex).toUpperCase());
-    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, cfg.hMm * 0.062, { maxMm: textMax });
+    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, hEff * 0.062, { maxMm: textMax });
 
     return canvas;
   }
@@ -375,9 +395,15 @@
       );
       parts.push(raster.bytes);
       // FF (0x0c)：间隙走纸到下一标签起点。
-      // 汉印官方多张连打抓包确认：连打不串位的关键就是每张结尾发 FF 而非 ESC d n。
-      // ESC d n 是固定行数进给，对不准标签间距会逐张累积漂移；FF 在间隙标签模式下
-      // 走纸到下一个标签起点，所以汉码一次连打多张都不偏。
+      // 汉码官方「打印到文件」抓包（50×30 ×3 份，10685 字节）确认：
+      //   每份标签是逐字节相同的 3473 字节块，块尾就是单个 0c，块与块之间没有别的指令。
+      //   ⇒ 份间走纸 = FF，和我们一致；但那份流每份只有 22 个 GS v 0 块、行数合计 **218 行
+      //     (27.28mm)**，也就是官方**不打满** 30mm 的标签，底部留了 22 行 ≈ 2.75mm 空白。
+      //   这一点才是连打不串位的关键：留白让打印头停在标签面上，间隙传感器随即看到
+      //   前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头会停在标签边缘/缝里，
+      //   FF 判定失准 → 逐张累积偏移（「第二张起越打越偏」）。
+      //   所以这里只发 raster（高度已按 cfg.footMargin 扣过，见 renderLabel/rasterRowsFor），
+      //   份间依旧发 FF。ESC d n 那种固定行数进给对不准标签间距，已弃用。
       parts.push(Uint8Array.from([0x0c]));
     }
     return concatBytes(parts);
@@ -613,9 +639,12 @@
       const info = document.getElementById("labelInfo");
       if (info) {
         const bytes = raster.bytesPerRow * raster.heightDots;
+        const margin = Math.max(0, Number(cfg.footMargin) || 0);
+        const fullRows = Math.max(8, Math.round(mm2dot(cfg.hMm, cfg.dpi)));
         info.textContent =
           Math.round(cfg.wMm) + "×" + Math.round(cfg.hMm) + " mm · " + cfg.dpi + " dpi · " +
           raster.widthDots + "×" + raster.heightDots + " 点 · " + bytes + " 字节" +
+          " · 底部留白 " + margin + " mm（" + raster.heightDots + "/" + fullRows + " 行）" +
           (spool && spool.name ? " · " + spool.name : "");
       }
     } catch (err) {
@@ -879,6 +908,9 @@
             cfg.density + '" oninput="labelPickDensity(this.value)" /></label>' +
           '<label class="field"><span>份数</span><input type="number" id="labelCopies" min="1" max="50" value="' +
             cfg.copies + '" onchange="labelPickCopies(this.value)" /></label>' +
+          '<label class="field"><span>底部留白 mm</span><input type="number" id="labelFootMargin" min="0" max="8" step="0.25" value="' +
+            (cfg.footMargin == null ? 2.75 : cfg.footMargin) +
+            '" onchange="labelPickFootMargin(this.value)" /></label>' +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -974,6 +1006,15 @@
     saveCfg();
   }
 
+  /** 底部留白：0 = 打满整张（旧行为，多张会串位）；2.75 = 对齐汉码官方抓包。 */
+  function labelPickFootMargin(value) {
+    const cfg = loadCfg();
+    const v = parseFloat(value);
+    cfg.footMargin = isNaN(v) ? 2.75 : Math.max(0, Math.min(8, v));
+    saveCfg();
+    labelRefresh();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -984,13 +1025,14 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
 
   Object.assign(window, {
     openLabelDialog,
     labelRefresh,
     labelDownload,
     labelPrintBle,
+    labelPickFootMargin,
     labelBleProbe,
     labelBleCalibrate,
     labelBleRaw,
