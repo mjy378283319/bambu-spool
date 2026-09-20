@@ -190,31 +190,31 @@ function testEscPosJob() {
   check("位图数据紧随其后（不丢不改）",
     Array.from(job.slice(16, 20)).join(",") === "170,187,204,221",
     Array.from(job.slice(16, 20)).join(","));
-  check("以 ESC d 3 走纸收尾",
-    job[20] === 0x1b && job[21] === 0x64 && job[22] === 3,
-    `${job[20]},${job[21]},${job[22]}`);
-  check("单份长度 = 2+6+8+4+3 = 23", job.length === 23, String(job.length));
+  check("以 FF 走纸到下一标签收尾（多张不串位关键）",
+    job[20] === 0x0c,
+    `job[20]=${job[20]}`);
+  check("单份长度 = 2+6+8+4+1 = 21", job.length === 21, String(job.length));
 
   const two = buildEscPosJob(raster, { copies: 2, feed: 3 });
-  check("两份 = 2+6+2×(8+4+3) = 38", two.length === 38, String(two.length));
-  // 第 2 份从第 23 字节开始（2 复位 + 6 标签模式 + 15 第一份）
+  check("两份 = 2+6+2×(8+4+1) = 34", two.length === 34, String(two.length));
+  // 第 2 份从第 21 字节开始（2 复位 + 6 标签模式 + 13 第一份）
   check("两份的第二份仍是完整报文",
-    two[23] === 0x1d && two[24] === 0x76 && two[25] === 0x30 && two[26] === 0x00 &&
-      two[27] === 0x02 && two[29] === 0x02 && two[37] === 3,
-    Array.from(two.slice(23)).join(","));
+    two[21] === 0x1d && two[22] === 0x76 && two[23] === 0x30 && two[24] === 0x00 &&
+      two[25] === 0x02 && two[27] === 0x02 && two[33] === 0x0c,
+    Array.from(two.slice(21)).join(","));
   check("两份逐字节相同（除长度翻倍）",
-    Array.from(two.slice(8, 23)).join(",") === Array.from(two.slice(23, 38)).join(","),
-    Array.from(two.slice(23, 38)).join(","));
+    Array.from(two.slice(8, 21)).join(",") === Array.from(two.slice(21, 34)).join(","),
+    Array.from(two.slice(21, 34)).join(","));
 
-  check("份数 0 兜底成 1 份", buildEscPosJob(raster, { copies: 0 }).length === 23,
+  check("份数 0 兜底成 1 份", buildEscPosJob(raster, { copies: 0 }).length === 21,
     String(buildEscPosJob(raster, { copies: 0 }).length));
   check("份数超上限夹到 50",
-    buildEscPosJob(raster, { copies: 999 }).length === 2 + 6 + 50 * 15,
+    buildEscPosJob(raster, { copies: 999 }).length === 2 + 6 + 50 * 13,
     String(buildEscPosJob(raster, { copies: 999 }).length));
-  check("feed 缺省按 0（不崩）", buildEscPosJob(raster, {}).length === 23);
-  check("feed 负数夹成 0",
-    buildEscPosJob(raster, { copies: 1, feed: -5 })[22] === 0,
-    String(buildEscPosJob(raster, { copies: 1, feed: -5 })[22]));
+  check("feed 缺省按 0（不崩）", buildEscPosJob(raster, {}).length === 21);
+  check("feed 已废弃（结尾恒为 FF，不崩）",
+    buildEscPosJob(raster, { copies: 1, feed: -5 })[20] === 0x0c,
+    String(buildEscPosJob(raster, { copies: 1, feed: -5 })[20]));
 
   // 403 点宽（50mm @ 203dpi）时行宽高字节仍要为 0，不能溢出成 0x00 0x00 之外的值
   const wide = buildEscPosJob(

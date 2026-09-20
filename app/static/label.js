@@ -374,8 +374,11 @@
         ])
       );
       parts.push(raster.bytes);
-      // ESC d n：走 n 行，把标签送过撕纸口
-      parts.push(Uint8Array.from([0x1b, 0x64, Math.max(0, cfg.feed | 0) & 0xff]));
+      // FF (0x0c)：间隙走纸到下一标签起点。
+      // 汉印官方多张连打抓包确认：连打不串位的关键就是每张结尾发 FF 而非 ESC d n。
+      // ESC d n 是固定行数进给，对不准标签间距会逐张累积漂移；FF 在间隙标签模式下
+      // 走纸到下一个标签起点，所以汉码一次连打多张都不偏。
+      parts.push(Uint8Array.from([0x0c]));
     }
     return concatBytes(parts);
   }
