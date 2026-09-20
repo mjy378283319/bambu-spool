@@ -77,7 +77,7 @@
   const LABEL = {
     cfg: null,
     spoolId: 0,
-    ble: { device: null, server: null, char: null, notify: null, chunk: 182, services: [], writes: [] },
+    ble: { device: null, server: null, char: null, notify: null, chunk: 20, services: [], writes: [] },
     busy: false,
     progress: "",
     probeLog: [],
@@ -391,8 +391,14 @@
       throw new Error("当前浏览器不支持 Web Bluetooth。请用电脑版 Chrome / Edge，或安卓 Chrome；iPhone 上只能用「下载标签图」。");
     }
     const st = LABEL.ble;
-    if (st.char && st.device && st.device.gatt.connected) return st;
+    // 已连且特征有效：直接复用，不强制重连（0.12.12 那种每次强制重连反而一打印就掉链）
+    if (st.char && st.device && st.device.gatt && st.device.gatt.connected) return st;
 
+    // 否则清空旧状态（含僵尸连接），重新走配对
+    LABEL.ble = {
+      device: null, server: null, char: null, notify: null,
+      chunk: 20, services: [], writes: [],
+    };
     const opts = showAll
       ? { acceptAllDevices: true, optionalServices: BLE_SERVICES }
       : {
@@ -406,6 +412,7 @@
         };
 
     const device = await navigator.bluetooth.requestDevice(opts);
+    device.addEventListener("gattserverdisconnected", onGattDisconnected);
     const server = await device.gatt.connect();
     const services = await server.getPrimaryServices();
 
@@ -440,48 +447,46 @@
     }
     if (!writeChar) writeChar = allWrites[0] || null;
 
-    st.device = device;
-    st.server = server;
-    st.char = writeChar;
-    st.notify = notifyChar;
-    st.chunk = writeChar && writeChar.properties.writeWithoutResponse ? 182 : 64;
-    st.services = seen;
-    st.writes = allWrites.map((c) => c.uuid);
-    st.notifyUuid = notifyChar ? notifyChar.uuid : "";
+    const st2 = LABEL.ble;
+    st2.device = device;
+    st2.server = server;
+    st2.char = writeChar;
+    st2.notify = notifyChar;
+    // 优先应答写入（有流控、失败可感知、浏览器按 MTU 自动分包）；不支持才退回无应答 20 字节
+    st2.chunk = writeChar && writeChar.properties.write ? 182 : 20;
+    st2.services = seen;
+    st2.writes = allWrites.map((c) => c.uuid);
+    st2.notifyUuid = notifyChar ? notifyChar.uuid : "";
 
     if (!writeChar) {
       throw new Error("连上了 " + (device.name || "设备") + "，但没找到可写特征。请到「诊断」里看服务列表并反馈。");
     }
-    return st;
+    return st2;
   }
 
   async function bleWriteAll(bytes, onProgress) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
-    const useNoResp = !!st.char.properties.writeWithoutResponse;
-    let size = st.chunk;
+    const useAck = !!st.char.properties.write;            // 优先应答写入：有流控、失败可感知
+    const useNoResp = !useAck && !!st.char.properties.writeWithoutResponse;
+    if (!useAck && !useNoResp) throw new Error("特征不支持写入");
+    const size = useAck ? 182 : 20;                       // 应答写由浏览器按 MTU 分包；无应答写必须 ≤ MTU(20)
     let sent = 0;
     const parts = [];
     while (sent < bytes.length) {
       const end = Math.min(sent + size, bytes.length);
       const chunk = bytes.subarray(sent, end);
       try {
-        if (useNoResp) await st.char.writeValueWithoutResponse(chunk);
-        else await st.char.writeValue(chunk);
+        if (useAck) await st.char.writeValue(chunk);
+        else await st.char.writeValueWithoutResponse(chunk);
       } catch (err) {
-        // 多半是单包超了链路 MTU，减半重试
-        if (size > 24) {
-          size = Math.max(24, Math.floor(size / 2));
-          st.chunk = size;
-          parts.push("分包降到 " + size + " 字节重试");
-          continue;
-        }
+        // 无应答写单包超长：降到 20 字节兜底重试
+        if (!useAck && size > 20) { size = 20; parts.push("无应答写超长，改 20 字节分包"); continue; }
         throw err;
       }
       sent = end;
       if (onProgress) onProgress(sent, bytes.length);
-      // 无应答写入没有流控，节奏太快打印机会丢数据
-      if (useNoResp) await sleep(12);
+      if (useNoResp) await sleep(20);                     // 无应答写无流控，≥20ms 才稳
     }
     return parts;
   }
@@ -516,14 +521,25 @@
   function bleDisconnect() {
     const st = LABEL.ble;
     try {
-      if (st.device && st.device.gatt.connected) st.device.gatt.disconnect();
+      if (st.device && st.device.gatt && st.device.gatt.connected) st.device.gatt.disconnect();
     } catch (err) {
       /* 已经断了就算了 */
     }
     LABEL.ble = {
       device: null, server: null, char: null, notify: null,
-      chunk: 182, services: [], writes: [],
+      chunk: 20, services: [], writes: [],
     };
+    renderBlePanel();
+  }
+
+  // 物理断电 / 系统空闲掉链：清空状态，下次连接重新枚举，避免卡在僵尸连接上
+  function onGattDisconnected() {
+    LABEL.ble = {
+      device: null, server: null, char: null, notify: null,
+      chunk: 20, services: [], writes: [],
+    };
+    if (typeof renderBlePanel === "function") renderBlePanel();
+    toast("打印机已断开，请重新连接", "err");
   }
 
   /* ── 对外动作 ───────────────────────────────────────────── */
@@ -593,19 +609,20 @@
       const cfg = loadCfg();
       labelProgress("正在连接蓝牙…");
       await bleConnect(cfg.showAll);
-      labelProgress("正在渲染标签…");
       const canvas = await labelCanvas();
       const raster = packRaster(canvas, cfg.density);
       const job = buildEscPosJob(raster, cfg);
-      const started = Date.now();
-      const notes = await bleWriteAll(job, (sent, total) => {
-        labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-      });
-      const secs = ((Date.now() - started) / 1000).toFixed(1);
-      labelProgress(
-        "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节" +
-        (notes.length ? "；" + notes.join("；") : "")
-      );
+      try {
+        await sendJob(job);
+      } catch (err) {
+        // 第一包都没发出去（链路可能死了）→ 强制断开重建后整份重发一次
+        labelProgress("发送失败，重建链路重试…");
+        bleDisconnect();
+        await bleConnect(cfg.showAll);
+        const canvas2 = await labelCanvas();
+        const raster2 = packRaster(canvas2, cfg.density);
+        await sendJob(buildEscPosJob(raster2, cfg));
+      }
       toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
       renderBlePanel();
     } catch (err) {
@@ -614,6 +631,18 @@
     } finally {
       LABEL.busy = false;
     }
+  }
+
+  async function sendJob(job) {
+    const started = Date.now();
+    const notes = await bleWriteAll(job, (sent, total) => {
+      labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
+    });
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    labelProgress(
+      "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节" +
+      (notes.length ? "；" + notes.join("；") : "")
+    );
   }
 
   async function labelBleProbe() {
