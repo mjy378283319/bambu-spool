@@ -65,17 +65,65 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(SRC, "utf8"), sandbox, { filename: "label.js" });
 
-const { mm2dot, packRaster, buildEscPosJob, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
+const { mm2dot, packRaster, buildEscPosJob, rasterCommands, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
+
+/* ── 报文解析器 ──────────────────────────────────────────────
+ * 把作业字节流按指令顺序解出来。它同时是「结构自检」：
+ * 只要出现一个解析不了的字节，就说明报文被切错了（位图数据长度写错、段边界算错…）。
+ * 光栅指令按 x*y 精确跳过数据，所以数据里含 1b/1d/0c 也不会被误认成指令。
+ */
+function parseJob(bytes) {
+  const out = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i];
+    if (b === 0x1b && bytes[i + 1] === 0x40) { out.push({ op: "reset" }); i += 2; continue; }
+    if (b === 0x1d && bytes[i + 1] === 0x73 && bytes[i + 2] === 0x65 && bytes[i + 3] === 0x74 && bytes[i + 4] === 0x70) {
+      out.push({ op: "setp", mode: bytes[i + 5] });
+      i += 6;
+      continue;
+    }
+    if (b === 0x1d && bytes[i + 1] === 0x50) {          // GS P x y：走纸单位
+      out.push({ op: "pitch", x: bytes[i + 2] | (bytes[i + 3] << 8), y: bytes[i + 4] | (bytes[i + 5] << 8) });
+      i += 6;
+      continue;
+    }
+    if (b === 0x1d && bytes[i + 1] === 0x76 && bytes[i + 2] === 0x30) {
+      const m = bytes[i + 3];
+      const x = bytes[i + 4] | (bytes[i + 5] << 8);
+      const y = bytes[i + 6] | (bytes[i + 7] << 8);
+      let sum = 0;
+      for (let k = i + 8; k < i + 8 + x * y; k++) sum += bytes[k];
+      out.push({ op: "raster", m, x, y, sum });
+      i += 8 + x * y;
+      continue;
+    }
+    if (b === 0x1b && bytes[i + 1] === 0x4a) { out.push({ op: "feed", n: bytes[i + 2] }); i += 3; continue; }
+    if (b === 0x0c) { out.push({ op: "ff" }); i += 1; continue; }
+    out.push({ op: "unknown", b });
+    i += 1;
+  }
+  return out;
+}
+
+/** 造一个光栅：rowBytes(y) 返回该行的字节数组（长度 = bytesPerRow） */
+function mkRaster(rows, bytesPerRow, rowBytes) {
+  const bytes = new Uint8Array(rows * bytesPerRow);
+  for (let y = 0; y < rows; y++) bytes.set(rowBytes(y), y * bytesPerRow);
+  return { bytes, bytesPerRow, heightDots: rows, widthDots: bytesPerRow * 8 };
+}
+const BLANK_ROW_52 = () => new Uint8Array(52);
 
 /* ── 1. 暴露面 ─────────────────────────────────────────────── */
 // label.js 里所有 onclick/onchange 会碰到的函数，一个都不能少。
 // 少一个的表现是「按钮点了没反应」，而 JS 控制台只报一个 ReferenceError，
 // 很容易漏 —— 所以这里按名单逐个点名。
 const REQUIRED_HANDLERS = [
-  "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintBle",
-  "labelBleProbe", "labelBleCalibrate", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
+  "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle",
+  "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst", "labelPickShowAll",
+  "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
+  "labelPickBandRows", "labelPickBlankSkip", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -167,6 +215,15 @@ function testPackRaster() {
 }
 
 /* ── 4. ESC/POS 报文 ───────────────────────────────────────── */
+function concatBytes(parts) {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
 function testEscPosJob() {
   console.log("== ESC/POS 报文 ==");
   const raster = {
@@ -177,66 +234,176 @@ function testEscPosJob() {
   };
 
   const job = buildEscPosJob(raster, { copies: 1 });
-  const head = Array.from(job.slice(0, 8));
-  // 关键回归：正常首发生成**不发** ESC @（对齐汉码官方抓包，官方流里 `1b 40` 出现 0 次）。
-  // 发复位会让固件放弃当前纸位、重新做标签检测 → 第一张偏移（用户 0.12.18 实测）。
-  check("默认不发 ESC @ 复位（第一张不偏的关键）",
-    !(job[0] === 0x1b && job[1] === 0x40), head.join(","));
-  check("默认第一个字节就是 GS \"setp\" 01（标签纸模式）",
-    [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => job[i] === b),
-    Array.from(job.slice(0, 6)).join(","));
-  check("接 GS v 0 m=0 光栅指令",
-    [0x1d, 0x76, 0x30, 0x00].every((b, i) => job[6 + i] === b),
-    Array.from(job.slice(6, 10)).join(","));
-  check("行宽小端（2 → 02 00）", job[10] === 0x02 && job[11] === 0x00, `${job[10]},${job[11]}`);
-  check("行数小端（2 → 02 00）", job[12] === 0x02 && job[13] === 0x00, `${job[12]},${job[13]}`);
-  check("位图数据紧随其后（不丢不改）",
-    Array.from(job.slice(14, 18)).join(",") === "170,187,204,221",
-    Array.from(job.slice(14, 18)).join(","));
-  check("以 FF 走纸到下一标签收尾（多张不串位关键）",
-    job[18] === 0x0c,
-    `job[18]=${job[18]}`);
-  check("单份长度 = 6+8+4+1 = 19（无复位）", job.length === 19, String(job.length));
+  const ops = parseJob(job);
+  check("报文能顺序解析完（无未知字节 → 段边界没算错）",
+    ops.every((o) => o.op !== "unknown"), JSON.stringify(ops));
+  // 2026-09-20 真机实测：不勾「打印前复位」时发送会中途停住、根本打不出来；勾上才出纸。
+  // 与官方抓包（1b 40 出现 0 次）相反，原因是官方 App 打印前自带初始化，浏览器直连没有。
+  check("默认发 ESC @ 复位（实测不发则发送停住、打不出来）",
+    job[0] === 0x1b && job[1] === 0x40, Array.from(job.slice(0, 2)).join(","));
+  check("复位后紧跟 GS \"setp\" 01（标签纸模式）",
+    [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => job[2 + i] === b),
+    Array.from(job.slice(2, 8)).join(","));
+  // 空白行跳过靠 ESC J 走纸，纵向单位各家常不一样（1/203、1/144、1/360），
+  // 所以必须显式下发 GS P 203 203 把单位钉成 1 点，否则整张标签会被拉长/压扁。
+  check("跟一条 GS P 203 203（钉住 ESC J 的走纸单位 = 1 点）",
+    [0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00].every((b, i) => job[8 + i] === b),
+    Array.from(job.slice(8, 14)).join(","));
+  check("单份长度 = 2+6+6+8+4+1 = 27", job.length === 27, String(job.length));
+
+  const r = ops.find((o) => o.op === "raster");
+  check("含一条 GS v 0 光栅指令", !!r);
+  check("GS v 0 m=0（未压缩位图）", r && r.m === 0x00, r && String(r.m));
+  check("行宽小端（2 → 02 00）", r && r.x === 2, r && String(r.x));
+  check("行数小端（2 → 02 00）", r && r.y === 2, r && String(r.y));
+  check("位图数据不丢不改（aa+bb+cc+dd = 694）",
+    r && r.sum === 0xaa + 0xbb + 0xcc + 0xdd, r && String(r.sum));
+  check("以 FF 走纸收尾（多张不串位关键）", job[job.length - 1] === 0x0c, String(job[job.length - 1]));
+
+  // 关掉复位 + 关掉空白跳过 = 对齐官方抓包的最小形态（不含 ESC @ / GS P）
+  const noReset = buildEscPosJob(raster, { copies: 1, resetFirst: false, blankSkip: false });
+  check("关掉复位与空白跳过 → 首字节就是 setp 01（对齐官方抓包）",
+    [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => noReset[i] === b),
+    Array.from(noReset.slice(0, 6)).join(","));
+  check("不发 GS P（不省空白就不需要走纸命令）",
+    !(noReset[6] === 0x1d && noReset[7] === 0x50), Array.from(noReset.slice(6, 14)).join(","));
+  check("该形态长度回到 19（= 6+8+4+1）", noReset.length === 19, String(noReset.length));
 
   const two = buildEscPosJob(raster, { copies: 2 });
-  check("两份 = 6+2×(8+4+1) = 32", two.length === 32, String(two.length));
-  // 第 2 份从第 19 字节开始（6 标签模式 + 13 第一份）
-  check("两份的第二份仍是完整报文",
-    two[19] === 0x1d && two[20] === 0x76 && two[21] === 0x30 && two[22] === 0x00 &&
-      two[23] === 0x02 && two[25] === 0x02 && two[31] === 0x0c,
-    Array.from(two.slice(19)).join(","));
-  check("两份逐字节相同（除长度翻倍）",
-    Array.from(two.slice(6, 19)).join(",") === Array.from(two.slice(19, 32)).join(","),
-    Array.from(two.slice(19, 32)).join(","));
+  const twoOps = parseJob(two);
+  check("两份 = 2 条光栅 + 2 个 FF",
+    twoOps.filter((o) => o.op === "raster").length === 2 &&
+      twoOps.filter((o) => o.op === "ff").length === 2, JSON.stringify(twoOps));
+  check("两份长度 = 27+13 = 40", two.length === 40, String(two.length));
+  check("两份的第二份与第一份逐字节相同（复位/GS P 只发一次）",
+    Array.from(two.slice(14, 27)).join(",") === Array.from(two.slice(27, 40)).join(","),
+    Array.from(two.slice(27)).join(","));
 
-  check("份数 0 兜底成 1 份", buildEscPosJob(raster, { copies: 0 }).length === 19,
-    String(buildEscPosJob(raster, { copies: 0 }).length));
+  check("份数 0 兜底成 1 份",
+    parseJob(buildEscPosJob(raster, { copies: 0 })).filter((o) => o.op === "raster").length === 1);
   check("份数超上限夹到 50",
-    buildEscPosJob(raster, { copies: 999 }).length === 6 + 50 * 13,
-    String(buildEscPosJob(raster, { copies: 999 }).length));
-  check("feed 缺省按 0（不崩）", buildEscPosJob(raster, {}).length === 19);
+    parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length === 50,
+    String(parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length));
+  check("cfg 只有 copies 也不崩（其余走默认）",
+    parseJob(buildEscPosJob(raster, {})).filter((o) => o.op === "ff").length === 1);
   check("feed 已废弃（结尾恒为 FF，不崩）",
-    buildEscPosJob(raster, { copies: 1, feed: -5 })[18] === 0x0c,
-    String(buildEscPosJob(raster, { copies: 1, feed: -5 })[18]));
+    buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0] === 0x0c,
+    String(buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0]));
 
-  // ESC @ 只该出现在两处：断链重发（opts.reset）或用户显式勾选（cfg.resetFirst）
-  const retry = buildEscPosJob(raster, { copies: 1 }, { reset: true });
-  check("重发时发 ESC @ 复位（清打印机里的半份残留）",
-    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 21,
+  // ESC @ 只该在「断链重发」或「用户勾了复位」时出现
+  const retry = buildEscPosJob(raster, { copies: 1, resetFirst: false }, { reset: true });
+  check("重发时强制发 ESC @（清打印机里的半份残留）",
+    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 27,
     Array.from(retry.slice(0, 2)).join(",") + " len=" + retry.length);
-  const forced = buildEscPosJob(raster, { copies: 1, resetFirst: true });
-  check("勾选「打印前复位」后首份也发 ESC @",
-    forced[0] === 0x1b && forced[1] === 0x40 && forced.length === 21,
-    Array.from(forced.slice(0, 2)).join(",") + " len=" + forced.length);
   check("{reset:false} 显式压过 cfg.resetFirst",
-    buildEscPosJob(raster, { copies: 1, resetFirst: true }, { reset: false }).length === 19);
+    buildEscPosJob(raster, { copies: 1, resetFirst: true }, { reset: false })[0] !== 0x1b);
 
-  // 403 点宽（50mm @ 203dpi）时行宽高字节仍要为 0，不能溢出成 0x00 0x00 之外的值
-  const wide = buildEscPosJob(
-    { bytes: new Uint8Array(51 * 2), bytesPerRow: 51, heightDots: 2, widthDots: 403 },
-    { copies: 1 }
+  // 403 点宽（50mm @ 203dpi）时行宽高字节仍要为 0，不能溢出。
+  // 注意位图必须非空：空白行会被「空白跳过」吃掉，那样测的就不是行宽字段了。
+  const wide = parseJob(
+    buildEscPosJob(
+      { bytes: Uint8Array.from({ length: 51 * 2 }, () => 0xff), bytesPerRow: 51, heightDots: 2, widthDots: 403 },
+      { copies: 1, blankSkip: false }
+    )
   );
-  check("403 点宽 → 行宽 51 字节（0x33 0x00）", wide[10] === 51 && wide[11] === 0, `${wide[10]},${wide[11]}`);
+  check("403 点宽 → 行宽 51 字节（0x33 0x00）", wide.find((o) => o.op === "raster").x === 51,
+    JSON.stringify(wide.find((o) => o.op === "raster")));
+  check("行宽超过 255 也不截断（0x33 0x00 而非 0x33 0x01）",
+    wide.find((o) => o.op === "raster").x === 51 && wide.find((o) => o.op === "raster").y === 2,
+    JSON.stringify(wide.find((o) => o.op === "raster")));
+}
+
+/* ── 4a2. 分带 / 空白跳过 ──────────────────────────────────────
+ * 这两条是「为什么汉印发得动、我们发不动」的直接对策：
+ *   汉码官方每张只发 3475 字节（私有压缩位图），而且拆成 22 条 10 行的 GS v 0（每条 520 字节）；
+ *   我们原来是 12000 字节一整坨未压缩位图 —— 50mm 宽、218 行满幅，纯白行占七成体积。
+ *   空白行用 ESC J 走纸跳过（3 字节换 52 字节），作业体积掉到 1/3，逼近官方量级。
+ */
+function testRasterCommands() {
+  console.log("== 分带与空白跳过 ==");
+  const ROWS = 218;
+  const BPR = 52;
+  const header = (c) => c[0] === 0x1d && c[1] === 0x76 && c[2] === 0x30;
+  const isFeed = (c) => c[0] === 0x1b && c[1] === 0x4a;
+  const size = (cmds) => cmds.reduce((a, c) => a + c.length, 0);
+
+  // 1) 全空白：一行位图都不该发，全用 ESC J 跳过
+  const blank = mkRaster(ROWS, BPR, BLANK_ROW_52);
+  const c1 = rasterCommands(blank, { bandRows: 10, blankSkip: true });
+  check("全空白标签 → 一条光栅指令都不发", c1.every((c) => !header(c)), size(c1) + " 字节");
+  check("ESC J 合计走纸 218 点（= 218 行空白）",
+    c1.filter(isFeed).reduce((a, c) => a + c[2], 0) === ROWS,
+    String(c1.filter(isFeed).reduce((a, c) => a + c[2], 0)));
+  check("全空白作业不到 20 字节（旧写法 218×52 = 11336 字节）", size(c1) < 20, String(size(c1)));
+
+  // 2) 关掉空白跳过 → 回到一整块位图（旧行为）
+  const c2 = rasterCommands(blank, { bandRows: 0, blankSkip: false });
+  check("关掉空白跳过 → 只剩一条 GS v 0 + 一块数据",
+    c2.length === 2 && header(c2[0]) && c2[1].length === ROWS * BPR,
+    `${c2.length} 段 / ${c2[1] && c2[1].length} 字节`);
+  check("关掉后行数字段 = 218（0xda 0x00）", c2[0][6] === 0xda && c2[0][7] === 0x00,
+    `${c2[0][6]},${c2[0][7]}`);
+
+  // 3) 分带：官方同款每 10 行一条（22 条 = 21×10 + 8）
+  const c3 = rasterCommands(blank, { bandRows: 10, blankSkip: false });
+  const heads = c3.filter(header);
+  check("分带 10 行 → 22 条 GS v 0（对齐汉码抓包 22 块）", heads.length === 22, String(heads.length));
+  check("每条行数 10，最后一条 8（合计仍 218 行）",
+    heads.slice(0, 21).every((h) => h[6] === 10) && heads[21][6] === 8 &&
+      heads.reduce((a, h) => a + h[6], 0) === ROWS,
+    heads.map((h) => h[6]).join(","));
+  check("每块载荷 520 字节（不再是 11KB 一整坨）",
+    c3[1].length === 520 && c3[2 * 21 + 1].length === 416,
+    `${c3[1].length} / ${c3[2 * 21 + 1].length}`);
+  check("分带后行宽仍是 52 字节", heads.every((h) => h[4] === 52 && h[5] === 0), String(heads[0][4]));
+
+  // 4) 首尾有内容、中间全空白 → 块 + 跳过 + 块
+  const sparse = mkRaster(100, BPR, (y) => {
+    const row = new Uint8Array(BPR);
+    if (y === 0 || y === 99) row[0] = 0xff;
+    return row;
+  });
+  const c4 = parseJob(concatBytes(rasterCommands(sparse, { bandRows: 0, blankSkip: true })));
+  check("稀疏标签 → 位图 / ESC J 98 / 位图",
+    c4.length === 3 && c4[0].op === "raster" && c4[0].y === 1 &&
+      c4[1].op === "feed" && c4[1].n === 98 && c4[2].op === "raster" && c4[2].y === 1,
+    JSON.stringify(c4));
+
+  // 5) 空白段超过 255 点要拆多条（ESC J 单条上限 255）
+  const longBlank = mkRaster(600, BPR, BLANK_ROW_52);
+  const c5 = rasterCommands(longBlank, { bandRows: 0, blankSkip: true });
+  check("空白段超 255 点自动拆成 255+255+90",
+    c5.length === 3 && c5[0][2] === 255 && c5[1][2] === 255 && c5[2][2] === 90,
+    c5.map((c) => c[2]).join(","));
+
+  // 6) 真实尺寸的整份作业：要如实反映「标签上有二维码」这件事 ——
+  //    二维码那几十行整行都有墨，跳过不了；能省的只有纯白行（上部、行间、底部）。
+  //    按我们自己的版式（二维码占右上、纵向约四成高），省幅大概在三到五成。
+  const rows218 = rasterRowsFor(30, 2.75, 203);
+  const withQr = mkRaster(rows218, BPR, (y) => {
+    const row = new Uint8Array(BPR);
+    if (y < 90) {
+      for (let i = 30; i < BPR - 2; i++) row[i] = (y + i) % 2 ? 0xb4 : 0xff; // 二维码带
+    } else if (y % 30 === 0) {
+      row[2] = 0xff;                                                        // 零散文字行
+    }
+    return row;
+  });
+  const cfgNew = { copies: 1, bandRows: 10, blankSkip: true, resetFirst: true };
+  const jobNew = buildEscPosJob(withQr, cfgNew);
+  const jobOld = buildEscPosJob(withQr, { copies: 1, bandRows: 0, blankSkip: false, resetFirst: true });
+  check("新作业能解析完（结构自检）",
+    parseJob(jobNew).every((o) => o.op !== "unknown"), JSON.stringify(parseJob(jobNew).slice(0, 6)));
+  check("带二维码的真实作业仍能省下四分之一以上",
+    jobNew.length * 4 < jobOld.length * 3, `${jobNew.length} vs ${jobOld.length}`);
+  check("省幅有上限：二维码整行跳过不了（省不到 2/3）",
+    jobNew.length * 3 > jobOld.length, `${jobNew.length} vs ${jobOld.length}`);
+  check("省下来的都是纯白行（ESC J 段数 ≥ 3，不是只砍了底部留白）",
+    parseJob(jobNew).filter((o) => o.op === "feed").length >= 3,
+    String(parseJob(jobNew).filter((o) => o.op === "feed").length));
+  check("多份时每份仍以 FF 收尾",
+    parseJob(buildEscPosJob(withQr, { copies: 3, bandRows: 10, blankSkip: true }))
+      .filter((o) => o.op === "ff").length === 3);
 }
 
 /* ── 4b. 底部留白 / 光栅高度 ───────────────────────────────── */
@@ -268,26 +435,25 @@ function testFootMargin() {
     rasterRowsFor(30, 999, 203) >= 8, String(rasterRowsFor(30, 999, 203)));
   check("光栅行数恒为整数", Number.isInteger(rasterRowsFor(30, 2.75, 203)));
 
-  // 留白必须真的作用到报文里：同等份数下，留白越大报文越短
+  // 留白必须真的作用到报文里：同等份数下，留白越大报文越短。
+  // 这里刻意把两个「省体积」开关关掉，单独量留白对报文体量的作用。
+  const BPR = 52;
+  const mkSolid = (rows) => mkRaster(rows, BPR, () => Uint8Array.from({ length: BPR }, () => 0xff));
+  const base = { copies: 2, bandRows: 0, blankSkip: false, resetFirst: true };
   const rows218 = rasterRowsFor(30, 2.75, 203);
   const rows240 = rasterRowsFor(30, 0, 203);
-  const jobSmall = buildEscPosJob(
-    { bytes: new Uint8Array(2 * rows218), bytesPerRow: 2, heightDots: rows218, widthDots: 16 },
-    { copies: 2 }
-  );
-  const jobBig = buildEscPosJob(
-    { bytes: new Uint8Array(2 * rows240), bytesPerRow: 2, heightDots: rows240, widthDots: 16 },
-    { copies: 2 }
-  );
-  check("留白后的两份报文确实更短（每份少 22 行×2 字节）",
-    jobBig.length - jobSmall.length === 2 * 22 * 2,
+  const jobSmall = buildEscPosJob(mkSolid(rows218), base);
+  const jobBig = buildEscPosJob(mkSolid(rows240), base);
+  check("留白后的两份报文确实更短（每份少 22 行×52 字节）",
+    jobBig.length - jobSmall.length === 2 * 22 * BPR,
     `${jobBig.length} vs ${jobSmall.length}`);
-  check("留白后每份仍以 FF 收尾", jobSmall[6 + 8 + 2 * rows218] === 0x0c,
-    String(jobSmall[6 + 8 + 2 * rows218]));
-  check("行数字段写进报文（218 = 0xDA 0x00）",
-    jobSmall[12] === 0xda && jobSmall[13] === 0x00, `${jobSmall[12]},${jobSmall[13]}`);
-  check("报文长度 = 6+2×(8+2×218+1)（数据无隐藏裁剪）",
-    jobSmall.length === 6 + 2 * (8 + 2 * rows218 + 1), String(jobSmall.length));
+  check("留白后每份仍以 FF 收尾",
+    parseJob(jobSmall).filter((o) => o.op === "ff").length === 2);
+  check("行数字段写进报文（218 = 0xda 0x00）",
+    parseJob(jobSmall).find((o) => o.op === "raster").y === 218,
+    String(parseJob(jobSmall).find((o) => o.op === "raster").y));
+  check("报文长度 = 2+6+2×(8+52×218+1)（数据无隐藏裁剪）",
+    jobSmall.length === 2 + 6 + 2 * (8 + BPR * rows218 + 1), String(jobSmall.length));
 }
 
 /* ── 5. 对话框装配 ─────────────────────────────────────────── */
@@ -330,7 +496,13 @@ async function testDialogHtml() {
   check("含 dpi 选项", html.includes('value="203"') && html.includes('value="300"'));
   check("含浓度与份数", html.includes('id="labelDensity"') && html.includes('id="labelCopies"'));
   check("含底部留白字段（多张连打不串位的关键参数）", html.includes('id="labelFootMargin"'));
-  check("含「打印前复位」开关（第一张偏移时做 A/B）", html.includes('id="labelResetFirst"'));
+  check("含「打印前复位」开关（真机实测不发则打不出来）", html.includes('id="labelResetFirst"'));
+  check("含「官方同款分带」开关", html.includes('id="labelBandRows"'));
+  check("含「空白行不传数据」开关（体积压到 1/3）", html.includes('id="labelBlankSkip"'));
+  check("含导出作业与对齐标签两个诊断按钮",
+    html.includes("labelExportJob") && html.includes("labelBleAlign"));
+  check("提示语写清「先连接→再间隙学习→再打印」的顺序",
+    html.includes("间隙学习") && html.includes("3475"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
   check("含预览挂点", html.includes('id="labelPreviewHost"'));
   check("提示语提到 T260LR 蓝牙方案", html.includes("T260LR"));
@@ -362,6 +534,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testMm2dot();
   testPackRaster();
   testEscPosJob();
+  testRasterCommands();
   testFootMargin();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);

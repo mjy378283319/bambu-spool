@@ -137,9 +137,21 @@
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
     // 2.75mm 是对齐汉码官方抓包的取值（50×30 标签只发 218 行 = 27.28mm）。
-    // resetFirst = 正常首发生成是否也发 ESC @ 复位。默认 false（对齐汉码官方抓包：
-    // 官方流里一次复位都不发）；勾上用于 A/B 排查「第一张偏移」。
-    return { wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1, footMargin: 2.75, resetFirst: false, showAll: false };
+    // resetFirst = 正常首发生成是否也发 ESC @ 复位。
+    //   默认 **true**：2026-09-20 真机实测，不发 ESC @ 时发送会在中途停住、根本打不出来；
+    //   发复位才打得出来（代价是第一张位置略偏）。虽然官方抓包流里 1b 40 出现 0 次，
+    //   但官方 App 在打印前一定做过自己的初始化/定位，浏览器直连没有那一步，
+    //   所以这里以真机实测为准。想回到「不发」把开关去掉即可。
+    // bandRows = 光栅分带行数：官方抓包是 22 个 GS v 0 块、每块 10 行（21×10 + 8 = 218 行），
+    //   不是一整块 218 行。分带后单条指令的载荷从 ~11KB 降到 520 字节，
+    //   与官方同构，打印机不必一次收满整张才动。0 = 不分带（旧行为）。
+    // blankSkip = 空白行不传数据，改用 ESC J 走纸跳过（见 rasterCommands）。
+    //   纯白标签的空白行占位图体积的 70%+，跳过能把 50×30 的作业从 ~12KB 压到 ~3KB，
+    //   逼近官方压缩流的 3475 字节/张 —— 这是「汉印发得动、我们发不动」的关键差距。
+    return {
+      wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1,
+      footMargin: 2.75, resetFirst: true, bandRows: 10, blankSkip: true, showAll: false,
+    };
   }
 
   function loadCfg() {
@@ -379,39 +391,114 @@
     return { bytes: out, widthDots: w, heightDots: h, bytesPerRow };
   }
 
+  /** 连续多少行空白才值得改成 ESC J 跳过。
+   *  一行空白在光栅里要占 bytesPerRow（50mm@203dpi = 52）字节，而 ESC J 只要 3 字节，
+   *  所以哪怕只跳过 1 行也省；取 2 是为了别把报文切得太碎（每段还要 8 字节 GS v 0 头）。 */
+  const BLANK_RUN_MIN = 2;
+
+  /** 一张标签 → 指令序列（不含开头的模式设置与结尾走纸）。
+   *
+   *  两个旋钮都在这里生效：
+   *   · bandRows>0：光栅按 bandRows 行切成多块，每块一条 GS v 0（对齐官方抓包：22 块 × 10 行）；
+   *   · blankSkip：连续 ≥BLANK_RUN_MIN 行空白不发位图数据，改用 ESC J n 走纸跳过
+   *     （ESC J 的走纸单位就是 1 点，203dpi 下 n = n 个点，与打印 n 行空白等价）。
+   *     空白行的位图是一串 0x00，占体积却没内容 —— 官方靠私有压缩干掉它们（3.4:1），
+   *     我们用 ESC J 达到同样目的，且不依赖未破译的私有压缩格式。
+   *  返回 Uint8Array 数组，调用方直接 concat。 */
+  function rasterCommands(raster, cfg) {
+    const w = raster.bytesPerRow;
+    const rows = raster.heightDots;
+    const data = raster.bytes;
+    const bandRows = Math.max(0, Math.floor(Number(cfg && cfg.bandRows) || 0));
+    const skipBlank = !(cfg && cfg.blankSkip === false);
+    const cmds = [];
+
+    const isBlankRow = (y) => {
+      const at = y * w;
+      for (let i = 0; i < w; i++) if (data[at + i]) return false;
+      return true;
+    };
+    // 光栅块：再按 bandRows 切成一条条 GS v 0（bandRows=0 就是整块一条）
+    const pushRaster = (y0, y1) => {
+      const step = bandRows > 0 ? bandRows : y1 - y0;
+      for (let y = y0; y < y1; y += step) {
+        const n = Math.min(step, y1 - y);
+        cmds.push(
+          Uint8Array.from([
+            0x1d, 0x76, 0x30, 0x00,        // GS v 0 m=0 光栅位图
+            w & 0xff, (w >> 8) & 0xff,
+            n & 0xff, (n >> 8) & 0xff,
+          ])
+        );
+        cmds.push(data.subarray(y * w, (y + n) * w));
+      }
+    };
+    // 空白段：ESC J n 走纸 n 点（单条上限 255）
+    const pushFeed = (n) => {
+      let left = n;
+      while (left > 0) {
+        const k = Math.min(255, left);
+        cmds.push(Uint8Array.from([0x1b, 0x4a, k]));
+        left -= k;
+      }
+    };
+
+    let y = 0;
+    while (y < rows) {
+      // 先吃掉一段「非空白 + 夹在中间的短空白」：直到碰到一个够长的空白段才停
+      let e = y;
+      while (e < rows) {
+        if (isBlankRow(e)) {
+          let z = e;
+          while (z < rows && isBlankRow(z)) z++;
+          if (skipBlank && z - e >= BLANK_RUN_MIN) break;
+          e = z; // 太短的空白跟着位图一起发
+        } else {
+          e++;
+        }
+      }
+      if (e > y) pushRaster(y, e);
+      if (e >= rows) break;
+      let z = e;
+      while (z < rows && isBlankRow(z)) z++;
+      pushFeed(z - e);
+      y = z;
+    }
+    return cmds;
+  }
+
   /** 组装 ESC/POS 作业：（可选复位）→ 标签纸模式 → 光栅 → 走纸。
-   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认不发）。 */
+   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认发）。 */
   function buildEscPosJob(raster, cfg, opts) {
     const parts = [];
     // ESC @ 复位：汉码官方「打印到文件」抓包（10685 字节，sha1 2e284c0c…）里 `1b 40`
     //   出现 **0 次** —— 官方流第一个字节就是 GS "setp" 01，全程不复位。
-    //   复位会让固件放弃当前纸位、重新做标签检测，实测会让**第一张**偏，所以默认不发。
-    //   但发送中断后打印机里可能留着半份位图，整份重发前必须复位清掉 → 那时传 { reset: true }。
-    const reset = opts && "reset" in opts ? !!opts.reset : !!(cfg && cfg.resetFirst);
+    //   但 2026-09-20 真机实测反过来：不发复位时发送会在中途停住、打不出来，
+    //   发复位才出纸（官方 App 打印前有自己的初始化，浏览器直连没有）→ 默认发。
+    //   发送中断后打印机里可能留着半份位图，整份重发前也必须复位清掉 → { reset: true }。
+    const reset = opts && "reset" in opts ? !!opts.reset : !(cfg && cfg.resetFirst === false);
     if (reset) parts.push(Uint8Array.from([0x1b, 0x40]));
     // GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式
     parts.push(Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]));
 
+    // GS P 203 203 —— 把纵向走纸单位显式设成 1 点。
+    //   空白行跳过用的是 ESC J n（走纸 n × 纵向单位），而纵向单位的默认值各家不同
+    //   （1/203 或 1/144 或 1/360），猜错就会把整张标签纵向拉长/压扁。
+    //   这里放在模式指令之后（ESC @ 会把设置清回默认，所以必须在它后面），把单位钉死，
+    //   ESC J n 就等于「n 个点」。不省空白时用不到走纸，就不发这条，少一个未知变量。
+    if (!(cfg && cfg.blankSkip === false)) {
+      parts.push(Uint8Array.from([0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00]));
+    }
+
+    const segs = rasterCommands(raster, cfg);
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
     for (let c = 0; c < copies; c++) {
-      parts.push(
-        Uint8Array.from([
-          0x1d, 0x76, 0x30, 0x00, // GS v 0 m=0 光栅位图
-          raster.bytesPerRow & 0xff, (raster.bytesPerRow >> 8) & 0xff,
-          raster.heightDots & 0xff, (raster.heightDots >> 8) & 0xff,
-        ])
-      );
-      parts.push(raster.bytes);
+      for (const s of segs) parts.push(s);
       // FF (0x0c)：间隙走纸到下一标签起点。
-      // 汉码官方「打印到文件」抓包（50×30 ×3 份，10685 字节）确认：
-      //   每份标签是逐字节相同的 3473 字节块，块尾就是单个 0c，块与块之间没有别的指令。
-      //   ⇒ 份间走纸 = FF，和我们一致；但那份流每份只有 22 个 GS v 0 块、行数合计 **218 行
-      //     (27.28mm)**，也就是官方**不打满** 30mm 的标签，底部留了 22 行 ≈ 2.75mm 空白。
-      //   这一点才是连打不串位的关键：留白让打印头停在标签面上，间隙传感器随即看到
-      //   前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头会停在标签边缘/缝里，
-      //   FF 判定失准 → 逐张累积偏移（「第二张起越打越偏」）。
-      //   所以这里只发 raster（高度已按 cfg.footMargin 扣过，见 renderLabel/rasterRowsFor），
-      //   份间依旧发 FF。ESC d n 那种固定行数进给对不准标签间距，已弃用。
+      // 汉码官方抓包（50×30 ×3 份，10685 字节）确认：每份标签逐字节相同，块尾就是单个 0c。
+      // 那份流每份 218 行（27.25mm）而不是打满 240 行 —— 留白让打印头停在标签面上，
+      // 间隙传感器随即看到前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头停在
+      // 标签边缘/缝里，FF 判定失准 → 逐张累积偏移。ESC d n 那种固定行数进给已弃用。
       parts.push(Uint8Array.from([0x0c]));
     }
     return concatBytes(parts);
@@ -432,6 +519,19 @@
         (e) => { clearTimeout(t); reject(e); }
       );
     });
+  }
+
+  /** 当前是否还处在「用户手势」的有效期内。
+   *  Web Bluetooth 的 requestDevice 只有在这个窗口里才允许弹设备选择框；
+   *  拿不到 userActivation（老浏览器）时按「可用」处理，免得误拦。 */
+  function userActivationActive() {
+    try {
+      const ua = typeof navigator !== "undefined" ? navigator.userActivation : null;
+      if (!ua || typeof ua.isActive !== "boolean") return true;
+      return ua.isActive;
+    } catch (err) {
+      return true;
+    }
   }
 
   // 无感重连：已有 device 引用时不重新弹窗。Windows 上 gatt.connected 可能是僵尸(true 但链路已死)，
@@ -508,10 +608,21 @@
       }
     }
     // 重新配对
-    LABEL.ble = {
-      device: null, server: null, char: null, notify: null,
-      chunk: 20, services: [], writes: [],
-    };
+    // ⚠️ 浏览器硬性要求：requestDevice 必须发生在「用户手势」的同步调用链里。
+    //   打印流程里 labelPrintBle → bleConnect 中间可能已经 await 过（比如无感重连失败），
+    //   这时再弹设备框会直接抛
+    //   "Failed to execute 'requestDevice' on 'Bluetooth': Must be handling a user gesture…"
+    //   —— 界面表现就是「点了打印，什么都没发生 / 一直报打不出来」。
+    //   所以这里先自检手势，没手势就清掉死设备引用、让人去点「连接打印机」那个真按钮。
+    if (!userActivationActive()) {
+      LABEL.ble = {
+        device: null, server: null, char: null, notify: null,
+        chunk: 20, services: [], writes: [],
+      };
+      if (typeof renderBlePanel === "function") renderBlePanel();
+      throw new Error("打印机已断开。浏览器规定「选择蓝牙设备」必须由你亲手点一下，请点上面的「连接打印机」，连上后再点打印。");
+    }
+
     const opts = showAll
       ? { acceptAllDevices: true, optionalServices: BLE_SERVICES }
       : {
@@ -524,12 +635,38 @@
           optionalServices: BLE_SERVICES,
         };
 
-    const device = await navigator.bluetooth.requestDevice(opts);
+    let device;
+    try {
+      device = await navigator.bluetooth.requestDevice(opts);
+    } catch (err) {
+      const msg = String((err && err.message) || "");
+      if (/user gesture/i.test(msg)) {
+        LABEL.ble = {
+          device: null, server: null, char: null, notify: null,
+          chunk: 20, services: [], writes: [],
+        };
+        if (typeof renderBlePanel === "function") renderBlePanel();
+        throw new Error("浏览器要求「选择蓝牙设备」必须由你亲手点一下：请点「连接打印机」重新配对。");
+      }
+      if (/cancel/i.test(msg)) throw new Error("已取消选择蓝牙设备。");
+      throw err;
+    }
     device.addEventListener("gattserverdisconnected", onGattDisconnected);
     const server = await withTimeout(device.gatt.connect(), 8000, "蓝牙连接超时");
     return await negotiate(device, server);
   }
 
+  /** 分包写入整份作业。
+   *
+   *  应答写入（characteristic.write）必须是**流水线连发**：逐包等确认时每包的往返 ~80ms，
+   *  一份 218 行的作业要几十包，光是来回就几秒 —— 打印机在那边空等，用户看到的就是
+   *  「发送半天」甚至中途停住。所以同时挂 INFLIGHT 包在途，只等最早那一包。
+   *
+   *  包装大小时浏览器会自动做 GATT 长写（Prepare/Execute）。这台机器长写能跑通，
+   *  但万一固件拒收长写（历史上出现过 182 字节触发长写报错），就把分包钉到 20 字节
+   *  再整份重发（由 labelPrintBle 的重试路径完成），不在这里半途改包大小 ——
+   *  打印机里已经存了半张位图，从中间换分包边界只会更乱。
+   */
   async function bleWriteAll(bytes, onProgress) {
     const st = LABEL.ble;
     if (!st.char) throw new Error("蓝牙未连接");
@@ -537,28 +674,42 @@
     const useAck = !!char.properties.write;              // 优先应答写入：有流控、失败可感知
     const useNoResp = !useAck && !!char.properties.writeWithoutResponse;
     if (!useAck && !useNoResp) throw new Error("特征不支持写入");
-    const size = useAck ? 182 : 20;                      // 应答写由浏览器按 MTU 分包；无应答写必须 ≤ MTU(20)
-    let sent = 0;
+    const INFLIGHT = useAck ? 6 : 1;                     // 无应答写没有流控，不能压太深
+    let size = useAck ? (st.chunk || 182) : 20;          // 应答写由浏览器按 MTU 自动分包
     const parts = [];
-    while (sent < bytes.length) {
-      const end = Math.min(sent + size, bytes.length);
-      const chunk = bytes.subarray(sent, end);
+    const inflight = [];
+    let sent = 0;
+
+    const issue = (chunk) => {
+      let p;
+      if (useAck) {
+        p = char.writeValue(chunk);
+        p.catch(() => {});                               // 超时/失败后底层 reject 静默化
+        p = withTimeout(p, 10000, "蓝牙写入超时");
+      } else {
+        p = char.writeValueWithoutResponse(chunk);
+      }
+      p.catch(() => {});                                 // 不被 await 的那几包也不能算未处理拒绝
+      inflight.push(p);
+    };
+
+    while (sent < bytes.length || inflight.length) {
+      while (sent < bytes.length && inflight.length < INFLIGHT) {
+        const end = Math.min(sent + size, bytes.length);
+        issue(bytes.subarray(sent, end));
+        sent = end;
+        if (onProgress) onProgress(sent, bytes.length);
+      }
       try {
-        if (useAck) {
-          // 套 6s 超时：Windows BLE 上某包 writeValue 可能永远不回，不超时就会把 LABEL.busy 锁死成「卡死」
-          const w = char.writeValue(chunk);
-          w.catch(() => {});                             // 超时后底层 reject 静默化，避免 unhandled rejection
-          await withTimeout(w, 6000, "蓝牙写入超时");
-        } else {
-          await char.writeValueWithoutResponse(chunk);
-        }
+        await inflight.shift();
       } catch (err) {
-        // 无应答写单包超长：降到 20 字节兜底重试
-        if (!useAck && size > 20) { size = 20; parts.push("无应答写超长，改 20 字节分包"); continue; }
+        if (useAck && size > 20) {
+          // 长写被拒：下次整份重发改用 20 字节小包（无长写）
+          st.chunk = 20;
+          parts.push("应答写入失败，已切到 20 字节分包（重试会整份重发）");
+        }
         throw err;
       }
-      sent = end;
-      if (onProgress) onProgress(sent, bytes.length);
       if (useNoResp) await sleep(20);                     // 无应答写无流控，≥20ms 才稳
     }
     return parts;
@@ -644,6 +795,9 @@
       const spool = currentSpool();
       const cfg = loadCfg();
       const raster = packRaster(canvas, cfg.density);
+      // 真正会发出去的字节数（分带 / 空白跳过后）。汉码官方同款约 3475 字节/张 ——
+      // 这个数是「发不动」的晴雨表：越大越容易中途停住。
+      const jobBytes = buildEscPosJob(raster, Object.assign({}, cfg, { copies: 1 })).length;
       const info = document.getElementById("labelInfo");
       if (info) {
         const bytes = raster.bytesPerRow * raster.heightDots;
@@ -651,8 +805,9 @@
         const fullRows = Math.max(8, Math.round(mm2dot(cfg.hMm, cfg.dpi)));
         info.textContent =
           Math.round(cfg.wMm) + "×" + Math.round(cfg.hMm) + " mm · " + cfg.dpi + " dpi · " +
-          raster.widthDots + "×" + raster.heightDots + " 点 · " + bytes + " 字节" +
+          raster.widthDots + "×" + raster.heightDots + " 点 · 位图 " + bytes + " 字节" +
           " · 底部留白 " + margin + " mm（" + raster.heightDots + "/" + fullRows + " 行）" +
+          " · 作业 " + jobBytes + " 字节（官方同款 ~3475）" +
           (spool && spool.name ? " · " + spool.name : "");
       }
     } catch (err) {
@@ -765,8 +920,53 @@
     }
   }
 
-  async function labelBleRaw() {
-    const box = document.getElementById("labelRawHex");
+  /** 对齐到标签起点：单发一个 FF (0x0C)。
+   *  打印位置偏了（内容压到缝上/跨到下张）时先点它 —— 在间隙标签模式下 FF 会让纸
+   *  走到下一张标签的起点，于是下一张必从标签头开始。代价是可能白费一张标签，
+   *  所以不做成每次打印前自动发。 */
+  async function labelBleAlign() {
+    if (LABEL.busy) { toast("正在打印，等这次发完再对齐", "err"); return; }
+    LABEL.busy = true;
+    try {
+      await bleConnect(loadCfg().showAll);
+      await bleSendRaw(Uint8Array.from([0x0c]), "对齐到标签起点（FF）");
+      renderBlePanel();
+      toast("已让打印机走到下一张标签起点（会消耗一张标签）", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      LABEL.busy = false;
+    }
+  }
+
+  /** 把当前这张标签的作业原样导出成 .bin。
+   *  汉码 Windows 客户端能「打印到文件」，我们这边也出一份，就能逐字节对比两边差在哪
+   *  （例如官方每份 3475 字节、22 个 GS v 0 块；我们多少块、多少字节）。
+   *  只导出二进制，不发送、不改任何状态。 */
+  async function labelExportJob() {
+    try {
+      const cfg = loadCfg();
+      const spool = currentSpool();
+      if (!spool) throw new Error("请先选一盘料");
+      const raster = packRaster(await labelCanvas(), cfg.density);
+      const job = buildEscPosJob(raster, cfg);
+      const blob = new Blob([job], { type: "application/octet-stream" });
+      const safe = String(spool.name || "料盘").replace(/[\\/:*?"<>|]/g, "_");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "标签作业-" + spool.id + "-" + safe + "-" + job.length + "B.bin";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast("已导出 " + job.length + " 字节（汉码官方同款约 3475 字节/张）", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
+  async function labelBleRaw() {    const box = document.getElementById("labelRawHex");
     if (!box) return;
     try {
       await bleConnect(loadCfg().showAll);
@@ -922,7 +1122,13 @@
             '" onchange="labelPickFootMargin(this.value)" /></label>' +
           '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
             (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
-            "<span>打印前复位打印机（发 ESC @，默认关；第一张偏时用来做对比）</span></label>" +
+            "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
+          '<label class="field check"><input type="checkbox" id="labelBandRows"' +
+            (cfg.bandRows > 0 ? " checked" : "") + ' onchange="labelPickBandRows(this.checked)" />' +
+            "<span>官方同款分带（每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
+          '<label class="field check"><input type="checkbox" id="labelBlankSkip"' +
+            (cfg.blankSkip !== false ? " checked" : "") + ' onchange="labelPickBlankSkip(this.checked)" />' +
+            "<span>空白行不传数据（ESC J 跳过；只有纯白行省得掉，实测省三到五成）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -934,11 +1140,21 @@
           '<div class="card" style="margin-top:10px;padding:10px"><div id="labelBlePanel"></div></div>' +
         "</div>" +
       "</div>" +
-      '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，' +
-      "所以只能走蓝牙。打印原理是把整张标签当位图用 ESC/POS 光栅指令 <code>GS v 0</code> 发过去" +
-      "（官方知识库的校准指令 <code>1D 73 65 74 4C</code> 也是 ESC/POS 派生，所以这套大概率可用）。" +
-      "要是打不出内容，先点「查询状态」看有没有回执：有回执说明链路通，可调浓度或换尺寸重试；" +
-      "完全没回执则是指令集不匹配，「收发记录」里能看到实际发出的字节，" +
+      '<p class="hint"><b>首次用 / 换了纸，按这个顺序来：</b>' +
+      "① 点「连接打印机」→ ② 点「间隙学习」（打印机自己走一段纸标定标签间距，这一步不能省）" +
+      "→ ③ 点「蓝牙打印」。位置偏了就点一次「对齐标签」，再打。" +
+      "打印的是整张标签的位图：<code>GS v 0</code> 光栅指令 + 结尾 <code>FF</code> 走纸到下一张起点。" +
+      "汉印官方（汉码 App）每张只发 <b>约 3475 字节</b>（私有压缩位图 + 22 个 10 行小块），" +
+      "我们发的是<b>未压缩</b>位图，50×30 满幅要 12000 字节 —— 蓝牙要发好几秒，" +
+      "打印机边收边印就会走走停停、纸位漂。" +
+      "所以上面两个开关默认开着：分带（单条 520 字节，不再 11KB 一整坨）" +
+      "+ 空白行跳过（ESC J 走纸代替发 0x00，纵向单位用 GS P 钉成 1 点）。" +
+      "注意二维码那几十行整行都有墨，跳不掉 —— 实际省三到五成（约 12KB → 6~7KB），" +
+      "还到不了官方 3475 字节（人家是私有压缩），但发送时间能砍一半以上。" +
+      "「导出作业(.bin)」可以把我们发的东西存下来，和汉码「打印到文件」的 .prn 逐字节对。</p>" +
+      '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。' +
+      "要是打不出内容，先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
+      "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
       "也可以在那里用「原始指令」手工试协议。</p>";
 
     openModal(
@@ -947,6 +1163,8 @@
       '<button onclick="closeModal()">关闭</button>' +
         '<button onclick="labelA4()">批量 A4 拼版</button>' +
         '<button onclick="labelDownload()">下载标签图</button>' +
+        '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
+        '<button onclick="labelBleAlign()">对齐标签</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
       true
     );
@@ -1027,11 +1245,28 @@
     labelRefresh();
   }
 
-  /** 打印前是否发 ESC @ 复位：默认关（对齐汉码官方流）；勾上 = 旧行为，用于 A/B 对比。 */
+  /** 打印前是否发 ESC @ 复位：默认开（2026-09-20 真机实测，不发时发送会中途停住、打不出来）。
+   *  去掉勾 = 回到「对齐官方抓包」的不发状态，用于 A/B。 */
   function labelPickResetFirst(checked) {
     const cfg = loadCfg();
     cfg.resetFirst = !!checked;
     saveCfg();
+  }
+
+  /** 官方同款分带：每 10 行一条 GS v 0（对齐汉码抓包 22 块 × 10 行）。 */
+  function labelPickBandRows(checked) {
+    const cfg = loadCfg();
+    cfg.bandRows = checked ? 10 : 0;
+    saveCfg();
+    labelRefresh();
+  }
+
+  /** 空白行不传位图数据，改用 ESC J 走纸跳过（体积约 1/3）。 */
+  function labelPickBlankSkip(checked) {
+    const cfg = loadCfg();
+    cfg.blankSkip = !!checked;
+    saveCfg();
+    labelRefresh();
   }
 
   function labelPickShowAll(checked) {
@@ -1044,17 +1279,21 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, rasterCommands, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
 
   Object.assign(window, {
     openLabelDialog,
     labelRefresh,
     labelDownload,
+    labelExportJob,
     labelPrintBle,
     labelPickFootMargin,
     labelPickResetFirst,
+    labelPickBandRows,
+    labelPickBlankSkip,
     labelBleProbe,
     labelBleCalibrate,
+    labelBleAlign,
     labelBleRaw,
     labelBleDisconnect,
     labelBleConnect: async function () {
