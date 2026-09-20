@@ -123,7 +123,7 @@ const REQUIRED_HANDLERS = [
   "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
-  "labelPickBandRows", "labelPickBlankSkip", "labelPickShowAll",
+  "labelPickBandRows", "labelPickBlankSkip", "labelPickPipeline", "labelPickShowAll",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -500,6 +500,10 @@ async function testDialogHtml() {
   check("含「打印前复位」开关（真机实测不发则打不出来）", html.includes('id="labelResetFirst"'));
   check("含「官方同款分带」开关", html.includes('id="labelBandRows"'));
   check("含「空白行不传数据」开关（12KB → 5KB 上下）", html.includes('id="labelBlankSkip"'));
+  check("含「流水线连发」开关且文案标注默认关（并发 GATT 会掐链路，0.12.20 教训）",
+    html.includes('id="labelPipeline"') && /流水线连发（快，但本机实测/.test(html));
+  check("流水线默认关闭钉在 defaultCfg 源码里",
+    /pipeline: false/.test(fs.readFileSync(SRC, "utf8")));
   check("含导出作业与对齐标签两个诊断按钮",
     html.includes("labelExportJob") && html.includes("labelBleAlign"));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",

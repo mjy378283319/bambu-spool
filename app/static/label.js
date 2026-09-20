@@ -151,7 +151,13 @@
     //   我们发不动」的关键差距。注意二维码那几十行整行都有墨、跳不掉，所以到不了官方量级。
     return {
       wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1,
-      footMargin: 2.75, resetFirst: true, bandRows: 10, blankSkip: true, showAll: false,
+      footMargin: 2.75, resetFirst: true, bandRows: 10, blankSkip: true,
+      // pipeline = 应答写入流水线连发（6 包在途）。默认 **关**：
+      //   0.12.20 真机实测「一点蓝牙打印就断链」——这台机器/Windows BLE 容不下并发
+      //   GATT 操作（0.12.8 定案：打印中再点查询就掐链路），流水线等于打印内部自己
+      //   开了 6 路并发 writeValue，正好撞枪口；而 0.12.19 逐包等确认能正常打出单张。
+      //   代价是慢（每包往返 ~80ms，9.7KB 约 54 包 ≈ 5 秒），留着开关给固件容忍的机器提速。
+      pipeline: false, showAll: false,
     };
   }
 
@@ -659,9 +665,14 @@
 
   /** 分包写入整份作业。
    *
-   *  应答写入（characteristic.write）必须是**流水线连发**：逐包等确认时每包的往返 ~80ms，
-   *  一份 218 行的作业要几十包，光是来回就几秒 —— 打印机在那边空等，用户看到的就是
-   *  「发送半天」甚至中途停住。所以同时挂 INFLIGHT 包在途，只等最早那一包。
+   *  应答写入（characteristic.write）默认**逐包等确认**：慢（每包往返 ~80ms），
+   *  但 0.12.19 真机验证过能完整打出单张。
+   *
+   *  ⚠️ 流水线连发（多包在途）只在 cfg.pipeline 打开时启用，默认关：
+   *  0.12.20 默认开（6 包在途），真机实测「一点蓝牙打印立刻断链」——
+   *  这台机器/Windows BLE 容不下并发 GATT 操作（0.12.8 定案的同一坑：
+   *  打印中再点查询就掐链路）。流水线 = 打印内部自己开 6 路并发 writeValue，
+   *  Windows 蓝牙栈直接把链路掐了。
    *
    *  包装大小时浏览器会自动做 GATT 长写（Prepare/Execute）。这台机器长写能跑通，
    *  但万一固件拒收长写（历史上出现过 182 字节触发长写报错），就把分包钉到 20 字节
@@ -675,7 +686,8 @@
     const useAck = !!char.properties.write;              // 优先应答写入：有流控、失败可感知
     const useNoResp = !useAck && !!char.properties.writeWithoutResponse;
     if (!useAck && !useNoResp) throw new Error("特征不支持写入");
-    const INFLIGHT = useAck ? 6 : 1;                     // 无应答写没有流控，不能压太深
+    const pipeline = useAck && !!(loadCfg().pipeline);   // 默认关，见函数头说明
+    const INFLIGHT = pipeline ? 6 : 1;
     let size = useAck ? (st.chunk || 182) : 20;          // 应答写由浏览器按 MTU 自动分包
     const parts = [];
     const inflight = [];
@@ -1130,6 +1142,9 @@
           '<label class="field check"><input type="checkbox" id="labelBlankSkip"' +
             (cfg.blankSkip !== false ? " checked" : "") + ' onchange="labelPickBlankSkip(this.checked)" />' +
             "<span>空白行不传数据（ESC J 跳过；只有纯白行省得掉，实测省三到五成）</span></label>" +
+          '<label class="field check"><input type="checkbox" id="labelPipeline"' +
+            (cfg.pipeline ? " checked" : "") + ' onchange="labelPickPipeline(this.checked)" />' +
+            "<span>流水线连发（快，但本机实测一点打印就断链，默认关）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -1271,6 +1286,12 @@
     labelRefresh();
   }
 
+  function labelPickPipeline(checked) {
+    const cfg = loadCfg();
+    cfg.pipeline = !!checked;
+    saveCfg();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -1314,6 +1335,7 @@
     labelPickDpi,
     labelPickDensity,
     labelPickCopies,
+    labelPickPipeline,
     labelPickShowAll,
   });
 })();
