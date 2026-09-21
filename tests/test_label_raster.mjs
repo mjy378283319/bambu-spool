@@ -65,19 +65,26 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(SRC, "utf8"), sandbox, { filename: "label.js" });
 
-const { mm2dot, packRaster, buildEscPosJob, rasterCommands, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
+const { mm2dot, packRaster, buildEscPosJob, buildJobParts, rasterCommands, effHeightMm, rasterRowsFor } = sandbox.labelDebug || {};
 
-/* ── 0.12.22：默认流必须 = 0.12.19 已验证形态 ─────────────── */
+/* ── 0.12.22 → 0.12.25：默认流必须 = 已验证形态 ───────────── */
 function testDefaultCfgSafe() {
-  console.log("== 默认配置安全（0.12.22） ==");
+  console.log("== 默认配置安全（0.12.22 起，0.12.25 扩充） ==");
   const cfg = sandbox.labelDebug.loadCfg();
   check("默认 bandRows=0（不分带，回已验证形态）", cfg.bandRows === 0, JSON.stringify(cfg));
   check("默认 blankSkip=false（不发 ESC J，断链头号嫌疑）", cfg.blankSkip === false);
   check("默认 pipeline=false（并发 GATT 断链，0.12.21 定案）", cfg.pipeline === false);
   check("默认 resetFirst=true（不发复位实测打不出来）", cfg.resetFirst === true);
+  // 0.12.25：多一次头部 = 多一次定位动作（会进纸）。用户实测「第二张没有头部，位置反而是对的」。
+  check("默认 perCopyPos=false（每份不再补头部）", cfg.perCopyPos === false, String(cfg.perCopyPos));
+  check("默认 headWaitMs=1200（作业头后等定位动作走完再发位图）",
+    cfg.headWaitMs === 1200, String(cfg.headWaitMs));
+  check("默认 copyDelayMs=1500（多份之间留打印时间，这份固件一份一份地打）",
+    cfg.copyDelayMs === 1500, String(cfg.copyDelayMs));
   const src = fs.readFileSync(SRC, "utf8");
-  check("旧存档迁移：cfgRev 不一致时强制重置三个实验开关",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 2;/.test(src));
+  check("旧存档迁移：cfgRev 不一致时强制重置实验开关与时间旋钮",
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 3;/.test(src) &&
+      /cfg\.headWaitMs = 1200;/.test(src) && /cfg\.perCopyPos = false;/.test(src));
 }
 
 /* ── 报文解析器 ──────────────────────────────────────────────
@@ -133,10 +140,10 @@ const BLANK_ROW_52 = () => new Uint8Array(52);
 // 很容易漏 —— 所以这里按名单逐个点名。
 const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle",
-  "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleFeedTest", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
+  "labelBleProbe", "labelBleCalibrate", "labelBleReset", "labelBleAlign", "labelBleFeedTest", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
-  "labelPickPerCopyPos",
+  "labelPickPerCopyPos", "labelPickHeadWait", "labelPickCopyDelay",
   "labelPickBandRows", "labelPickBlankSkip", "labelPickPipeline", "labelPickShowAll",
 ];
 
@@ -288,23 +295,21 @@ function testEscPosJob() {
   check("两份 = 2 条光栅 + 2 个 FF",
     twoOps.filter((o) => o.op === "raster").length === 2 &&
       twoOps.filter((o) => o.op === "ff").length === 2, JSON.stringify(twoOps));
-  // 0.12.24：默认「每份重新定位」—— 第二份起也重发一次作业头部（ESC @ + setp 01 + GS P），
-  // 于是每一份都是一个完整作业，和「单独打一张」逐字节相同 ⇒ 累积漂移每份清零。
-  check("每份重新定位：两份长度 = 2 × 27 = 54", two.length === 54, String(two.length));
-  check("每份重新定位后，两份逐字节完全相同（与官方抓包 3 份相同同构）",
-    Array.from(two.slice(0, 27)).join(",") === Array.from(two.slice(27, 54)).join(","),
-    Array.from(two.slice(27, 54)).join(","));
-  check("第二份开头也是 ESC @ + setp 01（重新定位）",
-    two[27] === 0x1b && two[28] === 0x40 &&
-      [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => two[29 + i] === b),
-    Array.from(two.slice(27, 35)).join(","));
+  // 0.12.25：默认**关**「每份重新定位」→ 全篇只有一个头部（与官方抓包同构：一份头 + 若干块）
+  check("默认每份不补头部：两份长度 = 27 + 13 = 40", two.length === 40, String(two.length));
+  check("默认第二份首字节就是 GS v 0（没有 ESC @、没有 setp）",
+    two[27] === 0x1d && two[28] === 0x76, Array.from(two.slice(27, 30)).join(","));
 
-  // 关掉「每份重新定位」= 0.12.23 形态：只有整份开头定位一次
-  const twoNoPos = buildEscPosJob(raster, { copies: 2, perCopyPos: false });
-  check("关掉每份重新定位 → 第二份只有光栅+FF（长度 = 27 + 13 = 40）",
-    twoNoPos.length === 40, String(twoNoPos.length));
-  check("关掉后第二份不再带 ESC @",
-    twoNoPos[27] === 0x1d && twoNoPos[28] === 0x76, Array.from(twoNoPos.slice(27, 30)).join(","));
+  // 勾上「每份重新定位」：第二份补一条 setp 01，**不带 ESC @**
+  //   （ESC @ 才是「打印前纸先进一下」的嫌疑，中途再发一次就再来一次进纸）
+  const twoPos = buildEscPosJob(raster, { copies: 2, perCopyPos: true });
+  check("勾上每份重新定位 → 两份长度 = 27 + 19 = 46", twoPos.length === 46, String(twoPos.length));
+  check("每份重新定位补的是 setp 01，不是 ESC @",
+    twoPos[27] === 0x1d && [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => twoPos[27 + i] === b),
+    Array.from(twoPos.slice(27, 33)).join(","));
+  check("关掉每份重新定位与打开的默认形态逐字节相同",
+    Array.from(buildEscPosJob(raster, { copies: 2, perCopyPos: false })).join(",") ===
+      Array.from(two).join(","));
 
   check("份数 0 兜底成 1 份",
     parseJob(buildEscPosJob(raster, { copies: 0 })).filter((o) => o.op === "raster").length === 1);
@@ -338,6 +343,58 @@ function testEscPosJob() {
   check("行宽超过 255 也不截断（0x33 0x00 而非 0x33 0x01）",
     wide.find((o) => o.op === "raster").x === 51 && wide.find((o) => o.op === "raster").y === 2,
     JSON.stringify(wide.find((o) => o.op === "raster")));
+}
+
+/* ── 4a1b. 作业拆分（0.12.25：头 / 位图分两次发） ─────────────
+ * 真机证据：打第一张时纸会往里进一下、位置就错；第二张不再进纸、位置反而是对的。
+ * 两处唯一差别 = 整份开头那一次作业头（ESC @ + setp 01）。修法不是删掉头（0.12.19 试过，
+ * 不发就「发送半天、打一点就没了」），而是把头与位图拆成两次写入，中间等 headWaitMs
+ * 让固件的复位/定位动作走完 —— 位图于是从静止的纸位开始。
+ * 这里钉的是「拆只是分包，不改内容」：拼回去必须与单块作业逐字节相同。
+ */
+function testJobParts() {
+  console.log("== 作业拆分（头 / 位图分两次发） ==");
+  const raster = {
+    bytes: Uint8Array.from([0xaa, 0xbb, 0xcc, 0xdd]),
+    bytesPerRow: 2,
+    heightDots: 2,
+    widthDots: 16,
+  };
+  const cat = (arrs) => {
+    const n = arrs.reduce((s, a) => s + a.length, 0);
+    const out = new Uint8Array(n);
+    let o = 0;
+    for (const a of arrs) { out.set(a, o); o += a.length; }
+    return out;
+  };
+
+  const cfg = { copies: 3, resetFirst: true, blankSkip: false, bandRows: 0 };
+  const p = buildJobParts(raster, cfg);
+  check("head 只含 ESC @ + setp 01（3 份共用一个头）",
+    p.head.length === 8 && p.head[0] === 0x1b && p.head[1] === 0x40 &&
+      [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => p.head[2 + i] === b),
+    Array.from(p.head).join(","));
+  check("copies 切出 3 份", p.copies.length === 3, String(p.copies.length));
+  check("每份 13 字节（光栅 12 + FF 1），份尾都是 FF",
+    p.copies.every((c) => c.length === 13 && c[12] === 0x0c),
+    p.copies.map((c) => c.length).join(","));
+  check("拼回去与单块作业逐字节相同（拆只是分包，不改内容）",
+    Array.from(cat([p.head].concat(p.copies))).join(",") ===
+      Array.from(buildEscPosJob(raster, cfg)).join(","));
+  check("关闭复位：head 只剩 setp 01（6 字节）",
+    buildJobParts(raster, { copies: 1, resetFirst: false, blankSkip: false }).head.length === 6);
+  check("份数为 1 时 copies 只有 1 份",
+    buildJobParts(raster, { copies: 1 }).copies.length === 1);
+  check("份数 0 兜底成 1 份",
+    buildJobParts(raster, { copies: 0 }).copies.length === 1);
+  // 拆包行为钉在源码里：sendJobParts 必须「先发头 → 等待 → 再发位图」，且仍是串行不并发
+  const src = fs.readFileSync(SRC, "utf8");
+  check("sendJobParts 存在且先发头再等 headWaitMs",
+    /async function sendJobParts\(parts, cfg\)/.test(src) && /await sleep\(wait\)/.test(src));
+  check("打印路径改用 buildJobParts / sendJobParts（不再一口气发）",
+    /const parts = buildJobParts\(raster, cfg\)/.test(src) && !/await sendJob\(/.test(src));
+  check("多份之间等 copyDelayMs（这份固件一份一份地打）",
+    /await sleep\(gap\)/.test(src));
 }
 
 /* ── 4a2. 分带 / 空白跳过 ──────────────────────────────────────
@@ -540,7 +597,16 @@ async function testDialogHtml() {
   check("诊断动作先发 setp 01 进标签模式（只发裸 FF 真机按了没反应）",
     typeof (sandbox.labelDebug || {}).labelModeBytes === "function" &&
       (sandbox.labelDebug.labelModeBytes() || [])[0] === 0x1d);
-  check("含「每份重新定位」开关（修越打越往下偏）", html.includes('id="labelPerCopyPos"'));
+  check("含「每份重新定位」开关（默认关，文案写上不带 ESC @）",
+    html.includes('id="labelPerCopyPos"') && /每份重新定位（实验，默认关/.test(html));
+  check("含「作业头后等待」时间旋钮（修第一张进纸导致的位置偏）",
+    html.includes('id="labelHeadWait"') && /作业头后等待 ms/.test(html));
+  check("含「多份间隔」时间旋钮（这份固件一份一份地打）",
+    html.includes('id="labelCopyDelay"') && /多份间隔 ms/.test(html));
+  check("含「复位打印机」独立按钮（卡住/发送中断时手动清缓冲）",
+    html.includes("labelBleReset") && typeof sandbox.labelBleReset === "function");
+  check("提示语写明「第一张位置偏」的排查顺序（等待值 / 取消复位）",
+    html.includes("第一张位置偏") && html.includes("作业头后等待"));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",
     html.includes("间隙学习") && html.includes("3475"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
@@ -575,6 +641,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testMm2dot();
   testPackRaster();
   testEscPosJob();
+  testJobParts();
   testRasterCommands();
   testFootMargin();
   await testDialogHtml();

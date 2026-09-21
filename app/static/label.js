@@ -136,7 +136,7 @@
 
   // cfgRev：改「实验性发送开关」的默认值时 +1。旧存档 rev 不一致时这些开关会被
   // 强制重置成本版默认 —— 不然用户曾经勾过的「断链组合」会被 localStorage 永远沿用。
-  const CFG_REV = 2;
+  const CFG_REV = 3;
 
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
@@ -146,6 +146,16 @@
     //   发复位才打得出来（代价是第一张位置略偏）。虽然官方抓包流里 1b 40 出现 0 次，
     //   但官方 App 在打印前一定做过自己的初始化/定位，浏览器直连没有那一步，
     //   所以这里以真机实测为准。想回到「不发」把开关去掉即可。
+    //   ⚠️ 2026-09-21 新证据（本轮主问题）：用户实测「**打第一张时纸会往里进一下、位置就错；
+    //   打第二张就不再进纸、位置反而是对的**」—— 这两处唯一的差别就是**整份开头那一次作业头**
+    //   （ESC @ + setp 01）。而 0.12.19 试过完全不发 ESC @ →「发送半天、打一点就没了」，
+    //   说明这条头不能简单删掉（固件多半靠它清缓冲/做初始化）。所以 0.12.25 的修法是
+    //   **把头与位图拆成两次写入**：先发头，等 headWaitMs 让固件的复位/定位动作走完，
+    //   再发位图 —— 这样位图一定从一个静止的纸位开始，进纸动作不再和打印叠在一起。
+    // headWaitMs = 作业头发完 → 开始发位图之间的等待（ms）。0 = 不拆不等待（0.12.24 形态）。
+    // copyDelayMs = 多份时每份之间的等待（ms）。这台机器「一次打三张只打第一张、后面只走纸
+    //   不打印」，看着像固件一份一份地处理 —— 一口气灌三份位图它就吞掉后两份。所以份数 > 1
+    //   时改成一份一份发，每份之间留出打印时间。份数 = 1 时这项不起作用。
     // bandRows / blankSkip / pipeline = 0.12.20 引入的三个实验性发送优化，0.12.22 起
     //   **全部默认关**（默认流 = 0.12.19 已验证能打完整张的形态：一条 218 行整块、
     //   无 GS P、无 ESC J）：
@@ -158,11 +168,13 @@
     return {
       wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1,
       footMargin: 2.75, resetFirst: true, bandRows: 0, blankSkip: false,
-      // perCopyPos = 每份重新定位（第二份起重发 ESC @ + setp 01）。默认 **开**：
-      //   2026-09-21 真机实测「份数 3 越打越往下偏」，而「每次单独打一张」三张全对正 ——
-      //   差别就是后者每张都带一次作业头部（重新定位）。开=每份字节完全相同，
-      //   和官方抓包「3 份逐字节相同」同构。关掉 = 回到 0.12.23 形态（只开头定位一次）。
-      perCopyPos: true,
+      // perCopyPos = 每份重新定位：第二份起也补一次头部。默认 **关**（与官方抓包同构：
+      //   一份头部 + 若干「逐字节相同」的位图块）。0.12.24 曾默认开（针对「越打越往下偏」），
+      //   但用户 09-21 的新证据显示「第二张不再进纸、位置反而是对的」—— 也就是**多一份头部
+      //   就多一次定位/进纸动作**，与「第一张进纸导致偏移」同源，所以回退为关。
+      //   勾上后每份只补一条 GS "setp" 01（**不带 ESC @**，避免中途再触发一次复位）。
+      perCopyPos: false,
+      headWaitMs: 1200, copyDelayMs: 1500,
       pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
@@ -177,10 +189,13 @@
       /* 配置坏了就用默认值 */
     }
     if (cfg.cfgRev !== CFG_REV) {
-      // 旧版存档：实验开关强制回本版默认（面板仍可手动勾回去做 A/B）
+      // 旧版存档：实验开关 + 时间旋钮强制回本版默认（面板仍可手动改回去做 A/B）
       cfg.bandRows = 0;
       cfg.blankSkip = false;
       cfg.pipeline = false;
+      cfg.perCopyPos = false;
+      cfg.headWaitMs = 1200;
+      cfg.copyDelayMs = 1500;
       cfg.cfgRev = CFG_REV;
     }
     LABEL.cfg = cfg;
@@ -487,28 +502,38 @@
     return cmds;
   }
 
-  /** 组装 ESC/POS 作业：（可选复位）→ 标签纸模式 → 光栅 → 走纸。
-   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认发）。
-   *  opts.perCopy 显式指定「每份重新定位」；不传时看 cfg.perCopyPos（默认开）。 */
-  function buildEscPosJob(raster, cfg, opts) {
-    const parts = [];
+  /** 组装 ESC/POS 作业，**拆成「作业头」与「每份位图」两段**：
+   *
+   *    head      =（可选 ESC @ 复位）→ GS "setp" 01 标签模式 →（可选 GS P 走纸单位）
+   *    copies[c] =（第二份起且 perCopyPos 时补一条 GS "setp" 01）→ 光栅指令 → FF
+   *
+   *  为什么要拆（0.12.25 的核心改动）：2026-09-21 用户实测「**打第一张时纸会往里进一下、
+   *  位置就错了；打第二张就不再进纸、位置反而是对的**」——两处唯一差别就是整份开头那一次
+   *  作业头。0.12.19 试过完全不发 ESC @ →「发送半天、打一点就没了」，说明这条头不能简单删。
+   *  ⇒ 改成**两次写入 + 等待**：先发 head，等 cfg.headWaitMs 让固件的复位/定位动作走完，
+   *  再发位图。位图于是从静止的纸位开始，进纸动作不会和打印叠在一起。
+   *
+   *  opts.reset   显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认发）。
+   *  opts.perCopy 显式指定「每份重新定位」；不传时看 cfg.perCopyPos（默认关）。
+   */
+  function buildJobParts(raster, cfg, opts) {
     // ESC @ 复位：汉码官方「打印到文件」抓包（10685 字节，sha1 2e284c0c…）里 `1b 40`
     //   出现 **0 次** —— 官方流第一个字节就是 GS "setp" 01，全程不复位。
     //   但 2026-09-20 真机实测反过来：不发复位时发送会在中途停住、打不出来，
     //   发复位才出纸（官方 App 打印前有自己的初始化，浏览器直连没有）→ 默认发。
     //   发送中断后打印机里可能留着半份位图，整份重发前也必须复位清掉 → { reset: true }。
     const reset = opts && "reset" in opts ? !!opts.reset : !(cfg && cfg.resetFirst === false);
-    // perCopyPos = 每份重新定位：第二份起也重发一遍「复位 + 标签模式」头部。
-    //   2026-09-21 真机实测：份数 3 连打**越打越往下偏**（累积漂移），但「每次单独打一张」
-    //   三张全对正 —— 两者唯一的差别就是后者每张都是一个独立作业、开头都会重新定位。
-    //   ⇒ 说明这份固件的 FF 单独并不足以把纸精确对到下一张起点（每次都差一点点，逐张累积）。
-    //   修法：让每一份都带一次作业头部（ESC @ + GS setp 01，blankSkip 时连带 GS P），
-    //   等价于「连点三次打印」，把累积误差每份清零。代价：每份多 8~14 字节、
-    //   打印机可能多走一点点纸；不想要就关掉这个开关（回到 0.12.23 的形态）。
+    // perCopyPos = 每份重新定位：第二份起补一条标签模式指令。
+    //   2026-09-24→25 两轮真机证据合起来看：多一次头部 = 多一次定位**动作**（会进纸），
+    //   所以默认关；勾上时也只补 GS "setp" 01，**不带 ESC @**（ESC @ 才是那次进纸的嫌疑）。
+    // ⚠️ 默认值写成「肯定式」判断：cfg 里没有这个字段时 → 关。
+    //   写成 `!(cfg.perCopyPos === false)` 会在「裸 cfg（缺字段）」时变成**开**，
+    //   这种否定式默认值以前害过我们（假绿），所以只在显式 true 时才补头部。
     const perCopy = opts && "perCopy" in opts
       ? !!opts.perCopy
-      : !(cfg && cfg.perCopyPos === false);
+      : !!(cfg && cfg.perCopyPos === true);
     const gsP = !(cfg && cfg.blankSkip === false);
+
     const head = [];
     if (reset) head.push(Uint8Array.from([0x1b, 0x40]));
     // GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式
@@ -516,31 +541,32 @@
     // GS P 203 203 —— 把纵向走纸单位显式设成 1 点。
     //   空白行跳过用的是 ESC J n（走纸 n × 纵向单位），而纵向单位的默认值各家不同
     //   （1/203 或 1/144 或 1/360），猜错就会把整张标签纵向拉长/压扁。
-    //   这里放在模式指令之后（ESC @ 会把设置清回默认，所以必须在它后面），把单位钉死，
-    //   ESC J n 就等于「n 个点」。不省空白时用不到走纸，就不发这条，少一个未知变量。
+    //   放在模式指令之后（ESC @ 会把设置清回默认），把单位钉死；
+    //   不省空白时不需要走纸，就不发这条，少一个未知变量。
     if (gsP) head.push(Uint8Array.from([0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00]));
-    for (const h of head) parts.push(h);
 
     const segs = rasterCommands(raster, cfg);
-    const copies = Math.max(1, Math.min(50, cfg.copies || 1));
-    for (let c = 0; c < copies; c++) {
-      // 第二份起：重发头部，重新做一次标签定位（见 perCopyPos 说明）。
-      // rasterCommands 每次都要重算：ESC @ 之后空白跳过的量是不变的，但保持「每份独立成型」
-      // 更好推理 —— 每份字节完全一致，和「单独打一张」逐字节相同。
-      if (c > 0 && perCopy) {
-        for (const h of head) parts.push(h);
-        for (const s of rasterCommands(raster, cfg)) parts.push(s);
-      } else {
-        for (const s of segs) parts.push(s);
-      }
+    const copies = [];
+    const n = Math.max(1, Math.min(50, cfg.copies || 1));
+    for (let c = 0; c < n; c++) {
+      const one = [];
+      if (c > 0 && perCopy) one.push(labelModeBytes());
+      for (const s of segs) one.push(s);
       // FF (0x0c)：间隙走纸到下一标签起点。
       // 汉码官方抓包（50×30 ×3 份，10685 字节）确认：每份标签逐字节相同，块尾就是单个 0c。
       // 那份流每份 218 行（27.25mm）而不是打满 240 行 —— 留白让打印头停在标签面上，
       // 间隙传感器随即看到前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头停在
       // 标签边缘/缝里，FF 判定失准 → 逐张累积偏移。ESC d n 那种固定行数进给已弃用。
-      parts.push(Uint8Array.from([0x0c]));
+      one.push(Uint8Array.from([0x0c]));
+      copies.push(concatBytes(one));
     }
-    return concatBytes(parts);
+    return { head: concatBytes(head), copies: copies };
+  }
+
+  /** 单块作业（head + 所有份拼一起）。导出 .bin、逐字节对比官方 .prn、单元测试都用它。 */
+  function buildEscPosJob(raster, cfg, opts) {
+    const p = buildJobParts(raster, cfg, opts);
+    return concatBytes([p.head].concat(p.copies));
   }
 
   /* ── 蓝牙 ───────────────────────────────────────────────── */
@@ -776,7 +802,10 @@
       }
     }
     await bleWriteAll(bytes);
-    if (st.notify) await sleep(900);
+    // 回执窗口：OK / finished 这类回执是**动作做完之后**才发的（间隙学习实测 ~3s、打印 ~2s），
+    // 原来只等 900ms → 界面一律显示「无回执」，看着像打印机没应答，其实只是没等够
+    // （0.12.9 就记过这个坑）。这里放宽到 2.5s，让「有回执但慢」和「真不回执」能区分开。
+    if (st.notify) await sleep(2500);
     LABEL.probeLog.unshift({
       at: new Date().toLocaleTimeString("zh-CN"),
       what: label || "原始指令",
@@ -890,9 +919,9 @@
       await bleConnect(cfg.showAll);
       const canvas = await labelCanvas();
       const raster = packRaster(canvas, cfg.density);
-      const job = buildEscPosJob(raster, cfg);
+      const parts = buildJobParts(raster, cfg);
       try {
-        await sendJob(job);
+        await sendJobParts(parts, cfg);
       } catch (err) {
         // 发送中途链路断了（Windows 僵尸连接 / 蓝牙掉线）→ 强制真实断开、保留设备引用，
         // 走无感重连后整份重发一次。重发这一份显式带 ESC @（{ reset: true }）：
@@ -910,7 +939,7 @@
         await bleConnect(cfg.showAll);
         const canvas2 = await labelCanvas();
         const raster2 = packRaster(canvas2, cfg.density);
-        await sendJob(buildEscPosJob(raster2, cfg, { reset: true }));
+        await sendJobParts(buildJobParts(raster2, cfg, { reset: true }), cfg);
       }
       toast("标签已发送到 " + (LABEL.ble.device.name || "打印机"), "ok");
       renderBlePanel();
@@ -922,14 +951,51 @@
     }
   }
 
-  async function sendJob(job) {
+  /** 分块写入：作业头 →（等 headWaitMs）→ 位图，多份之间再等 copyDelayMs。
+   *
+   *  为什么不能一口气发完（0.12.25，本轮主问题的修法）：
+   *   ① 作业头里的 ESC @ 会让固件做一次复位/定位 —— 真机表现就是「打第一张时纸会往里进
+   *      一下，然后位置就错了」，而**第二张不再进纸、位置反而是对的**（第二张没有头部）。
+   *      头、位图挤在同一次写入里，固件很可能一边走纸一边解析位图。拆开 + 等待之后，
+   *      位图一定从一个静止的纸位开始。
+   *   ② 多份时一口气灌 3×11KB，这台固件「只打第一张、后面只走纸不打印」；改成一份一份发、
+   *      每份之间留出打印时间，顺着它「一份一份地打」的脾气。
+   *  仍然是**串行**写入（写完一块才写下一块），不引入并发 GATT —— 0.12.20 的教训。
+   *  headWaitMs / copyDelayMs 都可从面板调成 0 回到「一口气发完」的旧形态，便于 A/B。
+   */
+  async function sendJobParts(parts, cfg) {
+    const wait = Math.max(0, Math.min(10000, Number(cfg.headWaitMs) || 0));
+    const gap = Math.max(0, Math.min(10000, Number(cfg.copyDelayMs) || 0));
+    const total = parts.head.length +
+      parts.copies.reduce(function (s, c) { return s + c.length; }, 0);
     const started = Date.now();
-    const notes = await bleWriteAll(job, (sent, total) => {
-      labelProgress("正在发送 " + Math.round((sent / total) * 100) + "%（" + sent + "/" + total + " 字节）");
-    });
-    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    const notes = [];                   // bleWriteAll 的提示（如「无应答写超长，改 20 字节分包」）
+    let base = 0;                       // 当前这一块之前已经发出去多少字节
+    let done = 0;
+    const onProg = function (n) {        // bleWriteAll 的进度是「本块内累计」，要加回 base
+      const cur = base + n;
+      labelProgress("正在发送 " + Math.round((cur / total) * 100) + "%（" + cur + "/" + total + " 字节）");
+    };
+    if (parts.head.length) {
+      notes.push.apply(notes, await bleWriteAll(parts.head, onProg));
+      done = parts.head.length;
+      if (wait) {
+        labelProgress("作业头已发（" + done + " 字节），等 " + wait + "ms 让打印机定位到位…");
+        await sleep(wait);
+      }
+    }
+    for (let i = 0; i < parts.copies.length; i++) {
+      base = done;
+      notes.push.apply(notes, await bleWriteAll(parts.copies[i], onProg));
+      done += parts.copies[i].length;
+      if (i < parts.copies.length - 1 && gap) {
+        labelProgress("第 " + (i + 1) + "/" + parts.copies.length + " 份已发，等 " + gap + "ms 再发下一份…");
+        await sleep(gap);
+      }
+    }
     labelProgress(
-      "已发送 " + job.length + " 字节，用时 " + secs + " 秒，分包 " + LABEL.ble.chunk + " 字节" +
+      "已发送 " + total + " 字节（" + parts.copies.length + " 份），用时 " +
+      ((Date.now() - started) / 1000).toFixed(1) + " 秒，分包 " + LABEL.ble.chunk + " 字节" +
       (notes.length ? "；" + notes.join("；") : "")
     );
   }
@@ -965,11 +1031,34 @@
     }
   }
 
+  /** 单独发一次 ESC @ 复位（清接收缓冲 / 让固件重新初始化）。
+   *
+   *  为什么单独做成一个动作：ESC @ 会让固件做一次复位/定位（真机表现 = 纸往里进一下），
+   *  所以它不该每次都混在打印作业的时序里（0.12.25 已把「头」与「位图」拆成两次写入来
+   *  隔离这个动作）。但「卡住不打印 / 上一份发送中断」时确实需要它清缓冲 ——
+   *  那就手动点一次，别让它污染正常打印。 */
+  async function labelBleReset() {
+    if (LABEL.busy) { toast("正在打印，等这次发完再复位", "err"); return; }
+    LABEL.busy = true;
+    try {
+      await bleConnect(loadCfg().showAll);
+      await bleSendRaw(Uint8Array.from([0x1b, 0x40]), "复位打印机（ESC @，清缓冲/重新初始化）");
+      renderBlePanel();
+      toast("已发复位指令（打印机可能走一点纸，属正常）", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      LABEL.busy = false;
+    }
+  }
+
   /** 对齐到标签起点：进标签模式 + 两个 FF。
    *
    *  ⚠️ 只发一个裸 FF 在真机上「按了没反应」：打印机不在标签模式时 FF 不触发间隙定位
    *  （等价于普通走一行）。所以先补 `GS "setp" 01` 再发 FF —— 和正式作业开头那两根指令一致。
-   *  打印位置偏了（内容压到缝上/跨到下张）时先点它。代价是可能白费一张标签。 */
+   *  若补了标签模式纸还是不动，说明这份固件在**空闲态**不响应 FF（真机 09-21 的观察就是如此），
+   *  那就别指望这个按钮：位置问题走「打印时把头与位图分开」（0.12.25）那条路。
+   *  代价：会白费 1~2 张标签，所以不做成自动动作。 */
   async function labelBleAlign() {
     if (LABEL.busy) { toast("正在打印，等这次发完再对齐", "err"); return; }
     LABEL.busy = true;
@@ -977,7 +1066,7 @@
       await bleConnect(loadCfg().showAll);
       await bleSendRaw(
         concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c])]),
-        "对齐到标签起点（setp 01 + FF×2）"
+        "对齐到标签起点（setp 01 + FF×2；FF 本身无回执，看纸有没有动）"
       );
       renderBlePanel();
       toast("已让打印机走到下一张标签起点（会消耗 1~2 张标签）", "ok");
@@ -1010,10 +1099,10 @@
       await bleConnect(loadCfg().showAll);
       await bleSendRaw(
         concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c, 0x0c])]),
-        "走纸测试 ×3（setp 01 + FF×3，不打印）"
+        "走纸测试 ×3（setp 01 + FF×3，不打印；FF 本身无回执，看纸有没有动）"
       );
       renderBlePanel();
-      toast("已发 3 次走纸：看 3 张空白标签是否每次都停在标签起点", "ok");
+      toast("已发 3 次走纸：看 3 张空白标签是否每次都停在标签起点（纸没动 = 固件空闲态不响应 FF，不影响打印）", "ok");
     } catch (err) {
       toast(err.message, "err");
     } finally {
@@ -1202,12 +1291,18 @@
           '<label class="field"><span>底部留白 mm</span><input type="number" id="labelFootMargin" min="0" max="8" step="0.25" value="' +
             (cfg.footMargin == null ? 2.75 : cfg.footMargin) +
             '" onchange="labelPickFootMargin(this.value)" /></label>' +
+          '<label class="field"><span>作业头后等待 ms</span><input type="number" id="labelHeadWait" min="0" max="10000" step="100" value="' +
+            (cfg.headWaitMs == null ? 1200 : cfg.headWaitMs) +
+            '" onchange="labelPickHeadWait(this.value)" /></label>' +
+          '<label class="field"><span>多份间隔 ms</span><input type="number" id="labelCopyDelay" min="0" max="10000" step="100" value="' +
+            (cfg.copyDelayMs == null ? 1500 : cfg.copyDelayMs) +
+            '" onchange="labelPickCopyDelay(this.value)" /></label>' +
           '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
             (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
             "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelPerCopyPos"' +
             (cfg.perCopyPos !== false ? " checked" : "") + ' onchange="labelPickPerCopyPos(this.checked)" />' +
-            "<span>每份重新定位（修「越打越往下偏」；每份都重发一次复位+标签模式）</span></label>" +
+            "<span>每份重新定位（实验，默认关；勾上后每份补一条 setp 01、不带 ESC @ —— 多一次头部就多一次进纸）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBandRows"' +
             (cfg.bandRows > 0 ? " checked" : "") + ' onchange="labelPickBandRows(this.checked)" />' +
             "<span>官方同款分带（实验，默认关；每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
@@ -1235,14 +1330,16 @@
       "3 张都干净停在标签起点 ⇒ 走纸定位没问题、漂移在位图那段；走纸本身就跑偏 ⇒ 先重做「间隙学习」。" +
       "打印的是整张标签的位图：<code>GS v 0</code> 光栅指令 + 结尾 <code>FF</code> 走纸到下一张起点。" +
       "汉印官方（汉码 App）每张只发 <b>约 3475 字节</b>（私有压缩位图 + 22 个 10 行小块），" +
-      "我们发的是<b>未压缩</b>位图，50×30 满幅要 12000 字节 —— 蓝牙要发好几秒，" +
-      "打印机边收边印就会走走停停、纸位漂。" +
-      "所以上面两个开关默认开着：分带（单条 520 字节，不再 11KB 一整坨）" +
-      "+ 空白行跳过（ESC J 走纸代替发 0x00，纵向单位用 GS P 钉成 1 点）。" +
-      "注意二维码那几十行整行都有墨，跳不掉 —— 单张作业从 12KB 压到 5KB 上下" +
-      "（具体看版面上有多少纯白行，实测样例 5082 字节/张），还到不了官方 3475 字节" +
-      "（人家是私有压缩），但发送时间能砍到零头（顺带还改成流水线连发）。" +
+      "我们发的是<b>未压缩</b>位图，50×30 满幅要 12000 字节 —— 蓝牙要发好几秒。" +
+      "「分带」「空白行不传数据」两个开关能把单张压到 5KB 上下（实测样例 5082 字节/张），" +
+      "但它们是<b>实验性</b>的、默认关（本机验证过任意组合都能打，想省时间就自己勾上试）。" +
       "「导出作业(.bin)」可以把我们发的东西存下来，和汉码「打印到文件」的 .prn 逐字节对。</p>" +
+      '<p class="hint"><b>第一张位置偏（打印前纸先进一下）？</b>' +
+      "作业头里的 <code>ESC @</code> 会让固件做一次复位/定位 —— 真机表现就是「纸往里进一下，位置就错」；" +
+      "而第二张没有头部、也就不再进纸，位置反而是对的。所以 0.12.25 起把<b>作业头与位图拆成两次发送</b>：" +
+      "先发头 → 等「作业头后等待」（默认 1200ms）让定位动作走完 → 再发位图，位图于是从静止的纸位开始。" +
+      "还偏就加大这个等待值（2000~3000ms 试）；实在不行取消勾选「打印前复位」彻底不发那条复位" +
+      "（若发送会中途停住、打不出，再勾回来）。</p>" +
       '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。' +
       "要是打不出内容，先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
       "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
@@ -1255,6 +1352,7 @@
         '<button onclick="labelA4()">批量 A4 拼版</button>' +
         '<button onclick="labelDownload()">下载标签图</button>' +
         '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
+        '<button onclick="labelBleReset()">复位打印机</button>' +
         '<button onclick="labelBleAlign()">对齐标签</button>' +
         '<button onclick="labelBleFeedTest()">走纸测试 ×3</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
@@ -1345,7 +1443,24 @@
     saveCfg();
   }
 
-  /** 每份重新定位：第二份起也重发一次「复位 + 标签模式」头部（修累积漂移）。 */
+  /** 作业头发完到开始发位图之间的等待（ms）：让 ESC @ 触发的复位/定位动作走完，
+   *  位图再从静止的纸位开始（修「第一张位置偏」）。0 = 不拆不等待。 */
+  function labelPickHeadWait(value) {
+    const cfg = loadCfg();
+    const v = parseInt(value, 10);
+    cfg.headWaitMs = isNaN(v) ? 1200 : Math.max(0, Math.min(10000, v));
+    saveCfg();
+  }
+
+  /** 多份之间等待（ms）：一份一份发，给固件留出打印时间（这份固件一份一份地打）。 */
+  function labelPickCopyDelay(value) {
+    const cfg = loadCfg();
+    const v = parseInt(value, 10);
+    cfg.copyDelayMs = isNaN(v) ? 1500 : Math.max(0, Math.min(10000, v));
+    saveCfg();
+  }
+
+  /** 每份重新定位：第二份起补一条标签模式指令（**不带 ESC @**，多一次头部就多一次进纸）。 */
   function labelPickPerCopyPos(checked) {
     const cfg = loadCfg();
     cfg.perCopyPos = !!checked;
@@ -1385,7 +1500,7 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, rasterCommands, loadCfg, labelModeBytes, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, buildJobParts, rasterCommands, loadCfg, labelModeBytes, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
 
   Object.assign(window, {
     openLabelDialog,
@@ -1394,12 +1509,15 @@
     labelExportJob,
     labelPrintBle,
     labelPickFootMargin,
+    labelPickHeadWait,
+    labelPickCopyDelay,
     labelPickResetFirst,
     labelPickPerCopyPos,
     labelPickBandRows,
     labelPickBlankSkip,
     labelBleProbe,
     labelBleCalibrate,
+    labelBleReset,
     labelBleAlign,
     labelBleFeedTest,
     labelBleRaw,
