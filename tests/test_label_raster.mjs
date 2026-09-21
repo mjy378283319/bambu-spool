@@ -605,6 +605,18 @@ async function testDialogHtml() {
     html.includes('id="labelCopyDelay"') && /多份间隔 ms/.test(html));
   check("含「复位打印机」独立按钮（卡住/发送中断时手动清缓冲）",
     html.includes("labelBleReset") && typeof sandbox.labelBleReset === "function");
+  // 版本自证：面板上要打运行版本号。0.12.25 的两个旋钮曾因「镜像没拉 / 浏览器缓存旧 JS」
+  // 在面板上根本看不到，白白排查一轮 —— 有版本号，一张截图就能定位是哪一版。
+  const srcAll = fs.readFileSync(SRC, "utf8");
+  check("预览信息行打出运行版本号（截图自证容器是哪一版）",
+    /" · 版本 " \+ runningVersion\(\)/.test(srcAll));
+  check("版本号取自后端 /api/system/status，不硬写第三份",
+    /S\.status\.version/.test(srcAll) &&
+      typeof ((sandbox.labelDebug || {}).runningVersion) === "function");
+  check("取不到后端版本时写「未知」而不是 undefined",
+    sandbox.labelDebug.runningVersion() === "未知", String(sandbox.labelDebug.runningVersion()));
+  check("落运行时把版本读成整数语义（source 里没有第三个硬编码版本号）",
+    !/["']0\.12\.\d+["']/.test(srcAll.replace(/\/\*[\s\S]*?\*\//g, "")));
   check("提示语写明「第一张位置偏」的排查顺序（等待值 / 取消复位）",
     html.includes("第一张位置偏") && html.includes("作业头后等待"));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",

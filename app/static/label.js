@@ -855,6 +855,16 @@
     return renderLabel(spool, loadCfg());
   }
 
+  /** 面板上打出正在运行的后端版本：截图就能自证「容器里到底是哪一版」。
+   *  以前版本号只在设置页，标签面板的截图看不出新旧 —— 「两个旋钮在哪呢」这类
+   *  排查每次都要先问一轮「你拉镜像了吗」。取 /api/system/status 的 version，
+   *  拿不到写「未知」（不写 undefined，免得在界面上露馅）。
+   *  ⚠️ 别再在这里硬写版本号：后端两处（main.py / routes.py）已经要同改了。 */
+  function runningVersion() {
+    const v = S && S.status && S.status.version;
+    return v ? String(v) : "未知";
+  }
+
   async function labelRefresh() {
     const token = ++LABEL.renderToken;
     const host = document.getElementById("labelPreviewHost");
@@ -882,6 +892,7 @@
           raster.widthDots + "×" + raster.heightDots + " 点 · 位图 " + bytes + " 字节" +
           " · 底部留白 " + margin + " mm（" + raster.heightDots + "/" + fullRows + " 行）" +
           " · 作业 " + jobBytes + " 字节（官方同款 ~3475）" +
+          " · 版本 " + runningVersion() +
           (spool && spool.name ? " · " + spool.name : "");
       }
     } catch (err) {
@@ -1340,6 +1351,12 @@
       "先发头 → 等「作业头后等待」（默认 1200ms）让定位动作走完 → 再发位图，位图于是从静止的纸位开始。" +
       "还偏就加大这个等待值（2000~3000ms 试）；实在不行取消勾选「打印前复位」彻底不发那条复位" +
       "（若发送会中途停住、打不出，再勾回来）。</p>" +
+      '<p class="hint"><b>面板上找不到这里说到的某个旋钮 / 按钮？</b>' +
+      "先按 <code>Ctrl+F5</code> 强刷一次（浏览器可能还缓存着旧的 JS）；强刷后还是没有，" +
+      "就看预览图下面那行的 <code>版本 x.y.z</code>：比最新发布低就说明容器还跑着旧镜像，" +
+      "<code>docker compose pull</code> 再 <code>up -d</code> 拉一次即可。" +
+      "面板缺控件只有这一个原因，不是功能没做 —— 服务端从 0.12.26 起对静态资源回" +
+      "<code>Cache-Control: no-cache</code>，以后刷新就能拿到新的。</p>" +
       '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。' +
       "要是打不出内容，先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
       "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
@@ -1500,7 +1517,7 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, buildJobParts, rasterCommands, loadCfg, labelModeBytes, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, buildJobParts, rasterCommands, loadCfg, labelModeBytes, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor, runningVersion };
 
   Object.assign(window, {
     openLabelDialog,

@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="拓竹耗材管家",
-    version="0.12.25",
+    version="0.12.26",
     lifespan=lifespan,
     # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
     docs_url=None,
@@ -95,7 +95,7 @@ async def access_control(request: Request, call_next):
 
     # 2) 放行前端外壳与登录接口
     if path in OPEN_EXACT or path.startswith(OPEN_PREFIX):
-        return _harden(await call_next(request))
+        return _harden(await call_next(request), path)
 
     # 3) 跨站写操作拦截
     if request.method in UNSAFE_METHODS and not _origin_allowed(request):
@@ -107,11 +107,11 @@ async def access_control(request: Request, call_next):
             {"detail": "未登录", "code": "unauthenticated"}, status_code=401
         )
 
-    return _harden(await call_next(request))
+    return _harden(await call_next(request), path)
 
 
-def _harden(response):
-    """给所有响应加上基础安全头。"""
+def _harden(response, path: str = ""):
+    """给所有响应加上基础安全头（以及前端外壳的缓存策略）。"""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -131,6 +131,14 @@ def _harden(response):
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
         "connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'",
     )
+    # 前端外壳必须每次都回源校验：
+    #   StaticFiles 只发 ETag / Last-Modified、**不发 Cache-Control**，浏览器于是按启发式
+    #   规则缓存（Last-Modified 起 10% 时长内直接复用、不校验）。后果是「镜像已经拉到新
+    #   版本，页面里的 JS 还是旧的」——面板上少控件、少按钮，看着像功能根本没做。
+    #   2026-09-21 真实踩坑：0.12.25 新增的两个时间旋钮在面板上找不到，白排查一轮。
+    #   局域网自用，多一次 304 的开销可以忽略，所以直接 no-cache。
+    if path.startswith("/static/") or path in ("/", "/index.html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
 

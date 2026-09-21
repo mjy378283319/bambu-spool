@@ -205,6 +205,19 @@ def main() -> int:
         check("允许本站使用相机（camera=(self)）", "camera=(self)" in pp, pp)
         check("没有把相机对所有来源关死（camera=()）", "camera=()" not in pp, pp)
 
+        # 前端外壳的缓存策略：StaticFiles 只发 ETag/Last-Modified、不发 Cache-Control，
+        # 浏览器会按启发式规则直接复用旧 JS —— 表现是「镜像已经更新，面板上却没有新控件」。
+        # 2026-09-21 踩坑：0.12.25 加的两个时间旋钮在面板上找不到。
+        r_js = fresh.get("/static/label.js")
+        cc_js = r_js.headers.get("cache-control") or ""
+        check("静态 JS 发 Cache-Control: no-cache", "no-cache" in cc_js, cc_js or "(无)")
+        r_home = fresh.get("/")
+        cc_home = r_home.headers.get("cache-control") or ""
+        check("首页 HTML 发 Cache-Control: no-cache", "no-cache" in cc_home, cc_home or "(无)")
+        r_api = fresh.get("/api/system/status")
+        check("业务接口不加 no-cache（数据本来就是动态的）",
+            "no-cache" not in (r_api.headers.get("cache-control") or ""))
+
         # ── 5. 会话强度 ───────────────────────────────────
         section("5. 会话强度")
         forged = httpx.Client(base_url=srv.base, timeout=15.0)
