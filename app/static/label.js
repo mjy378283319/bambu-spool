@@ -136,7 +136,8 @@
 
   // cfgRev：改「实验性发送开关」的默认值时 +1。旧存档 rev 不一致时这些开关会被
   // 强制重置成本版默认 —— 不然用户曾经勾过的「断链组合」会被 localStorage 永远沿用。
-  const CFG_REV = 3;
+  // rev 4：0.12.26 真机实测「拆开等 1200ms」会卡在发送 24%，拆分降级为实验、默认 0。
+  const CFG_REV = 4;
 
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
@@ -151,8 +152,14 @@
     //   （ESC @ + setp 01）。而 0.12.19 试过完全不发 ESC @ →「发送半天、打一点就没了」，
     //   说明这条头不能简单删掉（固件多半靠它清缓冲/做初始化）。所以 0.12.25 的修法是
     //   **把头与位图拆成两次写入**：先发头，等 headWaitMs 让固件的复位/定位动作走完，
-    //   再发位图 —— 这样位图一定从一个静止的纸位开始，进纸动作不再和打印叠在一起。
-    // headWaitMs = 作业头发完 → 开始发位图之间的等待（ms）。0 = 不拆不等待（0.12.24 形态）。
+    //   再发位图。
+    //   ⚠️⚠️ 但这个修法被真机证伪了（0.12.26 → 0.12.27）：等待 1200ms 时**打印卡在发送
+    //   24%（2920/12017 字节）不动、随后蓝牙掉线**。合理机制：刚发完 ESC @，固件正在做
+    //   复位/进纸的机械动作，此时再灌 182 字节的长写（Prepare+Execute 握手）它就来不及应答
+    //   → 卡住。而 0.12.23 那种「头 + 位图一口气发完」的形态是**已验证能打完整张**的。
+    //   ⇒ 纪律：**默认流永远等于已验证形态**（0.12.22 铁律），拆分降级为实验、默认关。
+    // headWaitMs = 作业头发完 → 开始发位图之间的等待（ms）。**默认 0 = 不拆不等**（= 0.12.23
+    //   已验证形态，头与位图紧挨着发）；想试拆分再手动调大（1200 是本机踩坑值）。
     // copyDelayMs = 多份时每份之间的等待（ms）。这台机器「一次打三张只打第一张、后面只走纸
     //   不打印」，看着像固件一份一份地处理 —— 一口气灌三份位图它就吞掉后两份。所以份数 > 1
     //   时改成一份一份发，每份之间留出打印时间。份数 = 1 时这项不起作用。
@@ -174,7 +181,7 @@
       //   就多一次定位/进纸动作**，与「第一张进纸导致偏移」同源，所以回退为关。
       //   勾上后每份只补一条 GS "setp" 01（**不带 ESC @**，避免中途再触发一次复位）。
       perCopyPos: false,
-      headWaitMs: 1200, copyDelayMs: 1500,
+      headWaitMs: 0, copyDelayMs: 1500,
       pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
@@ -194,7 +201,7 @@
       cfg.blankSkip = false;
       cfg.pipeline = false;
       cfg.perCopyPos = false;
-      cfg.headWaitMs = 1200;
+      cfg.headWaitMs = 0;
       cfg.copyDelayMs = 1500;
       cfg.cfgRev = CFG_REV;
     }
@@ -756,7 +763,7 @@
       if (useAck) {
         p = char.writeValue(chunk);
         p.catch(() => {});                               // 超时/失败后底层 reject 静默化
-        p = withTimeout(p, 10000, "蓝牙写入超时");
+        p = withTimeout(p, 6000, "蓝牙写入超时（链路可能已断）");
       } else {
         p = char.writeValueWithoutResponse(chunk);
       }
@@ -924,6 +931,8 @@
   async function labelPrintBle() {
     if (LABEL.busy) return;
     LABEL.busy = true;
+    LABEL.sent = 0;                 // 进度计数归零，供下面的「该不该自动重发」判断（0.12.27）
+    LABEL.total = 0;
     try {
       const cfg = loadCfg();
       labelProgress("正在连接蓝牙…");
@@ -934,10 +943,22 @@
       try {
         await sendJobParts(parts, cfg);
       } catch (err) {
+        // ⚠️ 只在**几乎没发出去**时才自动重连重发（0.12.8 定案 ②）。
+        //    0.12.25 把这条阈值弄丢了，于是「卡在 24%」被自动重发放大成「卡死 + 蓝牙掉了」：
+        //    已经发出去大半，打印机里存着半张位图，再灌一份新的只会打出残张、还把纸走乱，
+        //    中途的强制断开重连也让用户以为蓝牙坏了。
+        const pct = LABEL.total ? LABEL.sent / LABEL.total : 0;
+        if (pct >= 0.05) {
+          throw new Error(
+            "发送在 " + Math.round(pct * 100) + "% 中断（" + err.message + "）；" +
+            "已发出去的部分留在打印机里，不再自动重发（免得打出半张）。" +
+            "先点「复位打印机」清掉缓冲，再重打一次"
+          );
+        }
         // 发送中途链路断了（Windows 僵尸连接 / 蓝牙掉线）→ 强制真实断开、保留设备引用，
         // 走无感重连后整份重发一次。重发这一份显式带 ESC @（{ reset: true }）：
         // 打印机里可能留着断链前的半份位图，先复位清掉才不会打出残张。
-        labelProgress("发送中断，正在重建链路重试…");
+        labelProgress("发送中断（" + Math.round(pct * 100) + "%），正在重建链路重试…");
         const dev = LABEL.ble.device;
         try {
           if (dev && dev.gatt) {
@@ -983,8 +1004,11 @@
     const notes = [];                   // bleWriteAll 的提示（如「无应答写超长，改 20 字节分包」）
     let base = 0;                       // 当前这一块之前已经发出去多少字节
     let done = 0;
+    LABEL.sent = 0;                     // 供「发送中断后该不该自动重发」判断（见 labelPrintBle）
+    LABEL.total = total;
     const onProg = function (n) {        // bleWriteAll 的进度是「本块内累计」，要加回 base
       const cur = base + n;
+      LABEL.sent = cur;
       labelProgress("正在发送 " + Math.round((cur / total) * 100) + "%（" + cur + "/" + total + " 字节）");
     };
     if (parts.head.length) {
@@ -1011,7 +1035,33 @@
     );
   }
 
+  /** 蓝牙动作互斥锁：打印期间一律拒绝其它会碰 GATT 的动作。
+   *
+   *  ⚠️ 2026-09-21 真实事故：打印卡在 24% 时用户点了「查询状态」，而**查询状态当时没有这把锁**，
+   *  于是两条写入砸在同一个特征上 —— 正撞 0.12.8 定案的坑（这台机器 / Windows BLE 容不下
+   *  并发 GATT 操作），链路当场被掐：界面停在「正在发送 24%」、蓝牙也掉了。
+   *  规矩：**凡是会读写 GATT 的按钮，一个都不能漏这把锁**（含连接 / 断开 / 查询状态 / 原始指令）。 */
+  function bleBusyBlock(what) {
+    if (LABEL.busy) {
+      toast("正在打印，等这次发完再" + what, "err");
+      return true;
+    }
+    return false;
+  }
+
+  async function labelBleConnect() {
+    if (bleBusyBlock("连接")) return;
+    try {
+      await bleConnect(loadCfg().showAll);
+      renderBlePanel();
+      toast("蓝牙已连接", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  }
+
   async function labelBleProbe() {
+    if (bleBusyBlock("查询状态")) return;
     try {
       await bleConnect(loadCfg().showAll);
       if (!LABEL.ble.notify) {
@@ -1049,7 +1099,7 @@
    *  隔离这个动作）。但「卡住不打印 / 上一份发送中断」时确实需要它清缓冲 ——
    *  那就手动点一次，别让它污染正常打印。 */
   async function labelBleReset() {
-    if (LABEL.busy) { toast("正在打印，等这次发完再复位", "err"); return; }
+    if (bleBusyBlock("复位")) return;
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
@@ -1071,7 +1121,7 @@
    *  那就别指望这个按钮：位置问题走「打印时把头与位图分开」（0.12.25）那条路。
    *  代价：会白费 1~2 张标签，所以不做成自动动作。 */
   async function labelBleAlign() {
-    if (LABEL.busy) { toast("正在打印，等这次发完再对齐", "err"); return; }
+    if (bleBusyBlock("对齐标签")) return;
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
@@ -1104,7 +1154,7 @@
   }
 
   async function labelBleFeedTest() {
-    if (LABEL.busy) { toast("正在打印，等这次发完再测走纸", "err"); return; }
+    if (bleBusyBlock("测走纸")) return;
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
@@ -1148,7 +1198,9 @@
     }
   }
 
-  async function labelBleRaw() {    const box = document.getElementById("labelRawHex");
+  async function labelBleRaw() {
+    if (bleBusyBlock("发原始指令")) return;
+    const box = document.getElementById("labelRawHex");
     if (!box) return;
     try {
       await bleConnect(loadCfg().showAll);
@@ -1163,6 +1215,7 @@
   }
 
   function labelBleDisconnect() {
+    if (bleBusyBlock("断开")) return;
     bleDisconnect();
     renderBlePanel();
     toast("已断开蓝牙", "ok");
@@ -1347,10 +1400,17 @@
       "「导出作业(.bin)」可以把我们发的东西存下来，和汉码「打印到文件」的 .prn 逐字节对。</p>" +
       '<p class="hint"><b>第一张位置偏（打印前纸先进一下）？</b>' +
       "作业头里的 <code>ESC @</code> 会让固件做一次复位/定位 —— 真机表现就是「纸往里进一下，位置就错」；" +
-      "而第二张没有头部、也就不再进纸，位置反而是对的。所以 0.12.25 起把<b>作业头与位图拆成两次发送</b>：" +
-      "先发头 → 等「作业头后等待」（默认 1200ms）让定位动作走完 → 再发位图，位图于是从静止的纸位开始。" +
-      "还偏就加大这个等待值（2000~3000ms 试）；实在不行取消勾选「打印前复位」彻底不发那条复位" +
+      "而第二张没有头部、也就不再进纸，位置反而是对的。" +
+      "0.12.25 试过把<b>头与位图拆成两次发送</b>（先发头 → 等「作业头后等待」→ 再发位图），" +
+      "<b>但真机实测拆开反而会卡死</b>：等待 1200ms 时打印停在「正在发送 24%」不动、随后蓝牙掉线" +
+      "（刚发完 <code>ESC @</code>，固件正在做进纸的机械动作，此时再灌 182 字节长写它就来不及应答）。" +
+      "所以 <b>0.12.27 起「作业头后等待」默认 0 = 不拆</b>，回到 0.12.23 那个已验证能打完整张的形态。" +
+      "想试拆分再手动调大（1200 就是踩坑值）；也可以试<b>取消勾选</b>「打印前复位」彻底不发那条复位" +
       "（若发送会中途停住、打不出，再勾回来）。</p>" +
+      '<p class="hint"><b>打印期间别点其它蓝牙按钮。</b>' +
+      "打印是一条长写入，中途再点「查询状态 / 对齐 / 复位 / 连接 / 断开」会变成两条写入砸同一个特征 —— " +
+      "这台机器容不下并发 GATT 操作，链路会当场被掐（表现为进度停在某个百分比、蓝牙也掉了）。" +
+      "0.12.27 起这些按钮在打印期间都会被挡下并提示，不再有例外的按钮。</p>" +
       '<p class="hint"><b>面板上找不到这里说到的某个旋钮 / 按钮？</b>' +
       "先按 <code>Ctrl+F5</code> 强刷一次（浏览器可能还缓存着旧的 JS）；强刷后还是没有，" +
       "就看预览图下面那行的 <code>版本 x.y.z</code>：比最新发布低就说明容器还跑着旧镜像，" +
@@ -1539,15 +1599,7 @@
     labelBleFeedTest,
     labelBleRaw,
     labelBleDisconnect,
-    labelBleConnect: async function () {
-      try {
-        await bleConnect(loadCfg().showAll);
-        renderBlePanel();
-        toast("蓝牙已连接", "ok");
-      } catch (err) {
-        toast(err.message, "err");
-      }
-    },
+    labelBleConnect,
     labelA4,
     labelPickSpool,
     labelPickSize,

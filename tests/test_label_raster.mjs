@@ -77,14 +77,44 @@ function testDefaultCfgSafe() {
   check("默认 resetFirst=true（不发复位实测打不出来）", cfg.resetFirst === true);
   // 0.12.25：多一次头部 = 多一次定位动作（会进纸）。用户实测「第二张没有头部，位置反而是对的」。
   check("默认 perCopyPos=false（每份不再补头部）", cfg.perCopyPos === false, String(cfg.perCopyPos));
-  check("默认 headWaitMs=1200（作业头后等定位动作走完再发位图）",
-    cfg.headWaitMs === 1200, String(cfg.headWaitMs));
+  // 0.12.27：拆开发送被真机证伪（等待 1200ms → 卡在发送 24% + 掉线），拆分降级为实验。
+  check("默认 headWaitMs=0（不拆不等 = 0.12.23 已验证形态）",
+    cfg.headWaitMs === 0, String(cfg.headWaitMs));
   check("默认 copyDelayMs=1500（多份之间留打印时间，这份固件一份一份地打）",
     cfg.copyDelayMs === 1500, String(cfg.copyDelayMs));
   const src = fs.readFileSync(SRC, "utf8");
   check("旧存档迁移：cfgRev 不一致时强制重置实验开关与时间旋钮",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 3;/.test(src) &&
-      /cfg\.headWaitMs = 1200;/.test(src) && /cfg\.perCopyPos = false;/.test(src));
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 4;/.test(src) &&
+      /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src));
+}
+
+/* ── 0.12.27：蓝牙动作互斥 + 重发阈值 ─────────────────────── */
+function testBleGuards() {
+  console.log("== 蓝牙动作互斥与重发阈值（0.12.27） ==");
+  const src = fs.readFileSync(SRC, "utf8");
+  check("存在统一的蓝牙动作互斥锁 bleBusyBlock", /function bleBusyBlock\(what\)/.test(src));
+  // 每个会碰 GATT 的动作都必须过这把锁 —— 漏一个就等于留一条掐链路的路
+  // （0.12.26 真实事故：「查询状态」当时没有锁，打印中一点就掉链路）
+  const body = (name) => {
+    const i = src.indexOf("function " + name + "(");
+    return i < 0 ? "" : src.slice(i, src.indexOf("\n  }", i) + 4);
+  };
+  for (const fn of ["labelBleProbe", "labelBleConnect", "labelBleDisconnect",
+                    "labelBleReset", "labelBleAlign", "labelBleFeedTest", "labelBleRaw"]) {
+    const b = body(fn);
+    check(`${fn} 有 busy 守卫`, b.length > 0 && /bleBusyBlock\(/.test(b),
+      b ? b.slice(0, 60) : "找不到该函数");
+  }
+  check("打印入口 labelPrintBle 自己不套互斥锁（它就是持锁方）",
+    !/bleBusyBlock\(/.test(body("labelPrintBle")));
+  // 重发阈值：只在这份作业几乎没发出去时才自动重连重发；已发过大半就别再灌第二份
+  // （0.12.25 丢了这条阈值 → 「卡在 24%」被自动重发 + 断开重连放大成「卡死 + 蓝牙掉了」）
+  check("发送中断后按进度阈值决定是否自动重发（pct >= 0.05 就不再重发）",
+    /pct >= 0\.05/.test(body("labelPrintBle")));
+  check("不做自动重发时给出可执行处置（先点「复位打印机」清缓冲）",
+    /先点「复位打印机」清掉缓冲/.test(src));
+  check("单包写入超时 6s（缩短「看着像卡死」的窗口）",
+    /withTimeout\(p, 6000,/.test(src) && !/withTimeout\(p, 10000,/.test(src));
 }
 
 /* ── 报文解析器 ──────────────────────────────────────────────
@@ -650,6 +680,7 @@ async function testDialogHtml() {
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testDefaultCfgSafe();
+  testBleGuards();
   testMm2dot();
   testPackRaster();
   testEscPosJob();
