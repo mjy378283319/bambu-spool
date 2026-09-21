@@ -158,6 +158,11 @@
     return {
       wMm: 50, hMm: 30, dpi: 203, density: 4, copies: 1,
       footMargin: 2.75, resetFirst: true, bandRows: 0, blankSkip: false,
+      // perCopyPos = 每份重新定位（第二份起重发 ESC @ + setp 01）。默认 **开**：
+      //   2026-09-21 真机实测「份数 3 越打越往下偏」，而「每次单独打一张」三张全对正 ——
+      //   差别就是后者每张都带一次作业头部（重新定位）。开=每份字节完全相同，
+      //   和官方抓包「3 份逐字节相同」同构。关掉 = 回到 0.12.23 形态（只开头定位一次）。
+      perCopyPos: true,
       pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
@@ -483,7 +488,8 @@
   }
 
   /** 组装 ESC/POS 作业：（可选复位）→ 标签纸模式 → 光栅 → 走纸。
-   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认发）。 */
+   *  opts.reset 显式指定是否发 ESC @；不传时看 cfg.resetFirst（默认发）。
+   *  opts.perCopy 显式指定「每份重新定位」；不传时看 cfg.perCopyPos（默认开）。 */
   function buildEscPosJob(raster, cfg, opts) {
     const parts = [];
     // ESC @ 复位：汉码官方「打印到文件」抓包（10685 字节，sha1 2e284c0c…）里 `1b 40`
@@ -492,23 +498,41 @@
     //   发复位才出纸（官方 App 打印前有自己的初始化，浏览器直连没有）→ 默认发。
     //   发送中断后打印机里可能留着半份位图，整份重发前也必须复位清掉 → { reset: true }。
     const reset = opts && "reset" in opts ? !!opts.reset : !(cfg && cfg.resetFirst === false);
-    if (reset) parts.push(Uint8Array.from([0x1b, 0x40]));
+    // perCopyPos = 每份重新定位：第二份起也重发一遍「复位 + 标签模式」头部。
+    //   2026-09-21 真机实测：份数 3 连打**越打越往下偏**（累积漂移），但「每次单独打一张」
+    //   三张全对正 —— 两者唯一的差别就是后者每张都是一个独立作业、开头都会重新定位。
+    //   ⇒ 说明这份固件的 FF 单独并不足以把纸精确对到下一张起点（每次都差一点点，逐张累积）。
+    //   修法：让每一份都带一次作业头部（ESC @ + GS setp 01，blankSkip 时连带 GS P），
+    //   等价于「连点三次打印」，把累积误差每份清零。代价：每份多 8~14 字节、
+    //   打印机可能多走一点点纸；不想要就关掉这个开关（回到 0.12.23 的形态）。
+    const perCopy = opts && "perCopy" in opts
+      ? !!opts.perCopy
+      : !(cfg && cfg.perCopyPos === false);
+    const gsP = !(cfg && cfg.blankSkip === false);
+    const head = [];
+    if (reset) head.push(Uint8Array.from([0x1b, 0x40]));
     // GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式
-    parts.push(Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]));
-
+    head.push(labelModeBytes());
     // GS P 203 203 —— 把纵向走纸单位显式设成 1 点。
     //   空白行跳过用的是 ESC J n（走纸 n × 纵向单位），而纵向单位的默认值各家不同
     //   （1/203 或 1/144 或 1/360），猜错就会把整张标签纵向拉长/压扁。
     //   这里放在模式指令之后（ESC @ 会把设置清回默认，所以必须在它后面），把单位钉死，
     //   ESC J n 就等于「n 个点」。不省空白时用不到走纸，就不发这条，少一个未知变量。
-    if (!(cfg && cfg.blankSkip === false)) {
-      parts.push(Uint8Array.from([0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00]));
-    }
+    if (gsP) head.push(Uint8Array.from([0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00]));
+    for (const h of head) parts.push(h);
 
     const segs = rasterCommands(raster, cfg);
     const copies = Math.max(1, Math.min(50, cfg.copies || 1));
     for (let c = 0; c < copies; c++) {
-      for (const s of segs) parts.push(s);
+      // 第二份起：重发头部，重新做一次标签定位（见 perCopyPos 说明）。
+      // rasterCommands 每次都要重算：ESC @ 之后空白跳过的量是不变的，但保持「每份独立成型」
+      // 更好推理 —— 每份字节完全一致，和「单独打一张」逐字节相同。
+      if (c > 0 && perCopy) {
+        for (const h of head) parts.push(h);
+        for (const s of rasterCommands(raster, cfg)) parts.push(s);
+      } else {
+        for (const s of segs) parts.push(s);
+      }
       // FF (0x0c)：间隙走纸到下一标签起点。
       // 汉码官方抓包（50×30 ×3 份，10685 字节）确认：每份标签逐字节相同，块尾就是单个 0c。
       // 那份流每份 218 行（27.25mm）而不是打满 240 行 —— 留白让打印头停在标签面上，
@@ -941,18 +965,22 @@
     }
   }
 
-  /** 对齐到标签起点：单发一个 FF (0x0C)。
-   *  打印位置偏了（内容压到缝上/跨到下张）时先点它 —— 在间隙标签模式下 FF 会让纸
-   *  走到下一张标签的起点，于是下一张必从标签头开始。代价是可能白费一张标签，
-   *  所以不做成每次打印前自动发。 */
+  /** 对齐到标签起点：进标签模式 + 两个 FF。
+   *
+   *  ⚠️ 只发一个裸 FF 在真机上「按了没反应」：打印机不在标签模式时 FF 不触发间隙定位
+   *  （等价于普通走一行）。所以先补 `GS "setp" 01` 再发 FF —— 和正式作业开头那两根指令一致。
+   *  打印位置偏了（内容压到缝上/跨到下张）时先点它。代价是可能白费一张标签。 */
   async function labelBleAlign() {
     if (LABEL.busy) { toast("正在打印，等这次发完再对齐", "err"); return; }
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
-      await bleSendRaw(Uint8Array.from([0x0c]), "对齐到标签起点（FF）");
+      await bleSendRaw(
+        concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c])]),
+        "对齐到标签起点（setp 01 + FF×2）"
+      );
       renderBlePanel();
-      toast("已让打印机走到下一张标签起点（会消耗一张标签）", "ok");
+      toast("已让打印机走到下一张标签起点（会消耗 1~2 张标签）", "ok");
     } catch (err) {
       toast(err.message, "err");
     } finally {
@@ -968,14 +996,21 @@
    *   - 走纸本身就逐张跑偏 ⇒ 间隙定位/校准的问题（先做「间隙学习」再测）。
    *  会消耗 3 张标签，所以不做成自动动作。
    */
+  /** GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式。
+   *  对齐/走纸这类只发 FF 的诊断动作必须先带上它，否则打印机不在标签模式，
+   *  FF 不触发间隙定位（真机表现就是「按了没反应」）。 */
+  function labelModeBytes() {
+    return Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]);
+  }
+
   async function labelBleFeedTest() {
     if (LABEL.busy) { toast("正在打印，等这次发完再测走纸", "err"); return; }
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
       await bleSendRaw(
-        Uint8Array.from([0x0c, 0x0c, 0x0c]),
-        "走纸测试 ×3（只发 FF，不打印）"
+        concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c, 0x0c])]),
+        "走纸测试 ×3（setp 01 + FF×3，不打印）"
       );
       renderBlePanel();
       toast("已发 3 次走纸：看 3 张空白标签是否每次都停在标签起点", "ok");
@@ -1170,6 +1205,9 @@
           '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
             (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
             "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
+          '<label class="field check"><input type="checkbox" id="labelPerCopyPos"' +
+            (cfg.perCopyPos !== false ? " checked" : "") + ' onchange="labelPickPerCopyPos(this.checked)" />' +
+            "<span>每份重新定位（修「越打越往下偏」；每份都重发一次复位+标签模式）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBandRows"' +
             (cfg.bandRows > 0 ? " checked" : "") + ' onchange="labelPickBandRows(this.checked)" />' +
             "<span>官方同款分带（实验，默认关；每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
@@ -1307,6 +1345,14 @@
     saveCfg();
   }
 
+  /** 每份重新定位：第二份起也重发一次「复位 + 标签模式」头部（修累积漂移）。 */
+  function labelPickPerCopyPos(checked) {
+    const cfg = loadCfg();
+    cfg.perCopyPos = !!checked;
+    saveCfg();
+    labelRefresh();
+  }
+
   /** 官方同款分带：每 10 行一条 GS v 0（对齐汉码抓包 22 块 × 10 行）。 */
   function labelPickBandRows(checked) {
     const cfg = loadCfg();
@@ -1339,7 +1385,7 @@
 
   // 无头测试用：把渲染与打包暴露出来，便于在浏览器里直接核对 1 位位图结果。
   // 只读、不改状态，留着对排查打印问题是真有帮助。
-  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, rasterCommands, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
+  window.labelDebug = { renderLabel, packRaster, buildEscPosJob, rasterCommands, loadCfg, labelModeBytes, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor };
 
   Object.assign(window, {
     openLabelDialog,
@@ -1349,6 +1395,7 @@
     labelPrintBle,
     labelPickFootMargin,
     labelPickResetFirst,
+    labelPickPerCopyPos,
     labelPickBandRows,
     labelPickBlankSkip,
     labelBleProbe,

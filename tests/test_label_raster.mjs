@@ -136,6 +136,7 @@ const REQUIRED_HANDLERS = [
   "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleFeedTest", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
+  "labelPickPerCopyPos",
   "labelPickBandRows", "labelPickBlankSkip", "labelPickPipeline", "labelPickShowAll",
 ];
 
@@ -287,10 +288,23 @@ function testEscPosJob() {
   check("两份 = 2 条光栅 + 2 个 FF",
     twoOps.filter((o) => o.op === "raster").length === 2 &&
       twoOps.filter((o) => o.op === "ff").length === 2, JSON.stringify(twoOps));
-  check("两份长度 = 27+13 = 40", two.length === 40, String(two.length));
-  check("两份的第二份与第一份逐字节相同（复位/GS P 只发一次）",
-    Array.from(two.slice(14, 27)).join(",") === Array.from(two.slice(27, 40)).join(","),
-    Array.from(two.slice(27)).join(","));
+  // 0.12.24：默认「每份重新定位」—— 第二份起也重发一次作业头部（ESC @ + setp 01 + GS P），
+  // 于是每一份都是一个完整作业，和「单独打一张」逐字节相同 ⇒ 累积漂移每份清零。
+  check("每份重新定位：两份长度 = 2 × 27 = 54", two.length === 54, String(two.length));
+  check("每份重新定位后，两份逐字节完全相同（与官方抓包 3 份相同同构）",
+    Array.from(two.slice(0, 27)).join(",") === Array.from(two.slice(27, 54)).join(","),
+    Array.from(two.slice(27, 54)).join(","));
+  check("第二份开头也是 ESC @ + setp 01（重新定位）",
+    two[27] === 0x1b && two[28] === 0x40 &&
+      [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => two[29 + i] === b),
+    Array.from(two.slice(27, 35)).join(","));
+
+  // 关掉「每份重新定位」= 0.12.23 形态：只有整份开头定位一次
+  const twoNoPos = buildEscPosJob(raster, { copies: 2, perCopyPos: false });
+  check("关掉每份重新定位 → 第二份只有光栅+FF（长度 = 27 + 13 = 40）",
+    twoNoPos.length === 40, String(twoNoPos.length));
+  check("关掉后第二份不再带 ESC @",
+    twoNoPos[27] === 0x1d && twoNoPos[28] === 0x76, Array.from(twoNoPos.slice(27, 30)).join(","));
 
   check("份数 0 兜底成 1 份",
     parseJob(buildEscPosJob(raster, { copies: 0 })).filter((o) => o.op === "raster").length === 1);
@@ -453,7 +467,9 @@ function testFootMargin() {
   // 这里刻意把两个「省体积」开关关掉，单独量留白对报文体量的作用。
   const BPR = 52;
   const mkSolid = (rows) => mkRaster(rows, BPR, () => Uint8Array.from({ length: BPR }, () => 0xff));
-  const base = { copies: 2, bandRows: 0, blankSkip: false, resetFirst: true };
+  // 这里刻意把「省体积」开关与「每份重新定位」都关掉，单独量留白对报文体量的作用
+  // （perCopyPos 会每份多发一次头部，会干扰这条长度公式）。
+  const base = { copies: 2, bandRows: 0, blankSkip: false, resetFirst: true, perCopyPos: false };
   const rows218 = rasterRowsFor(30, 2.75, 203);
   const rows240 = rasterRowsFor(30, 0, 203);
   const jobSmall = buildEscPosJob(mkSolid(rows218), base);
@@ -521,6 +537,10 @@ async function testDialogHtml() {
     html.includes("labelExportJob") && html.includes("labelBleAlign"));
   check("含走纸测试按钮（串页时分离「走纸定位」与「位图打印」）",
     html.includes("labelBleFeedTest"));
+  check("诊断动作先发 setp 01 进标签模式（只发裸 FF 真机按了没反应）",
+    typeof (sandbox.labelDebug || {}).labelModeBytes === "function" &&
+      (sandbox.labelDebug.labelModeBytes() || [])[0] === 0x1d);
+  check("含「每份重新定位」开关（修越打越往下偏）", html.includes('id="labelPerCopyPos"'));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",
     html.includes("间隙学习") && html.includes("3475"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
