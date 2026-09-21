@@ -834,6 +834,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .label-diag summary { cursor: pointer; color: var(--text-2); }
 .label-diag ul { margin: 8px 0 0; padding-left: 16px; line-height: 1.75; word-break: break-all; }
 .label-diag code { font-size: 12.5px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+/* 折叠起来的说明 / 实验开关：默认收起，面板正文不铺长文（用户明确要求） */
+.label-adv { margin: 10px 0 2px; }
+.label-adv summary { font-size: 13.5px; }
+.label-help { margin-top: 14px; }
+.label-help summary { font-size: 13.5px; }
+/* .label-diag ul 是给十六进制串用的 break-all，讲解文字要按正常断行 */
+.label-help ul { word-break: normal; }
+.label-help li { margin-bottom: 7px; }
+.label-help li:last-child { margin-bottom: 0; }
 label.field.check { display: flex; align-items: center; gap: 7px; }
 label.field.check input { width: auto; margin: 0; flex: none; }
 label.field.check > span { display: inline; margin-bottom: 0; }

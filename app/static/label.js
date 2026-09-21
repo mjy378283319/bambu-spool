@@ -1364,18 +1364,22 @@
           '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
             (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
             "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
+          // 四个实验开关收进折叠区：默认全关，正常打印根本不用看它们。
+          // 留在面板上每一行都是「要不要勾」的决策成本，用户实测反馈就是「这些选项到底勾哪个」。
+          '<details class="label-diag label-adv"><summary>实验选项（默认全关，打印正常就别动）</summary>' +
           '<label class="field check"><input type="checkbox" id="labelPerCopyPos"' +
-            (cfg.perCopyPos !== false ? " checked" : "") + ' onchange="labelPickPerCopyPos(this.checked)" />' +
+            (cfg.perCopyPos === true ? " checked" : "") + ' onchange="labelPickPerCopyPos(this.checked)" />' +
             "<span>每份重新定位（实验，默认关；勾上后每份补一条 setp 01、不带 ESC @ —— 多一次头部就多一次进纸）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBandRows"' +
             (cfg.bandRows > 0 ? " checked" : "") + ' onchange="labelPickBandRows(this.checked)" />' +
             "<span>官方同款分带（实验，默认关；每 10 行一条 GS v 0，单条载荷 520 字节）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelBlankSkip"' +
-            (cfg.blankSkip !== false ? " checked" : "") + ' onchange="labelPickBlankSkip(this.checked)" />' +
+            (cfg.blankSkip === true ? " checked" : "") + ' onchange="labelPickBlankSkip(this.checked)" />' +
             "<span>空白行不传数据（实验，默认关；ESC J 跳过 —— 本机实测会断链，勾了自负）</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelPipeline"' +
             (cfg.pipeline ? " checked" : "") + ' onchange="labelPickPipeline(this.checked)" />' +
             "<span>流水线连发（快，但本机实测一点打印就断链，默认关）</span></label>" +
+          "</details>" +
           '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -1387,40 +1391,31 @@
           '<div class="card" style="margin-top:10px;padding:10px"><div id="labelBlePanel"></div></div>' +
         "</div>" +
       "</div>" +
-      '<p class="hint"><b>首次用 / 换了纸，按这个顺序来：</b>' +
-      "① 点「连接打印机」→ ② 点「间隙学习」（打印机自己走一段纸标定标签间距，这一步不能省）" +
-      "→ ③ 点「蓝牙打印」。位置偏了就点一次「对齐标签」，再打。" +
-      "<b>多张连打串页时</b>，先点「走纸测试 ×3」（只发 FF 不打内容、费 3 张标签）：" +
-      "3 张都干净停在标签起点 ⇒ 走纸定位没问题、漂移在位图那段；走纸本身就跑偏 ⇒ 先重做「间隙学习」。" +
-      "打印的是整张标签的位图：<code>GS v 0</code> 光栅指令 + 结尾 <code>FF</code> 走纸到下一张起点。" +
-      "汉印官方（汉码 App）每张只发 <b>约 3475 字节</b>（私有压缩位图 + 22 个 10 行小块），" +
-      "我们发的是<b>未压缩</b>位图，50×30 满幅要 12000 字节 —— 蓝牙要发好几秒。" +
-      "「分带」「空白行不传数据」两个开关能把单张压到 5KB 上下（实测样例 5082 字节/张），" +
-      "但它们是<b>实验性</b>的、默认关（本机验证过任意组合都能打，想省时间就自己勾上试）。" +
-      "「导出作业(.bin)」可以把我们发的东西存下来，和汉码「打印到文件」的 .prn 逐字节对。</p>" +
-      '<p class="hint"><b>第一张位置偏（打印前纸先进一下）？</b>' +
-      "作业头里的 <code>ESC @</code> 会让固件做一次复位/定位 —— 真机表现就是「纸往里进一下，位置就错」；" +
-      "而第二张没有头部、也就不再进纸，位置反而是对的。" +
-      "0.12.25 试过把<b>头与位图拆成两次发送</b>（先发头 → 等「作业头后等待」→ 再发位图），" +
-      "<b>但真机实测拆开反而会卡死</b>：等待 1200ms 时打印停在「正在发送 24%」不动、随后蓝牙掉线" +
-      "（刚发完 <code>ESC @</code>，固件正在做进纸的机械动作，此时再灌 182 字节长写它就来不及应答）。" +
-      "所以 <b>0.12.27 起「作业头后等待」默认 0 = 不拆</b>，回到 0.12.23 那个已验证能打完整张的形态。" +
-      "想试拆分再手动调大（1200 就是踩坑值）；也可以试<b>取消勾选</b>「打印前复位」彻底不发那条复位" +
-      "（若发送会中途停住、打不出，再勾回来）。</p>" +
-      '<p class="hint"><b>打印期间别点其它蓝牙按钮。</b>' +
-      "打印是一条长写入，中途再点「查询状态 / 对齐 / 复位 / 连接 / 断开」会变成两条写入砸同一个特征 —— " +
-      "这台机器容不下并发 GATT 操作，链路会当场被掐（表现为进度停在某个百分比、蓝牙也掉了）。" +
-      "0.12.27 起这些按钮在打印期间都会被挡下并提示，不再有例外的按钮。</p>" +
-      '<p class="hint"><b>面板上找不到这里说到的某个旋钮 / 按钮？</b>' +
-      "先按 <code>Ctrl+F5</code> 强刷一次（浏览器可能还缓存着旧的 JS）；强刷后还是没有，" +
-      "就看预览图下面那行的 <code>版本 x.y.z</code>：比最新发布低就说明容器还跑着旧镜像，" +
-      "<code>docker compose pull</code> 再 <code>up -d</code> 拉一次即可。" +
-      "面板缺控件只有这一个原因，不是功能没做 —— 服务端从 0.12.26 起对静态资源回" +
-      "<code>Cache-Control: no-cache</code>，以后刷新就能拿到新的。</p>" +
-      '<p class="hint">汉印 T260LR 用的是私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。' +
-      "要是打不出内容，先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
-      "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
-      "也可以在那里用「原始指令」手工试协议。</p>";
+      // 说明与排查收进折叠区（默认收起）。原来这五段是直接铺在面板下面的，占了大半屏，
+      // 用户的反馈就是「这些选项到底勾哪个」—— 默认状态下面板不该有需要读的长文。
+      '<details class="label-diag label-help"><summary>操作说明 / 排查（点开）</summary><ul>' +
+        "<li><b>顺序</b>：① 点「连接打印机」→ ② 点「间隙学习」→ ③ 点「蓝牙打印」。" +
+        "间隙学习是打印机自己走一段纸、标定标签间距，<b>只有首次用或换纸才需要重做</b>。</li>" +
+        "<li><b>位置偏</b>：先点一次「对齐标签」，再打。" +
+        "第一张「纸先进一下、位置就错」是作业头里 <code>ESC @</code> 触发的复位/定位" +
+        "（第二张没有头部、所以反而是对的）。0.12.25 试过把作业头与位图拆开发 → 真机卡死" +
+        "（停在 24% 后掉链），所以 <b>0.12.27 起「作业头后等待 ms」默认 0 = 不拆不等待</b>，" +
+        "回到已验证能打完整张的形态。想再试拆分就把它调大（1200 是踩坑值）；" +
+        "也可以 <b>取消勾选</b>「打印前复位」彻底不发那条复位（若发送中途停住、打不出，再勾回来）。</li>" +
+        "<li><b>多张串页 / 走偏</b>：先重做一次「间隙学习」，再点「走纸测试 ×3」" +
+        "（只走纸不打内容、费 3 张标签）——3 张都干净停在标签起点，说明走纸定位没问题、漂移在位图那段。</li>" +
+        "<li><b>打印期间别点其它蓝牙按钮</b>（查询状态 / 对齐 / 复位 / 连接 / 断开）：" +
+        "这台机器容不下并发 GATT 操作，两条写入砸同一个特征会当场把链路掐了" +
+        "（表现为进度停在某个百分比、蓝牙也掉了）。0.12.27 起打印期间这些按钮会被自动挡下并提示。</li>" +
+        "<li><b>打不出内容</b>：汉印 T260LR 用私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。" +
+        "先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
+        "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
+        "也可以在那里用「原始指令」手工试协议。</li>" +
+        "<li><b>面板上找不到这里说到的某个旋钮 / 按钮，或版本看着旧</b>：先 <code>Ctrl+F5</code> 强刷一次，" +
+        "再看预览图下面那行的 <code>版本 x.y.z</code>：比最新发布低就说明容器还跑着旧镜像，" +
+        "<code>docker compose pull</code> 再 <code>up -d</code>。" +
+        "面板缺控件只有这一个原因，不是功能没做。</li>" +
+      "</ul></details>";
 
     openModal(
       "标签打印",

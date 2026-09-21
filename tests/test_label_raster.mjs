@@ -647,10 +647,20 @@ async function testDialogHtml() {
     sandbox.labelDebug.runningVersion() === "未知", String(sandbox.labelDebug.runningVersion()));
   check("落运行时把版本读成整数语义（source 里没有第三个硬编码版本号）",
     !/["']0\.12\.\d+["']/.test(srcAll.replace(/\/\*[\s\S]*?\*\//g, "")));
-  check("提示语写明「第一张位置偏」的排查顺序（等待值 / 取消复位）",
-    html.includes("第一张位置偏") && html.includes("作业头后等待"));
-  check("提示语写清「先连接→再间隙学习→再打印」的顺序",
-    html.includes("间隙学习") && html.includes("3475"));
+  check("说明里写明「位置偏」的处置（等待值 / 取消复位）",
+    html.includes("作业头后等待") && html.includes("取消勾选"));
+  check("说明里写清「先连接→再间隙学习→再打印」的顺序",
+    html.includes("连接打印机") && html.includes("间隙学习") && html.includes("蓝牙打印"));
+  // 0.12.28：说明与实验开关都收进折叠区，默认收起 —— 面板上不再铺半屏长文。
+  check("操作说明收进折叠区且默认收起",
+    /<details class="label-diag label-help">/.test(html) && !/label-help"[^>]*\sopen/.test(html) &&
+      html.includes("<summary>"));
+  check("四个实验开关收进折叠区且默认收起",
+    /<details class="label-diag label-adv">/.test(html) && !/label-adv"[^>]*\sopen/.test(html) &&
+      html.indexOf('id="labelPerCopyPos"') > html.indexOf("label-adv") &&
+      html.indexOf('id="labelPipeline"') < html.indexOf("</details>", html.indexOf("label-adv")));
+  check("面板正文不再有直接铺开的 .hint 长文",
+    !/class="hint"/.test(html), html.match(/class="hint"[^>]{0,40}/)?.[0] || "");
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
   check("含预览挂点", html.includes('id="labelPreviewHost"'));
   check("提示语提到 T260LR 蓝牙方案", html.includes("T260LR"));
