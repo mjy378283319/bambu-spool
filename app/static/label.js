@@ -960,6 +960,32 @@
     }
   }
 
+  /** 走纸测试：只发 3 个 FF（不打印任何内容），看纸是否每次都停在标签起点。
+   *
+   *  多张连打串页时用来「分环节」：
+   *   - 3 张空白标签都干净地停在起点 ⇒ FF 定位没问题，漂移出在位图打印那一段
+   *     （固件对 GS v 0 行数的纵向走纸量与我们算的不一致）；
+   *   - 走纸本身就逐张跑偏 ⇒ 间隙定位/校准的问题（先做「间隙学习」再测）。
+   *  会消耗 3 张标签，所以不做成自动动作。
+   */
+  async function labelBleFeedTest() {
+    if (LABEL.busy) { toast("正在打印，等这次发完再测走纸", "err"); return; }
+    LABEL.busy = true;
+    try {
+      await bleConnect(loadCfg().showAll);
+      await bleSendRaw(
+        Uint8Array.from([0x0c, 0x0c, 0x0c]),
+        "走纸测试 ×3（只发 FF，不打印）"
+      );
+      renderBlePanel();
+      toast("已发 3 次走纸：看 3 张空白标签是否每次都停在标签起点", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      LABEL.busy = false;
+    }
+  }
+
   /** 把当前这张标签的作业原样导出成 .bin。
    *  汉码 Windows 客户端能「打印到文件」，我们这边也出一份，就能逐字节对比两边差在哪
    *  （例如官方每份 3475 字节、22 个 GS v 0 块；我们多少块、多少字节）。
@@ -1167,6 +1193,8 @@
       '<p class="hint"><b>首次用 / 换了纸，按这个顺序来：</b>' +
       "① 点「连接打印机」→ ② 点「间隙学习」（打印机自己走一段纸标定标签间距，这一步不能省）" +
       "→ ③ 点「蓝牙打印」。位置偏了就点一次「对齐标签」，再打。" +
+      "<b>多张连打串页时</b>，先点「走纸测试 ×3」（只发 FF 不打内容、费 3 张标签）：" +
+      "3 张都干净停在标签起点 ⇒ 走纸定位没问题、漂移在位图那段；走纸本身就跑偏 ⇒ 先重做「间隙学习」。" +
       "打印的是整张标签的位图：<code>GS v 0</code> 光栅指令 + 结尾 <code>FF</code> 走纸到下一张起点。" +
       "汉印官方（汉码 App）每张只发 <b>约 3475 字节</b>（私有压缩位图 + 22 个 10 行小块），" +
       "我们发的是<b>未压缩</b>位图，50×30 满幅要 12000 字节 —— 蓝牙要发好几秒，" +
@@ -1190,6 +1218,7 @@
         '<button onclick="labelDownload()">下载标签图</button>' +
         '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
         '<button onclick="labelBleAlign()">对齐标签</button>' +
+        '<button onclick="labelBleFeedTest()">走纸测试 ×3</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
       true
     );
@@ -1325,6 +1354,7 @@
     labelBleProbe,
     labelBleCalibrate,
     labelBleAlign,
+    labelBleFeedTest,
     labelBleRaw,
     labelBleDisconnect,
     labelBleConnect: async function () {

@@ -133,7 +133,7 @@ const BLANK_ROW_52 = () => new Uint8Array(52);
 // 很容易漏 —— 所以这里按名单逐个点名。
 const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle",
-  "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
+  "labelBleProbe", "labelBleCalibrate", "labelBleAlign", "labelBleFeedTest", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
   "labelPickBandRows", "labelPickBlankSkip", "labelPickPipeline", "labelPickShowAll",
@@ -519,6 +519,8 @@ async function testDialogHtml() {
     /pipeline: false/.test(fs.readFileSync(SRC, "utf8")));
   check("含导出作业与对齐标签两个诊断按钮",
     html.includes("labelExportJob") && html.includes("labelBleAlign"));
+  check("含走纸测试按钮（串页时分离「走纸定位」与「位图打印」）",
+    html.includes("labelBleFeedTest"));
   check("提示语写清「先连接→再间隙学习→再打印」的顺序",
     html.includes("间隙学习") && html.includes("3475"));
   check("含诊断折叠区挂点", html.includes('id="labelBlePanel"'));
