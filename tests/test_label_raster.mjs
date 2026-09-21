@@ -82,10 +82,14 @@ function testDefaultCfgSafe() {
     cfg.headWaitMs === 0, String(cfg.headWaitMs));
   check("默认 copyDelayMs=1500（多份之间留打印时间，这份固件一份一份地打）",
     cfg.copyDelayMs === 1500, String(cfg.copyDelayMs));
+  // 0.12.29：打完退回本张起点 —— 间隙学习不必再消耗 4 张贴纸（用户硬需求）。
+  check("默认 rewindAfter=true（整份末尾补一条 FF 把纸退回起点）",
+    cfg.rewindAfter === true, String(cfg.rewindAfter));
   const src = fs.readFileSync(SRC, "utf8");
   check("旧存档迁移：cfgRev 不一致时强制重置实验开关与时间旋钮",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 4;/.test(src) &&
-      /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src));
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 5;/.test(src) &&
+      /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src) &&
+      /cfg\.rewindAfter = true;/.test(src));
 }
 
 /* ── 0.12.27：蓝牙动作互斥 + 重发阈值 ─────────────────────── */
@@ -300,7 +304,16 @@ function testEscPosJob() {
   check("跟一条 GS P 203 203（钉住 ESC J 的走纸单位 = 1 点）",
     [0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00].every((b, i) => job[8 + i] === b),
     Array.from(job.slice(8, 14)).join(","));
-  check("单份长度 = 2+6+6+8+4+1 = 27", job.length === 27, String(job.length));
+  check("单份长度 = 2+6+6+8+4+1+1 = 28（末位多一条回退 FF）", job.length === 28, String(job.length));
+  // 回退定位：末尾 FF 能让「间隙学习后试印」不浪费贴纸，所以默认开、且要在最后一位。
+  // 注意不能断言「倒数第二位不是 FF」——这条最小 raster 只有 2 行，位图块自带的那条 FF
+  // 和回退 FF 在字节流里是紧挨着的两个 0c，页面上就是「走两张」。
+  check("末尾连续两条 FF（位图收尾 + 回退一次）",
+    job[job.length - 1] === 0x0c && job[job.length - 2] === 0x0c,
+    Array.from(job.slice(-4)).join(","));
+  const noRewind = buildEscPosJob(raster, { copies: 1, rewindAfter: false });
+  check("关掉回退定位 → 单份回到 27 字节",
+    noRewind.length === 27 && noRewind[noRewind.length - 1] === 0x0c, String(noRewind.length));
 
   const r = ops.find((o) => o.op === "raster");
   check("含一条 GS v 0 光栅指令", !!r);
@@ -309,7 +322,7 @@ function testEscPosJob() {
   check("行数小端（2 → 02 00）", r && r.y === 2, r && String(r.y));
   check("位图数据不丢不改（aa+bb+cc+dd = 694）",
     r && r.sum === 0xaa + 0xbb + 0xcc + 0xdd, r && String(r.sum));
-  check("以 FF 走纸收尾（多张不串位关键）", job[job.length - 1] === 0x0c, String(job[job.length - 1]));
+  check("以 FF 走纸收尾（多张不串位关键）", job[job.length - 2] === 0x0c, String(job[job.length - 2]));
 
   // 关掉复位 + 关掉空白跳过 = 对齐官方抓包的最小形态（不含 ESC @ / GS P）
   const noReset = buildEscPosJob(raster, { copies: 1, resetFirst: false, blankSkip: false });
@@ -318,22 +331,22 @@ function testEscPosJob() {
     Array.from(noReset.slice(0, 6)).join(","));
   check("不发 GS P（不省空白就不需要走纸命令）",
     !(noReset[6] === 0x1d && noReset[7] === 0x50), Array.from(noReset.slice(6, 14)).join(","));
-  check("该形态长度回到 19（= 6+8+4+1）", noReset.length === 19, String(noReset.length));
+  check("该形态长度回到 20（= 6+8+4+1+1，含回退 FF）", noReset.length === 20, String(noReset.length));
 
   const two = buildEscPosJob(raster, { copies: 2 });
   const twoOps = parseJob(two);
-  check("两份 = 2 条光栅 + 2 个 FF",
+  check("两份 = 2 条光栅 + 3 个 FF（每份收尾 1 条 + 整份回退 1 条）",
     twoOps.filter((o) => o.op === "raster").length === 2 &&
-      twoOps.filter((o) => o.op === "ff").length === 2, JSON.stringify(twoOps));
+      twoOps.filter((o) => o.op === "ff").length === 3, JSON.stringify(twoOps));
   // 0.12.25：默认**关**「每份重新定位」→ 全篇只有一个头部（与官方抓包同构：一份头 + 若干块）
-  check("默认每份不补头部：两份长度 = 27 + 13 = 40", two.length === 40, String(two.length));
+  check("默认每份不补头部：两份长度 = 28 + 13 = 41", two.length === 41, String(two.length));
   check("默认第二份首字节就是 GS v 0（没有 ESC @、没有 setp）",
     two[27] === 0x1d && two[28] === 0x76, Array.from(two.slice(27, 30)).join(","));
 
   // 勾上「每份重新定位」：第二份补一条 setp 01，**不带 ESC @**
   //   （ESC @ 才是「打印前纸先进一下」的嫌疑，中途再发一次就再来一次进纸）
   const twoPos = buildEscPosJob(raster, { copies: 2, perCopyPos: true });
-  check("勾上每份重新定位 → 两份长度 = 27 + 19 = 46", twoPos.length === 46, String(twoPos.length));
+  check("勾上每份重新定位 → 两份长度 = 28 + 19 = 47", twoPos.length === 47, String(twoPos.length));
   check("每份重新定位补的是 setp 01，不是 ESC @",
     twoPos[27] === 0x1d && [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => twoPos[27 + i] === b),
     Array.from(twoPos.slice(27, 33)).join(","));
@@ -346,8 +359,8 @@ function testEscPosJob() {
   check("份数超上限夹到 50",
     parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length === 50,
     String(parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length));
-  check("cfg 只有 copies 也不崩（其余走默认）",
-    parseJob(buildEscPosJob(raster, {})).filter((o) => o.op === "ff").length === 1);
+  check("cfg 只有 copies 也不崩（其余走默认；1 份收尾 + 1 条回退 = 2）",
+    parseJob(buildEscPosJob(raster, {})).filter((o) => o.op === "ff").length === 2);
   check("feed 已废弃（结尾恒为 FF，不崩）",
     buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0] === 0x0c,
     String(buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0]));
@@ -355,7 +368,7 @@ function testEscPosJob() {
   // ESC @ 只该在「断链重发」或「用户勾了复位」时出现
   const retry = buildEscPosJob(raster, { copies: 1, resetFirst: false }, { reset: true });
   check("重发时强制发 ESC @（清打印机里的半份残留）",
-    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 27,
+    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 28,
     Array.from(retry.slice(0, 2)).join(",") + " len=" + retry.length);
   check("{reset:false} 显式压过 cfg.resetFirst",
     buildEscPosJob(raster, { copies: 1, resetFirst: true }, { reset: false })[0] !== 0x1b);
@@ -406,8 +419,10 @@ function testJobParts() {
     Array.from(p.head).join(","));
   check("copies 切出 3 份", p.copies.length === 3, String(p.copies.length));
   check("每份 13 字节（光栅 12 + FF 1），份尾都是 FF",
-    p.copies.every((c) => c.length === 13 && c[12] === 0x0c),
+    p.copies.every((c, i) => (i < 2 ? c.length === 13 && c[12] === 0x0c
+                                    : c.length === 14 && c[13] === 0x0c && c[12] === 0x0c)),
     p.copies.map((c) => c.length).join(","));
+  check("只有最后一份带回退 FF（前面几份不变）", p.copies[0].length === 13);
   check("拼回去与单块作业逐字节相同（拆只是分包，不改内容）",
     Array.from(cat([p.head].concat(p.copies))).join(",") ===
       Array.from(buildEscPosJob(raster, cfg)).join(","));
@@ -516,9 +531,10 @@ function testRasterCommands() {
   check("省下来的都是纯白行（ESC J 段数 ≥ 3，不是只砍了底部留白）",
     parseJob(jobNew).filter((o) => o.op === "feed").length >= 3,
     String(parseJob(jobNew).filter((o) => o.op === "feed").length));
-  check("多份时每份仍以 FF 收尾",
+  // 0.12.29：每份收尾 1 条 FF，整份末尾再加 1 条回退 FF → 3 份共 4 条。
+  check("多份时每份仍以 FF 收尾（3 份 + 1 条回退 = 4）",
     parseJob(buildEscPosJob(withQr, { copies: 3, bandRows: 10, blankSkip: true }))
-      .filter((o) => o.op === "ff").length === 3);
+      .filter((o) => o.op === "ff").length === 4);
 }
 
 /* ── 4b. 底部留白 / 光栅高度 ───────────────────────────────── */
@@ -564,13 +580,13 @@ function testFootMargin() {
   check("留白后的两份报文确实更短（每份少 22 行×52 字节）",
     jobBig.length - jobSmall.length === 2 * 22 * BPR,
     `${jobBig.length} vs ${jobSmall.length}`);
-  check("留白后每份仍以 FF 收尾",
-    parseJob(jobSmall).filter((o) => o.op === "ff").length === 2);
+  check("留白后每份仍以 FF 收尾（2 份 + 1 条回退 = 3）",
+    parseJob(jobSmall).filter((o) => o.op === "ff").length === 3);
   check("行数字段写进报文（218 = 0xda 0x00）",
     parseJob(jobSmall).find((o) => o.op === "raster").y === 218,
     String(parseJob(jobSmall).find((o) => o.op === "raster").y));
-  check("报文长度 = 2+6+2×(8+52×218+1)（数据无隐藏裁剪）",
-    jobSmall.length === 2 + 6 + 2 * (8 + BPR * rows218 + 1), String(jobSmall.length));
+  check("报文长度 = 2+6+2×(8+52×218+1)+1（数据无隐藏裁剪 + 末尾回退 FF）",
+    jobSmall.length === 2 + 6 + 2 * (8 + BPR * rows218 + 1) + 1, String(jobSmall.length));
 }
 
 /* ── 5. 对话框装配 ─────────────────────────────────────────── */

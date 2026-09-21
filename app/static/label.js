@@ -137,7 +137,7 @@
   // cfgRev：改「实验性发送开关」的默认值时 +1。旧存档 rev 不一致时这些开关会被
   // 强制重置成本版默认 —— 不然用户曾经勾过的「断链组合」会被 localStorage 永远沿用。
   // rev 4：0.12.26 真机实测「拆开等 1200ms」会卡在发送 24%，拆分降级为实验、默认 0。
-  const CFG_REV = 4;
+  const CFG_REV = 5;
 
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
@@ -182,6 +182,11 @@
       //   勾上后每份只补一条 GS "setp" 01（**不带 ESC @**，避免中途再触发一次复位）。
       perCopyPos: false,
       headWaitMs: 0, copyDelayMs: 1500,
+      // rewindAfter = 打完把纸退回本张起点（整份末尾再补一条 FF）。
+      //   默认 **开**：用户 09-21 要求「间隙学习别每次浪费 4 张贴纸」—— 学习指令后只要
+      //   打印任一帧（哪怕空标签）就会完成定位，结尾这条 FF 把纸退回起点，于是能反复试印，
+      //   不用撕掉整卷。若回退过头/不足（各机固件对末尾 FF 的处理不同）就在面板关掉它。
+      rewindAfter: true,
       pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
@@ -203,6 +208,7 @@
       cfg.perCopyPos = false;
       cfg.headWaitMs = 0;
       cfg.copyDelayMs = 1500;
+      cfg.rewindAfter = true;
       cfg.cfgRev = CFG_REV;
     }
     LABEL.cfg = cfg;
@@ -540,6 +546,12 @@
       ? !!opts.perCopy
       : !!(cfg && cfg.perCopyPos === true);
     const gsP = !(cfg && cfg.blankSkip === false);
+    // 打完把纸**退回本张标签起点**（面板开关，默认开）。
+    //   实现方式：在整份位图**之后**再跟一条 FF —— 位图末尾那条 FF 把纸停在下一张的起点，
+    //   这一条再走一张，纸就回到原处。假设「FF 在打印流内部有效」——这台机器上
+    //   单发 FF 不走纸（0.12.28 实测），但位图末尾那条 FF 是确实生效的，
+    //   所以流内的 FF 有效、再补一条即可。若回退过头/不足，关掉这个开关即可。
+    const rewind = !(cfg && cfg.rewindAfter === false);
 
     const head = [];
     if (reset) head.push(Uint8Array.from([0x1b, 0x40]));
@@ -564,8 +576,14 @@
       // 那份流每份 218 行（27.25mm）而不是打满 240 行 —— 留白让打印头停在标签面上，
       // 间隙传感器随即看到前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头停在
       // 标签边缘/缝里，FF 判定失准 → 逐张累积偏移。ESC d n 那种固定行数进给已弃用。
-      one.push(Uint8Array.from([0x0c]));
+      one.push(labelFeedBytes());
       copies.push(concatBytes(one));
+    }
+    // 回退定位（默认开）：整份之后再跟一条 FF，把纸退回本张标签起点。
+    //   只加在**末尾**，不动每份内部的结构 —— 每份仍是「位图 + 单个 FF」，
+    //   与官方抓包逐字节一致（这条多出来的 0x0c 在官方流里没有，仅本机便利功能）。
+    if (rewind && copies.length) {
+      copies[copies.length - 1] = concatBytes([copies[copies.length - 1], labelFeedBytes()]);
     }
     return { head: concatBytes(head), copies: copies };
   }
@@ -1126,11 +1144,11 @@
     try {
       await bleConnect(loadCfg().showAll);
       await bleSendRaw(
-        concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c])]),
-        "对齐到标签起点（setp 01 + FF×2；FF 本身无回执，看纸有没有动）"
+        labelAlignPreamble(),
+        "回退定位（setp 01 + FF×2；FF 本身无回执，看纸有没有动）"
       );
       renderBlePanel();
-      toast("已让打印机走到下一张标签起点（会消耗 1~2 张标签）", "ok");
+      toast("已发定位帧。★ 单发 FF 在本机实测不走纸（回执只回 OK），真正生效是在打印流里 —— 纸不动属正常", "ok");
     } catch (err) {
       toast(err.message, "err");
     } finally {
@@ -1153,17 +1171,45 @@
     return Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]);
   }
 
+  /** GS FF（0x0c）：间隙走纸到下一张标签起点。配合 setp 01 才生效。 */
+  function labelFeedBytes() {
+    return Uint8Array.from([0x0c]);
+  }
+
+  /** 诊断动作的固定前奏 + 纸位归零。
+   *
+   *  ★ 2026-09-21 真机实测（0.12.28 的日志）：
+   *    用户点「对齐标签」发的字节是 `1d 73 65 74 70 01 0c 0c`，回执 `5f 4f 4b 5f`（_OK_）
+   *    —— 指令被接受了、也回了 OK，**但纸一动不动**；「走纸测试 ×3」同样只回 OK 不走纸。
+   *    而紧接着「蓝牙打印」照样能打出内容、单张位置很正。
+   *    结论：**FF 在这台机器上只负责「在打印流内部走到下一张起点」，单独发不驱动走纸**
+   *    （固件空闲态不执行裸 FF）。所以别再把这两个按钮当「位置校准工具」——它们探不出纸位，
+   *    位置问题只能靠观察打印结果。
+   *
+   *  那串 0c 0c 虽然不走纸，却仍是**正确的前奏**：把两个 FF 留在缓冲里，等于要求固件
+   *  「开始打印前先走到下一张标签起点」。所以：
+
+   *  - 诊断按钮（对齐 / 走纸测试）= 前奏 + 动作，保持原样；
+   *  - **正式打印** = 前奏 + 动作，并且打印结束后由固件继续执行前奏里那个 FF，
+   *    把纸**退回到本张标签起点**（用户 2026-09-21 提的「打完倒回去」）。
+   *    这样间隙学习不再自带「走 4 张贴纸」的代价 —— 学习指令后补一帧位图按一下打印，
+   *    要保留就撕走，不要就用「回退定位」把纸退回来接着印。
+   */
+  function labelAlignPreamble() {
+    return concatBytes([labelModeBytes(), labelFeedBytes(), labelFeedBytes()]);
+  }
+
   async function labelBleFeedTest() {
     if (bleBusyBlock("测走纸")) return;
     LABEL.busy = true;
     try {
       await bleConnect(loadCfg().showAll);
       await bleSendRaw(
-        concatBytes([labelModeBytes(), Uint8Array.from([0x0c, 0x0c, 0x0c])]),
+        concatBytes([labelAlignPreamble(), labelFeedBytes()]),
         "走纸测试 ×3（setp 01 + FF×3，不打印；FF 本身无回执，看纸有没有动）"
       );
       renderBlePanel();
-      toast("已发 3 次走纸：看 3 张空白标签是否每次都停在标签起点（纸没动 = 固件空闲态不响应 FF，不影响打印）", "ok");
+      toast("已发 3 个 FF。★ 本机实测单发 FF 不走纸（只回 OK）—— 若纸没动，不代表打印机有问题", "ok");
     } catch (err) {
       toast(err.message, "err");
     } finally {
@@ -1286,6 +1332,7 @@
       '<div class="label-ble-tests">' +
         '<button class="sm" onclick="labelBleProbe()">查询状态（不耗纸）</button>' +
         '<button class="sm" onclick="labelBleCalibrate()">间隙学习（走一段纸）</button>' +
+        '<button class="sm" onclick="labelBleAlign()">回退定位（退回本张起点）</button>' +
       "</div>" +
       '<label class="field" style="margin-top:10px"><span>原始指令（十六进制）</span>' +
         '<input id="labelRawHex" placeholder="例如 1B 40" /></label>' +
@@ -1380,7 +1427,10 @@
             (cfg.pipeline ? " checked" : "") + ' onchange="labelPickPipeline(this.checked)" />' +
             "<span>流水线连发（快，但本机实测一点打印就断链，默认关）</span></label>" +
           "</details>" +
-          '<label class="field check"><input type="checkbox" id="labelShowAll"' +
+          '<label class="field check"><input type="checkbox" id="labelRewind"' +
+        (cfg.rewindAfter === true ? " checked" : "") + ' onchange="labelPickRewind(this.checked)" />' +
+        "<span>打完退回本张起点（默认关；整份后再补一条 FF 把纸退回来 —— 间隙学习后可反复试印，不再浪费贴纸）</span></label>" +
+      '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
         "</div>" +
@@ -1394,17 +1444,24 @@
       // 说明与排查收进折叠区（默认收起）。原来这五段是直接铺在面板下面的，占了大半屏，
       // 用户的反馈就是「这些选项到底勾哪个」—— 默认状态下面板不该有需要读的长文。
       '<details class="label-diag label-help"><summary>操作说明 / 排查（点开）</summary><ul>' +
-        "<li><b>顺序</b>：① 点「连接打印机」→ ② 点「间隙学习」→ ③ 点「蓝牙打印」。" +
-        "间隙学习是打印机自己走一段纸、标定标签间距，<b>只有首次用或换纸才需要重做</b>。</li>" +
-        "<li><b>位置偏</b>：先点一次「对齐标签」，再打。" +
-        "第一张「纸先进一下、位置就错」是作业头里 <code>ESC @</code> 触发的复位/定位" +
-        "（第二张没有头部、所以反而是对的）。0.12.25 试过把作业头与位图拆开发 → 真机卡死" +
-        "（停在 24% 后掉链），所以 <b>0.12.27 起「作业头后等待 ms」默认 0 = 不拆不等待</b>，" +
-        "回到已验证能打完整张的形态。想再试拆分就把它调大（1200 是踩坑值）；" +
-        "也可以 <b>取消勾选</b>「打印前复位」彻底不发那条复位（若发送中途停住、打不出，再勾回来）。</li>" +
-        "<li><b>多张串页 / 走偏</b>：先重做一次「间隙学习」，再点「走纸测试 ×3」" +
-        "（只走纸不打内容、费 3 张标签）——3 张都干净停在标签起点，说明走纸定位没问题、漂移在位图那段。</li>" +
-        "<li><b>打印期间别点其它蓝牙按钮</b>（查询状态 / 对齐 / 复位 / 连接 / 断开）：" +
+        "<li><b>顺序</b>：① 点「连接打印机」→ ② 点「间隙学习」→ ③ 点「蓝牙打印」→ ④ 点「回退定位」把纸退回来。" +
+        "间隙学习是打印机自己走一段纸、标定标签间距，<b>只有首次用或换纸才需要重做</b>。" +
+        "<b>学完不要撕纸</b>：现在打完会自动退回本张起点（「打完退回本张起点」默认开，在实验选项里），" +
+        "所以第 ③④ 步可以反复来 —— 学到了正确的间距再撕掉那一张即可，不必每次都浪费 4 张贴纸。" +
+        "若没退回或退过头，把那个开关关掉。</li>" +
+        "<li><b>位置偏 / 第二张开始串</b>：分两种情况——" +
+        "① <b>第二张起整体位移</b>（每张都偏、越打越偏）⇒ 份间定位不准，试勾上「每份重新定位」" +
+        "（第二份起补一条 <code>setp 01</code>）；② 单张位置就偏 ⇒ 调「底部留白 mm」和浓度，别动别的。" +
+        "「回退定位」和「走纸测试」<b>探不出纸位</b>（见下面那条），别指望用它们校准。" +
+        "第一张「纸先进一下」是作业头里 <code>ESC @</code> 触发的复位动作，0.12.25 试过拆开发 → 真机卡死，" +
+        "所以「作业头后等待 ms」默认 0；也可以试着取消勾选「打印前复位」。没有更好的办法了，" +
+        "这台机器的固件就这个脾气。</li>" +
+        "<li><b>「回退定位」「走纸测试」按了纸不动是正常的</b>（2026-09-21 实测，收发记录里回执是" +
+        "<code>5f 4f 4b 5f</code> = <code>_OK_</code>）：这台机器<b>只认打印流内部的 FF</b>，" +
+        "单独发一个 <code>0x0c</code>（哪怕已切到标签模式）它只回 OK 不驱动走纸。" +
+        "所以这两个按钮的作用是「告诉固件下一次打印从哪开始」，不是当场走纸。" +
+        "要真正改变纸位，只能用打印一条内容 + 「打完退回本张起点」，或者手动按机器上的走纸键。</li>" +
+        "<li><b>打印期间别点其它蓝牙按钮</b>（查询状态 / 复位 / 连接 / 断开）：" +
         "这台机器容不下并发 GATT 操作，两条写入砸同一个特征会当场把链路掐了" +
         "（表现为进度停在某个百分比、蓝牙也掉了）。0.12.27 起打印期间这些按钮会被自动挡下并提示。</li>" +
         "<li><b>打不出内容</b>：汉印 T260LR 用私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。" +
@@ -1425,7 +1482,7 @@
         '<button onclick="labelDownload()">下载标签图</button>' +
         '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
         '<button onclick="labelBleReset()">复位打印机</button>' +
-        '<button onclick="labelBleAlign()">对齐标签</button>' +
+        '<button onclick="labelBleAlign()">回退定位</button>' +
         '<button onclick="labelBleFeedTest()">走纸测试 ×3</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
       true
@@ -1562,6 +1619,15 @@
     saveCfg();
   }
 
+  /** 打完退回本张起点：整份末尾再补一条 FF，把纸退回来。
+   *  用于「间隙学习后要试印又不想撕贴纸」——学完打一帧、纸自动退回，可反复调参数。 */
+  function labelPickRewind(checked) {
+    const cfg = loadCfg();
+    cfg.rewindAfter = !!checked;
+    saveCfg();
+    labelRefresh();
+  }
+
   function labelPickShowAll(checked) {
     const cfg = loadCfg();
     cfg.showAll = !!checked;
@@ -1585,6 +1651,7 @@
     labelPickCopyDelay,
     labelPickResetFirst,
     labelPickPerCopyPos,
+    labelPickRewind,
     labelPickBandRows,
     labelPickBlankSkip,
     labelBleProbe,
