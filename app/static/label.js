@@ -137,11 +137,24 @@
   // cfgRev：改「实验性发送开关」的默认值时 +1。旧存档 rev 不一致时这些开关会被
   // 强制重置成本版默认 —— 不然用户曾经勾过的「断链组合」会被 localStorage 永远沿用。
   // rev 4：0.12.26 真机实测「拆开等 1200ms」会卡在发送 24%，拆分降级为实验、默认 0。
-  const CFG_REV = 5;
+  // rev 6（0.12.30）：把「底部留白」也纳入强制重置 —— 用户面板上存着 0（打满整张），
+  //   而真机照片证明打满整张会让结尾 FF 找不到缝、多张逐张往上偏。这是**版式参数**，
+  //   以前不在迁移范围，但它和发送开关一样会让新默认失效，所以一并重置。
+  const CFG_REV = 6;
+
+  /** 底部留白的下限（mm）。低于它 = 位图打满整张标签，打印头停在标签边缘/缝上，
+   *  结尾 FF 的间隙定位就失准 → 多张连打逐张往上偏。
+   *  汉码官方每张只发 218 行（= 30mm 标签留 2.75mm），这是它不偏的物理原因。 */
+  const FOOT_MIN_MM = 2;
 
   function defaultCfg() {
     // footMargin = 底部留白（mm）：不打满整张标签，见 buildEscPosJob 里多张走纸的说明。
     // 2.75mm 是对齐汉码官方抓包的取值（50×30 标签只发 218 行 = 27.28mm）。
+    //   ★ 0.12.30 起这条是**硬约束**，不再是可随便调的风格参数：用户 09-22 把留白调成 0
+    //   （位图 240/240 行 = 打满整张）后，连打三张的照片显示内容**逐张往上偏**（第三张直接
+    //   少了第一行字、二维码顶被切）。物理原因：位图把整张标签打完，打印头/间隙传感器正好
+    //   停在标签边缘的缝上，结尾 FF 的间隙定位没有可用于判定的「缝」→ 每张少走约 2mm 累积。
+    //   官方 218 行留的 2.75mm 就是给这一步留的余量。留白小于 FOOT_MIN_MM 时面板会红字提示。
     // resetFirst = 正常首发生成是否也发 ESC @ 复位。
     //   默认 **true**：2026-09-20 真机实测，不发 ESC @ 时发送会在中途停住、根本打不出来；
     //   发复位才打得出来（代价是第一张位置略偏）。虽然官方抓包流里 1b 40 出现 0 次，
@@ -183,10 +196,15 @@
       perCopyPos: false,
       headWaitMs: 0, copyDelayMs: 1500,
       // rewindAfter = 打完把纸退回本张起点（整份末尾再补一条 FF）。
-      //   默认 **开**：用户 09-21 要求「间隙学习别每次浪费 4 张贴纸」—— 学习指令后只要
-      //   打印任一帧（哪怕空标签）就会完成定位，结尾这条 FF 把纸退回起点，于是能反复试印，
-      //   不用撕掉整卷。若回退过头/不足（各机固件对末尾 FF 的处理不同）就在面板关掉它。
-      rewindAfter: true,
+      //   ⚠️ 0.12.29 默认开，0.12.30 改回 **关**：用户 09-22 真机实测「纸没有退回」——
+      //   整份之后再补的那条 FF 既没把纸退回来、也没让它多走，等于白加一个字节。
+      //   （同一轮实测里单发 `setp 01 + FF×2 / FF×3` 也都不走纸，只回 `_OK_`。）
+      //   所以「间隙学习不浪费贴纸」这件事在这台机器上做不到，功能降级为实验、默认关。
+      rewindAfter: false,
+      // topShiftMm = 内容整体下移（mm）：版式整体（二维码 + 文字 + 页脚）往下挪这么多，
+      //   打印长度不变。用来抵消「打出来内容偏上」这种固定偏移 —— 那是纸位对齐的
+      //   固定误差，不是版式问题，改留白是改不掉的。0.25mm 一档，203dpi 下 1 点 ≈ 0.125mm。
+      topShiftMm: 0,
       pipeline: false, showAll: false, cfgRev: CFG_REV,
     };
   }
@@ -201,14 +219,18 @@
       /* 配置坏了就用默认值 */
     }
     if (cfg.cfgRev !== CFG_REV) {
-      // 旧版存档：实验开关 + 时间旋钮强制回本版默认（面板仍可手动改回去做 A/B）
+      // 旧版存档：发送开关 + 时间旋钮 + **版式参数**强制回本版默认（面板仍可手动改回去做 A/B）
       cfg.bandRows = 0;
       cfg.blankSkip = false;
       cfg.pipeline = false;
       cfg.perCopyPos = false;
       cfg.headWaitMs = 0;
       cfg.copyDelayMs = 1500;
-      cfg.rewindAfter = true;
+      cfg.rewindAfter = false;
+      // rev 6：留白回 2.75（官方同款）。用户存档里的 0 会让「多张逐张往上偏」这一条
+      // bug 在升级后**照样复现**——不重置等于没升。
+      cfg.footMargin = 2.75;
+      cfg.topShiftMm = 0;
       cfg.cfgRev = CFG_REV;
     }
     LABEL.cfg = cfg;
@@ -355,6 +377,12 @@
     ctx.fillRect(0, 0, wDots, hDots);
 
     const L = layoutOf(cfg.wMm, hEff);
+    // 内容整体下移（mm）：抵消「打出来内容偏上」这类**固定纸位误差**。
+    //   只挪内容、不改画布高度 ⇒ 打印长度与字节数都不变（125 点 ≈ 0.6mm@203dpi，
+    //   上限 3mm：再多会把底部页脚挤出画面）。上限/下限都在这里兜住，
+    //   面板上那 0~3 的限制只是 UI，真正生效的是这一行。
+    const dyMm = Math.max(0, Math.min(3, Number(cfg.topShiftMm) || 0));
+    const dyDots = mm2dot(dyMm, dpi);
 
     // 二维码：服务端按整数倍模块出图，这里 1:1 贴上去，绝不缩放。
     // 先用 box=4 探出模块数（模块数只跟内容/静区有关，跟 box 无关），
@@ -362,13 +390,13 @@
     const probe = await loadQrImage(spool.id, 4);
     const modules = probe ? Math.round(probe.naturalWidth / 4) : 0;
     const padDots = mm2dot(L.pad, dpi);
-    const targetDots = Math.min(wDots * QR_WIDTH_RATIO, hDots - padDots * 2);
+    const targetDots = Math.min(wDots * QR_WIDTH_RATIO, Math.max(8, hDots - padDots * 2 - dyDots));
     const box = qrBoxFor(targetDots, modules);
     const qr = (probe && box === 4 ? probe : await loadQrImage(spool.id, box)) || probe;
     const qrDots = qr ? qr.naturalWidth : 0;
     const qrMm = qrDots / mm2dot(1, dpi);
     if (qr) {
-      ctx.drawImage(qr, wDots - Math.round(padDots) - qrDots, Math.round(padDots));
+      ctx.drawImage(qr, wDots - Math.round(padDots) - qrDots, Math.round(padDots + dyDots));
     }
     // 文字列的右边界：让开二维码
     const textMax = (qr ? cfg.wMm - L.pad - qrMm - 0.8 : cfg.wMm - L.pad) - L.pad;
@@ -395,8 +423,8 @@
       { text: spool.location ? "位置 " + spool.location : "", size: 0.065 },
     ].filter((r) => String(r.text == null ? "" : r.text).trim());
 
-    const topBase = L.top;
-    const bottomBase = L.foot - hEff * 0.115; // 最后一行与页脚之间留一行字高的空
+    const topBase = L.top + dyMm;
+    const bottomBase = L.foot - hEff * 0.115 + dyMm; // 最后一行与页脚之间留一行字高的空
     const n = rows.length;
     rows.forEach((row, i) => {
       const y = n > 1 ? topBase + ((bottomBase - topBase) * i) / (n - 1) : topBase;
@@ -407,7 +435,7 @@
     // 页脚：编号 + 色值；颜色名只在名字里没写时才补上（否则又是重复）
     const foot = ["#" + spool.id, ...dedupeAgainst(name, [spool.color_name])];
     if (spool.color_hex) foot.push(String(spool.color_hex).toUpperCase());
-    drawText(ctx, dpi, foot.join(" · "), textX, L.foot, hEff * 0.062, { maxMm: textMax });
+    drawText(ctx, dpi, foot.join(" · "), textX, L.foot + dyMm, hEff * 0.062, { maxMm: textMax });
 
     return canvas;
   }
@@ -546,12 +574,12 @@
       ? !!opts.perCopy
       : !!(cfg && cfg.perCopyPos === true);
     const gsP = !(cfg && cfg.blankSkip === false);
-    // 打完把纸**退回本张标签起点**（面板开关，默认开）。
-    //   实现方式：在整份位图**之后**再跟一条 FF —— 位图末尾那条 FF 把纸停在下一张的起点，
-    //   这一条再走一张，纸就回到原处。假设「FF 在打印流内部有效」——这台机器上
-    //   单发 FF 不走纸（0.12.28 实测），但位图末尾那条 FF 是确实生效的，
-    //   所以流内的 FF 有效、再补一条即可。若回退过头/不足，关掉这个开关即可。
-    const rewind = !(cfg && cfg.rewindAfter === false);
+    // 打完把纸**退回本张标签起点**（实验项，0.12.30 起默认关）。
+    //   ⚠️ 肯定式判断：cfg 里没有这个字段时必须判为**关**。写成 `!(cfg.rewindAfter === false)`
+    //   会在裸 cfg（缺字段）时变成开 —— 这种否定式默认值已经害过我们三次
+    //   （perCopyPos / blankSkip / 现在这条），一律只在显式 true 时才生效。
+    //   0.12.29 曾默认开，但真机实测「纸没有退回」（补的那条 FF 既没退也没多走），所以降级。
+    const rewind = !!(cfg && cfg.rewindAfter === true);
 
     const head = [];
     if (reset) head.push(Uint8Array.from([0x1b, 0x40]));
@@ -911,11 +939,15 @@
       if (info) {
         const bytes = raster.bytesPerRow * raster.heightDots;
         const margin = Math.max(0, Number(cfg.footMargin) || 0);
+        const shift = Math.max(0, Number(cfg.topShiftMm) || 0);
         const fullRows = Math.max(8, Math.round(mm2dot(cfg.hMm, cfg.dpi)));
         info.textContent =
           Math.round(cfg.wMm) + "×" + Math.round(cfg.hMm) + " mm · " + cfg.dpi + " dpi · " +
           raster.widthDots + "×" + raster.heightDots + " 点 · 位图 " + bytes + " 字节" +
           " · 底部留白 " + margin + " mm（" + raster.heightDots + "/" + fullRows + " 行）" +
+          (shift ? " · 内容下移 " + shift + " mm" : "") +
+          // 留白不足就写进这一行：截图即可自证，不用去翻表单。
+          (margin < FOOT_MIN_MM ? " · ⚠ 留白不足 " + FOOT_MIN_MM + "mm（多张会逐张往上偏）" : "") +
           " · 作业 " + jobBytes + " 字节（官方同款 ~3475）" +
           " · 版本 " + runningVersion() +
           (spool && spool.name ? " · " + spool.name : "");
@@ -1131,42 +1163,11 @@
     }
   }
 
-  /** 对齐到标签起点：进标签模式 + 两个 FF。
-   *
-   *  ⚠️ 只发一个裸 FF 在真机上「按了没反应」：打印机不在标签模式时 FF 不触发间隙定位
-   *  （等价于普通走一行）。所以先补 `GS "setp" 01` 再发 FF —— 和正式作业开头那两根指令一致。
-   *  若补了标签模式纸还是不动，说明这份固件在**空闲态**不响应 FF（真机 09-21 的观察就是如此），
-   *  那就别指望这个按钮：位置问题走「打印时把头与位图分开」（0.12.25）那条路。
-   *  代价：会白费 1~2 张标签，所以不做成自动动作。 */
-  async function labelBleAlign() {
-    if (bleBusyBlock("对齐标签")) return;
-    LABEL.busy = true;
-    try {
-      await bleConnect(loadCfg().showAll);
-      await bleSendRaw(
-        labelAlignPreamble(),
-        "回退定位（setp 01 + FF×2；FF 本身无回执，看纸有没有动）"
-      );
-      renderBlePanel();
-      toast("已发定位帧。★ 单发 FF 在本机实测不走纸（回执只回 OK），真正生效是在打印流里 —— 纸不动属正常", "ok");
-    } catch (err) {
-      toast(err.message, "err");
-    } finally {
-      LABEL.busy = false;
-    }
-  }
-
-  /** 走纸测试：只发 3 个 FF（不打印任何内容），看纸是否每次都停在标签起点。
-   *
-   *  多张连打串页时用来「分环节」：
-   *   - 3 张空白标签都干净地停在起点 ⇒ FF 定位没问题，漂移出在位图打印那一段
-   *     （固件对 GS v 0 行数的纵向走纸量与我们算的不一致）；
-   *   - 走纸本身就逐张跑偏 ⇒ 间隙定位/校准的问题（先做「间隙学习」再测）。
-   *  会消耗 3 张标签，所以不做成自动动作。
-   */
   /** GS "setp" 01 —— 官方知识库给的「标签纸设置指令」，切到间隙标签模式。
-   *  对齐/走纸这类只发 FF 的诊断动作必须先带上它，否则打印机不在标签模式，
-   *  FF 不触发间隙定位（真机表现就是「按了没反应」）。 */
+   *  正式作业开头必须带它（官方抓包第一个字节就是它），结尾那条 FF 靠它才做间隙定位。
+   *  ⚠️ 别再指望「单独发 setp 01 + FF」能让纸动起来：09-21/09-22 两轮真机实测都是
+   *  回执 `_OK_` 而纸一动不动（连点两次「走纸测试 ×3」也一样），所以那两个诊断按钮
+   *  在 0.12.30 已被删掉 —— 它们除了给人「按了没反应」的错觉，什么也证明不了。 */
   function labelModeBytes() {
     return Uint8Array.from([0x1d, 0x73, 0x65, 0x74, 0x70, 0x01]);
   }
@@ -1174,47 +1175,6 @@
   /** GS FF（0x0c）：间隙走纸到下一张标签起点。配合 setp 01 才生效。 */
   function labelFeedBytes() {
     return Uint8Array.from([0x0c]);
-  }
-
-  /** 诊断动作的固定前奏 + 纸位归零。
-   *
-   *  ★ 2026-09-21 真机实测（0.12.28 的日志）：
-   *    用户点「对齐标签」发的字节是 `1d 73 65 74 70 01 0c 0c`，回执 `5f 4f 4b 5f`（_OK_）
-   *    —— 指令被接受了、也回了 OK，**但纸一动不动**；「走纸测试 ×3」同样只回 OK 不走纸。
-   *    而紧接着「蓝牙打印」照样能打出内容、单张位置很正。
-   *    结论：**FF 在这台机器上只负责「在打印流内部走到下一张起点」，单独发不驱动走纸**
-   *    （固件空闲态不执行裸 FF）。所以别再把这两个按钮当「位置校准工具」——它们探不出纸位，
-   *    位置问题只能靠观察打印结果。
-   *
-   *  那串 0c 0c 虽然不走纸，却仍是**正确的前奏**：把两个 FF 留在缓冲里，等于要求固件
-   *  「开始打印前先走到下一张标签起点」。所以：
-
-   *  - 诊断按钮（对齐 / 走纸测试）= 前奏 + 动作，保持原样；
-   *  - **正式打印** = 前奏 + 动作，并且打印结束后由固件继续执行前奏里那个 FF，
-   *    把纸**退回到本张标签起点**（用户 2026-09-21 提的「打完倒回去」）。
-   *    这样间隙学习不再自带「走 4 张贴纸」的代价 —— 学习指令后补一帧位图按一下打印，
-   *    要保留就撕走，不要就用「回退定位」把纸退回来接着印。
-   */
-  function labelAlignPreamble() {
-    return concatBytes([labelModeBytes(), labelFeedBytes(), labelFeedBytes()]);
-  }
-
-  async function labelBleFeedTest() {
-    if (bleBusyBlock("测走纸")) return;
-    LABEL.busy = true;
-    try {
-      await bleConnect(loadCfg().showAll);
-      await bleSendRaw(
-        concatBytes([labelAlignPreamble(), labelFeedBytes()]),
-        "走纸测试 ×3（setp 01 + FF×3，不打印；FF 本身无回执，看纸有没有动）"
-      );
-      renderBlePanel();
-      toast("已发 3 个 FF。★ 本机实测单发 FF 不走纸（只回 OK）—— 若纸没动，不代表打印机有问题", "ok");
-    } catch (err) {
-      toast(err.message, "err");
-    } finally {
-      LABEL.busy = false;
-    }
   }
 
   /** 把当前这张标签的作业原样导出成 .bin。
@@ -1332,7 +1292,6 @@
       '<div class="label-ble-tests">' +
         '<button class="sm" onclick="labelBleProbe()">查询状态（不耗纸）</button>' +
         '<button class="sm" onclick="labelBleCalibrate()">间隙学习（走一段纸）</button>' +
-        '<button class="sm" onclick="labelBleAlign()">回退定位（退回本张起点）</button>' +
       "</div>" +
       '<label class="field" style="margin-top:10px"><span>原始指令（十六进制）</span>' +
         '<input id="labelRawHex" placeholder="例如 1B 40" /></label>' +
@@ -1402,6 +1361,14 @@
           '<label class="field"><span>底部留白 mm</span><input type="number" id="labelFootMargin" min="0" max="8" step="0.25" value="' +
             (cfg.footMargin == null ? 2.75 : cfg.footMargin) +
             '" onchange="labelPickFootMargin(this.value)" /></label>' +
+          // 留白 < 2mm 会直接红字提示：0 = 位图打满整张，结尾 FF 找不到缝 → 多张逐张往上偏
+          // （用户 09-22 照片实证：第三张少了第一行字、二维码顶被切）。别把这条藏进折叠区。
+          ((Number(cfg.footMargin == null ? 2.75 : cfg.footMargin) < FOOT_MIN_MM)
+            ? '<div class="tiny" style="color:var(--red);margin:-6px 0 4px">⚠ 留白太小（位图打满整张）：结尾 FF 找不到缝 → 多张逐张往上偏（实测）</div>'
+            : "") +
+          '<label class="field"><span>内容下移 mm</span><input type="number" id="labelTopShift" min="0" max="3" step="0.25" value="' +
+            (cfg.topShiftMm == null ? 0 : cfg.topShiftMm) +
+            '" onchange="labelPickTopShift(this.value)" /></label>' +
           '<label class="field"><span>作业头后等待 ms</span><input type="number" id="labelHeadWait" min="0" max="10000" step="100" value="' +
             (cfg.headWaitMs == null ? 1200 : cfg.headWaitMs) +
             '" onchange="labelPickHeadWait(this.value)" /></label>' +
@@ -1429,7 +1396,7 @@
           "</details>" +
           '<label class="field check"><input type="checkbox" id="labelRewind"' +
         (cfg.rewindAfter === true ? " checked" : "") + ' onchange="labelPickRewind(this.checked)" />' +
-        "<span>打完退回本张起点（默认关；整份后再补一条 FF 把纸退回来 —— 间隙学习后可反复试印，不再浪费贴纸）</span></label>" +
+        "<span>打完退回本张起点（实验，默认关；本机实测补的那条 FF 纸不动 —— 留着待以后验证）</span></label>" +
       '<label class="field check"><input type="checkbox" id="labelShowAll"' +
             (cfg.showAll ? " checked" : "") + ' onchange="labelPickShowAll(this.checked)" />' +
             "<span>蓝牙列表显示全部设备（找不到打印机时勾上）</span></label>" +
@@ -1444,23 +1411,20 @@
       // 说明与排查收进折叠区（默认收起）。原来这五段是直接铺在面板下面的，占了大半屏，
       // 用户的反馈就是「这些选项到底勾哪个」—— 默认状态下面板不该有需要读的长文。
       '<details class="label-diag label-help"><summary>操作说明 / 排查（点开）</summary><ul>' +
-        "<li><b>顺序</b>：① 点「连接打印机」→ ② 点「间隙学习」→ ③ 点「蓝牙打印」→ ④ 点「回退定位」把纸退回来。" +
-        "间隙学习是打印机自己走一段纸、标定标签间距，<b>只有首次用或换纸才需要重做</b>。" +
-        "<b>学完不要撕纸</b>：现在打完会自动退回本张起点（「打完退回本张起点」默认开，在实验选项里），" +
-        "所以第 ③④ 步可以反复来 —— 学到了正确的间距再撕掉那一张即可，不必每次都浪费 4 张贴纸。" +
-        "若没退回或退过头，把那个开关关掉。</li>" +
-        "<li><b>位置偏 / 第二张开始串</b>：分两种情况——" +
-        "① <b>第二张起整体位移</b>（每张都偏、越打越偏）⇒ 份间定位不准，试勾上「每份重新定位」" +
-        "（第二份起补一条 <code>setp 01</code>）；② 单张位置就偏 ⇒ 调「底部留白 mm」和浓度，别动别的。" +
-        "「回退定位」和「走纸测试」<b>探不出纸位</b>（见下面那条），别指望用它们校准。" +
-        "第一张「纸先进一下」是作业头里 <code>ESC @</code> 触发的复位动作，0.12.25 试过拆开发 → 真机卡死，" +
-        "所以「作业头后等待 ms」默认 0；也可以试着取消勾选「打印前复位」。没有更好的办法了，" +
-        "这台机器的固件就这个脾气。</li>" +
-        "<li><b>「回退定位」「走纸测试」按了纸不动是正常的</b>（2026-09-21 实测，收发记录里回执是" +
-        "<code>5f 4f 4b 5f</code> = <code>_OK_</code>）：这台机器<b>只认打印流内部的 FF</b>，" +
-        "单独发一个 <code>0x0c</code>（哪怕已切到标签模式）它只回 OK 不驱动走纸。" +
-        "所以这两个按钮的作用是「告诉固件下一次打印从哪开始」，不是当场走纸。" +
-        "要真正改变纸位，只能用打印一条内容 + 「打完退回本张起点」，或者手动按机器上的走纸键。</li>" +
+        "<li><b>顺序</b>：① 「连接打印机」→ ② 「间隙学习」→ ③ 「蓝牙打印」。" +
+        "间隙学习是打印机自己走一段纸标定标签间距，<b>只有首次用或换纸才需要重做</b>；" +
+        "它必然会吃掉 2~4 张贴纸，这是打印机自己的机械动作，改不了。" +
+        "（以前想用「回退定位」把纸退回来省纸，真机实测<b>纸不动</b> —— 0.12.30 已把那个按钮和" +
+        "「走纸测试」一起删掉：单发 <code>0x0c</code> 这台机器只回 <code>_OK_</code> 不驱动走纸。）</li>" +
+        "<li><b>多张连打逐张往上偏</b>（第一张正、第三张少了第一行字）⇒ 几乎总是<b>「底部留白 mm」太小</b>。" +
+        "留白 0 = 位图把整张标签打满，打印头正好停在标签边缘的缝上，结尾 <code>FF</code> 找不到可用于" +
+        "定位的缝 → 每张少走约 2mm 累积。汉码官方每张只发 218 行（30mm 标签留 2.75mm）就是为了这个。" +
+        "<b>保持 ≥ 2.5mm，别调 0</b>；留白 <2mm 时上面那行参数下面会出红字提示。</li>" +
+        "<li><b>整张内容偏上 / 偏下</b>（每张都一样、不累积）⇒ 这是固定纸位误差，用「<b>内容下移 mm</b>」" +
+        "补偿：偏上就加 0.5~1mm，偏下就减。它只挪内容、不打印长度，所以不会影响走纸。" +
+        "第一张的「纸先进一下」是作业头里 <code>ESC @</code> 触发的复位动作（第二张起不再进纸）。" +
+        "0.12.25 试过把头与位图拆开发 → 真机卡在发送 24% 后掉链，所以「作业头后等待 ms」默认 0，" +
+        "别再往那个方向调。</li>" +
         "<li><b>打印期间别点其它蓝牙按钮</b>（查询状态 / 复位 / 连接 / 断开）：" +
         "这台机器容不下并发 GATT 操作，两条写入砸同一个特征会当场把链路掐了" +
         "（表现为进度停在某个百分比、蓝牙也掉了）。0.12.27 起打印期间这些按钮会被自动挡下并提示。</li>" +
@@ -1482,8 +1446,6 @@
         '<button onclick="labelDownload()">下载标签图</button>' +
         '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
         '<button onclick="labelBleReset()">复位打印机</button>' +
-        '<button onclick="labelBleAlign()">回退定位</button>' +
-        '<button onclick="labelBleFeedTest()">走纸测试 ×3</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
       true
     );
@@ -1560,6 +1522,16 @@
     const cfg = loadCfg();
     const v = parseFloat(value);
     cfg.footMargin = isNaN(v) ? 2.75 : Math.max(0, Math.min(8, v));
+    saveCfg();
+    labelRefresh();
+  }
+
+  /** 内容整体下移（mm）：抵消「打出来内容偏上」这类固定纸位误差。
+   *  只挪内容、不动画布高度 ⇒ 打印长度与字节数都不变（改留白是改不出这个效果的）。 */
+  function labelPickTopShift(value) {
+    const cfg = loadCfg();
+    const v = parseFloat(value);
+    cfg.topShiftMm = isNaN(v) ? 0 : Math.max(0, Math.min(3, v));
     saveCfg();
     labelRefresh();
   }
@@ -1647,6 +1619,7 @@
     labelExportJob,
     labelPrintBle,
     labelPickFootMargin,
+    labelPickTopShift,
     labelPickHeadWait,
     labelPickCopyDelay,
     labelPickResetFirst,
@@ -1657,8 +1630,6 @@
     labelBleProbe,
     labelBleCalibrate,
     labelBleReset,
-    labelBleAlign,
-    labelBleFeedTest,
     labelBleRaw,
     labelBleDisconnect,
     labelBleConnect,

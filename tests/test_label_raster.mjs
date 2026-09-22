@@ -82,14 +82,22 @@ function testDefaultCfgSafe() {
     cfg.headWaitMs === 0, String(cfg.headWaitMs));
   check("默认 copyDelayMs=1500（多份之间留打印时间，这份固件一份一份地打）",
     cfg.copyDelayMs === 1500, String(cfg.copyDelayMs));
-  // 0.12.29：打完退回本张起点 —— 间隙学习不必再消耗 4 张贴纸（用户硬需求）。
-  check("默认 rewindAfter=true（整份末尾补一条 FF 把纸退回起点）",
-    cfg.rewindAfter === true, String(cfg.rewindAfter));
+  // 0.12.30：退回定位被真机证伪（补的那条 FF 纸一动不动）→ 降到实验项、默认关。
+  check("默认 rewindAfter=false（实测补的 FF 不走纸，不再假装能退回）",
+    cfg.rewindAfter === false, String(cfg.rewindAfter));
+  // 0.12.30：留白锁回官方抓包的 2.75mm —— 0 = 打满整张，结尾 FF 找不到缝 → 逐张往上偏。
+  check("默认 footMargin=2.75（= 官方 218/240 行；0 会多张逐张往上偏）",
+    cfg.footMargin === 2.75, String(cfg.footMargin));
+  check("默认 topShiftMm=0（内容整体下移量，抵消固定偏上）",
+    cfg.topShiftMm === 0, String(cfg.topShiftMm));
   const src = fs.readFileSync(SRC, "utf8");
-  check("旧存档迁移：cfgRev 不一致时强制重置实验开关与时间旋钮",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 5;/.test(src) &&
+  check("旧存档迁移：cfgRev 不一致时强制重置发送开关与版式参数",
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 6;/.test(src) &&
       /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src) &&
-      /cfg\.rewindAfter = true;/.test(src));
+      /cfg\.rewindAfter = false;/.test(src) && /cfg\.footMargin = 2\.75;/.test(src) &&
+      /cfg\.topShiftMm = 0;/.test(src));
+  check("留白下限 FOOT_MIN_MM 有常量（面板红字与信息行共用同一个判据）",
+    /const FOOT_MIN_MM = 2;/.test(src));
 }
 
 /* ── 0.12.27：蓝牙动作互斥 + 重发阈值 ─────────────────────── */
@@ -104,7 +112,7 @@ function testBleGuards() {
     return i < 0 ? "" : src.slice(i, src.indexOf("\n  }", i) + 4);
   };
   for (const fn of ["labelBleProbe", "labelBleConnect", "labelBleDisconnect",
-                    "labelBleReset", "labelBleAlign", "labelBleFeedTest", "labelBleRaw"]) {
+                    "labelBleReset", "labelBleRaw"]) {
     const b = body(fn);
     check(`${fn} 有 busy 守卫`, b.length > 0 && /bleBusyBlock\(/.test(b),
       b ? b.slice(0, 60) : "找不到该函数");
@@ -174,9 +182,9 @@ const BLANK_ROW_52 = () => new Uint8Array(52);
 // 很容易漏 —— 所以这里按名单逐个点名。
 const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle",
-  "labelBleProbe", "labelBleCalibrate", "labelBleReset", "labelBleAlign", "labelBleFeedTest", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
+  "labelBleProbe", "labelBleCalibrate", "labelBleReset", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickResetFirst",
+  "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickTopShift", "labelPickResetFirst",
   "labelPickPerCopyPos", "labelPickHeadWait", "labelPickCopyDelay",
   "labelPickBandRows", "labelPickBlankSkip", "labelPickPipeline", "labelPickShowAll",
 ];
@@ -304,16 +312,17 @@ function testEscPosJob() {
   check("跟一条 GS P 203 203（钉住 ESC J 的走纸单位 = 1 点）",
     [0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00].every((b, i) => job[8 + i] === b),
     Array.from(job.slice(8, 14)).join(","));
-  check("单份长度 = 2+6+6+8+4+1+1 = 28（末位多一条回退 FF）", job.length === 28, String(job.length));
-  // 回退定位：末尾 FF 能让「间隙学习后试印」不浪费贴纸，所以默认开、且要在最后一位。
-  // 注意不能断言「倒数第二位不是 FF」——这条最小 raster 只有 2 行，位图块自带的那条 FF
-  // 和回退 FF 在字节流里是紧挨着的两个 0c，页面上就是「走两张」。
-  check("末尾连续两条 FF（位图收尾 + 回退一次）",
-    job[job.length - 1] === 0x0c && job[job.length - 2] === 0x0c,
+  check("单份长度 = 2+6+6+8+4+1 = 27（默认不回退）", job.length === 27, String(job.length));
+  check("默认末尾只有一条 FF（位图收尾那条）",
+    job[job.length - 1] === 0x0c && job[job.length - 2] !== 0x0c,
     Array.from(job.slice(-4)).join(","));
-  const noRewind = buildEscPosJob(raster, { copies: 1, rewindAfter: false });
-  check("关掉回退定位 → 单份回到 27 字节",
-    noRewind.length === 27 && noRewind[noRewind.length - 1] === 0x0c, String(noRewind.length));
+  // 回退 FF 仍留着当实验项（勾上后整份末尾再加一条 0c）。
+  // 注意不能断言「倒数第二位不是 FF」——这条最小 raster 只有 2 行，位图块自带的那条 FF
+  // 和回退 FF 在字节流里是紧挨着的两个 0c。
+  const withRewind = buildEscPosJob(raster, { copies: 1, rewindAfter: true });
+  check("勾上「打完退回本张起点」→ 28 字节、末尾连续两条 FF",
+    withRewind.length === 28 && withRewind[27] === 0x0c && withRewind[26] === 0x0c,
+    String(withRewind.length));
 
   const r = ops.find((o) => o.op === "raster");
   check("含一条 GS v 0 光栅指令", !!r);
@@ -322,7 +331,7 @@ function testEscPosJob() {
   check("行数小端（2 → 02 00）", r && r.y === 2, r && String(r.y));
   check("位图数据不丢不改（aa+bb+cc+dd = 694）",
     r && r.sum === 0xaa + 0xbb + 0xcc + 0xdd, r && String(r.sum));
-  check("以 FF 走纸收尾（多张不串位关键）", job[job.length - 2] === 0x0c, String(job[job.length - 2]));
+  check("以 FF 走纸收尾（多张不串位关键）", job[job.length - 1] === 0x0c, String(job[job.length - 1]));
 
   // 关掉复位 + 关掉空白跳过 = 对齐官方抓包的最小形态（不含 ESC @ / GS P）
   const noReset = buildEscPosJob(raster, { copies: 1, resetFirst: false, blankSkip: false });
@@ -331,22 +340,22 @@ function testEscPosJob() {
     Array.from(noReset.slice(0, 6)).join(","));
   check("不发 GS P（不省空白就不需要走纸命令）",
     !(noReset[6] === 0x1d && noReset[7] === 0x50), Array.from(noReset.slice(6, 14)).join(","));
-  check("该形态长度回到 20（= 6+8+4+1+1，含回退 FF）", noReset.length === 20, String(noReset.length));
+  check("该形态长度回到 19（= 6+8+4+1，默认不含回退 FF）", noReset.length === 19, String(noReset.length));
 
   const two = buildEscPosJob(raster, { copies: 2 });
   const twoOps = parseJob(two);
-  check("两份 = 2 条光栅 + 3 个 FF（每份收尾 1 条 + 整份回退 1 条）",
+  check("两份 = 2 条光栅 + 2 个 FF（每份收尾 1 条；默认不回退）",
     twoOps.filter((o) => o.op === "raster").length === 2 &&
-      twoOps.filter((o) => o.op === "ff").length === 3, JSON.stringify(twoOps));
+      twoOps.filter((o) => o.op === "ff").length === 2, JSON.stringify(twoOps));
   // 0.12.25：默认**关**「每份重新定位」→ 全篇只有一个头部（与官方抓包同构：一份头 + 若干块）
-  check("默认每份不补头部：两份长度 = 28 + 13 = 41", two.length === 41, String(two.length));
+  check("默认每份不补头部：两份长度 = 27 + 13 = 40", two.length === 40, String(two.length));
   check("默认第二份首字节就是 GS v 0（没有 ESC @、没有 setp）",
     two[27] === 0x1d && two[28] === 0x76, Array.from(two.slice(27, 30)).join(","));
 
   // 勾上「每份重新定位」：第二份补一条 setp 01，**不带 ESC @**
   //   （ESC @ 才是「打印前纸先进一下」的嫌疑，中途再发一次就再来一次进纸）
   const twoPos = buildEscPosJob(raster, { copies: 2, perCopyPos: true });
-  check("勾上每份重新定位 → 两份长度 = 28 + 19 = 47", twoPos.length === 47, String(twoPos.length));
+  check("勾上每份重新定位 → 两份长度 = 27 + 19 = 46", twoPos.length === 46, String(twoPos.length));
   check("每份重新定位补的是 setp 01，不是 ESC @",
     twoPos[27] === 0x1d && [0x1d, 0x73, 0x65, 0x74, 0x70, 0x01].every((b, i) => twoPos[27 + i] === b),
     Array.from(twoPos.slice(27, 33)).join(","));
@@ -359,8 +368,11 @@ function testEscPosJob() {
   check("份数超上限夹到 50",
     parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length === 50,
     String(parseJob(buildEscPosJob(raster, { copies: 999 })).filter((o) => o.op === "raster").length));
-  check("cfg 只有 copies 也不崩（其余走默认；1 份收尾 + 1 条回退 = 2）",
-    parseJob(buildEscPosJob(raster, {})).filter((o) => o.op === "ff").length === 2);
+  check("cfg 只有 copies 也不崩（其余走默认；1 份只有收尾那条 FF）",
+    parseJob(buildEscPosJob(raster, {})).filter((o) => o.op === "ff").length === 1);
+  // 肯定式默认：裸 cfg（缺字段）不能被判成「勾了回退」——0.12.28 修过同类 `!== false` 的坑
+  check("回退开关是肯定式判断（=== true），裸 cfg 判为关",
+    /const rewind = !!\(cfg && cfg\.rewindAfter === true\)/.test(fs.readFileSync(SRC, "utf8")));
   check("feed 已废弃（结尾恒为 FF，不崩）",
     buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0] === 0x0c,
     String(buildEscPosJob(raster, { copies: 1, feed: -5 }).slice(-1)[0]));
@@ -368,7 +380,7 @@ function testEscPosJob() {
   // ESC @ 只该在「断链重发」或「用户勾了复位」时出现
   const retry = buildEscPosJob(raster, { copies: 1, resetFirst: false }, { reset: true });
   check("重发时强制发 ESC @（清打印机里的半份残留）",
-    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 28,
+    retry[0] === 0x1b && retry[1] === 0x40 && retry.length === 27,
     Array.from(retry.slice(0, 2)).join(",") + " len=" + retry.length);
   check("{reset:false} 显式压过 cfg.resetFirst",
     buildEscPosJob(raster, { copies: 1, resetFirst: true }, { reset: false })[0] !== 0x1b);
@@ -419,10 +431,10 @@ function testJobParts() {
     Array.from(p.head).join(","));
   check("copies 切出 3 份", p.copies.length === 3, String(p.copies.length));
   check("每份 13 字节（光栅 12 + FF 1），份尾都是 FF",
-    p.copies.every((c, i) => (i < 2 ? c.length === 13 && c[12] === 0x0c
-                                    : c.length === 14 && c[13] === 0x0c && c[12] === 0x0c)),
+    p.copies.every((c) => c.length === 13 && c[12] === 0x0c),
     p.copies.map((c) => c.length).join(","));
-  check("只有最后一份带回退 FF（前面几份不变）", p.copies[0].length === 13);
+  check("默认不回退：3 份逐字节相同（与官方抓包同构）",
+    p.copies.slice(1).every((c) => Array.from(c).join(",") === Array.from(p.copies[0]).join(",")));
   check("拼回去与单块作业逐字节相同（拆只是分包，不改内容）",
     Array.from(cat([p.head].concat(p.copies))).join(",") ===
       Array.from(buildEscPosJob(raster, cfg)).join(","));
@@ -531,10 +543,10 @@ function testRasterCommands() {
   check("省下来的都是纯白行（ESC J 段数 ≥ 3，不是只砍了底部留白）",
     parseJob(jobNew).filter((o) => o.op === "feed").length >= 3,
     String(parseJob(jobNew).filter((o) => o.op === "feed").length));
-  // 0.12.29：每份收尾 1 条 FF，整份末尾再加 1 条回退 FF → 3 份共 4 条。
-  check("多份时每份仍以 FF 收尾（3 份 + 1 条回退 = 4）",
+  // 默认不回退：每份收尾 1 条 FF → 3 份共 3 条。
+  check("多份时每份仍以 FF 收尾（3 份 = 3 条）",
     parseJob(buildEscPosJob(withQr, { copies: 3, bandRows: 10, blankSkip: true }))
-      .filter((o) => o.op === "ff").length === 4);
+      .filter((o) => o.op === "ff").length === 3);
 }
 
 /* ── 4b. 底部留白 / 光栅高度 ───────────────────────────────── */
@@ -580,13 +592,13 @@ function testFootMargin() {
   check("留白后的两份报文确实更短（每份少 22 行×52 字节）",
     jobBig.length - jobSmall.length === 2 * 22 * BPR,
     `${jobBig.length} vs ${jobSmall.length}`);
-  check("留白后每份仍以 FF 收尾（2 份 + 1 条回退 = 3）",
-    parseJob(jobSmall).filter((o) => o.op === "ff").length === 3);
+  check("留白后每份仍以 FF 收尾（2 份 = 2 条）",
+    parseJob(jobSmall).filter((o) => o.op === "ff").length === 2);
   check("行数字段写进报文（218 = 0xda 0x00）",
     parseJob(jobSmall).find((o) => o.op === "raster").y === 218,
     String(parseJob(jobSmall).find((o) => o.op === "raster").y));
-  check("报文长度 = 2+6+2×(8+52×218+1)+1（数据无隐藏裁剪 + 末尾回退 FF）",
-    jobSmall.length === 2 + 6 + 2 * (8 + BPR * rows218 + 1) + 1, String(jobSmall.length));
+  check("报文长度 = 2+6+2×(8+52×218+1)（数据无隐藏裁剪，默认不回退）",
+    jobSmall.length === 2 + 6 + 2 * (8 + BPR * rows218 + 1), String(jobSmall.length));
 }
 
 /* ── 5. 对话框装配 ─────────────────────────────────────────── */
@@ -636,10 +648,14 @@ async function testDialogHtml() {
     html.includes('id="labelPipeline"') && /流水线连发（快，但本机实测/.test(html));
   check("流水线默认关闭钉在 defaultCfg 源码里",
     /pipeline: false/.test(fs.readFileSync(SRC, "utf8")));
-  check("含导出作业与对齐标签两个诊断按钮",
-    html.includes("labelExportJob") && html.includes("labelBleAlign"));
-  check("含走纸测试按钮（串页时分离「走纸定位」与「位图打印」）",
-    html.includes("labelBleFeedTest"));
+  check("含导出作业按钮", html.includes("labelExportJob"));
+  // 0.12.30 删掉「回退定位」「走纸测试 ×3」：真机两轮实测单发 FF 纸一动不动（只回 _OK_），
+  // 按钮只会让人以为「是不是坏了」，留着毫无价值。
+  check("不再有「回退定位 / 走纸测试」按钮（函数与 onclick 都删了；说明里留一句解释）",
+    !html.includes("labelBleAlign") && !html.includes("labelBleFeedTest") &&
+      !/<button[^>]*>[^<]*(回退定位|走纸测试)/.test(html));
+  check("含「内容下移 mm」字段（抵消整张内容偏上的固定误差）",
+    html.includes('id="labelTopShift"'));
   check("诊断动作先发 setp 01 进标签模式（只发裸 FF 真机按了没反应）",
     typeof (sandbox.labelDebug || {}).labelModeBytes === "function" &&
       (sandbox.labelDebug.labelModeBytes() || [])[0] === 0x1d);
@@ -656,6 +672,14 @@ async function testDialogHtml() {
   const srcAll = fs.readFileSync(SRC, "utf8");
   check("预览信息行打出运行版本号（截图自证容器是哪一版）",
     /" · 版本 " \+ runningVersion\(\)/.test(srcAll));
+  check("留白不足的红字判据与文案（默认 2.75 时不显示，改小才出现）",
+    /⚠ 留白太小/.test(srcAll) && /footMargin == null \? 2\.75 : cfg\.footMargin\) < FOOT_MIN_MM/.test(srcAll));
+  check("「内容下移」真的挪内容：版式基线 + 二维码都加 dyMm（画布高度不变、字节数不变）",
+    /const dyMm = Math\.max\(0, Math\.min\(3, Number\(cfg\.topShiftMm\) \|\| 0\)\)/.test(srcAll) &&
+      /const topBase = L\.top \+ dyMm/.test(srcAll) &&
+      /L\.foot \+ dyMm/.test(srcAll) && /padDots \+ dyDots/.test(srcAll));
+  check("信息行会自曝「留白不足」（截图即可判定，不用翻表单）",
+    /留白不足 " \+ FOOT_MIN_MM/.test(srcAll));
   check("版本号取自后端 /api/system/status，不硬写第三份",
     /S\.status\.version/.test(srcAll) &&
       typeof ((sandbox.labelDebug || {}).runningVersion) === "function");
@@ -663,8 +687,8 @@ async function testDialogHtml() {
     sandbox.labelDebug.runningVersion() === "未知", String(sandbox.labelDebug.runningVersion()));
   check("落运行时把版本读成整数语义（source 里没有第三个硬编码版本号）",
     !/["']0\.12\.\d+["']/.test(srcAll.replace(/\/\*[\s\S]*?\*\//g, "")));
-  check("说明里写明「位置偏」的处置（等待值 / 取消复位）",
-    html.includes("作业头后等待") && html.includes("取消勾选"));
+  check("说明里写明两类偏位的处置（逐张往上偏→留白；整张偏上→内容下移）",
+    html.includes("逐张往上偏") && html.includes("内容下移") && html.includes("底部留白 mm"));
   check("说明里写清「先连接→再间隙学习→再打印」的顺序",
     html.includes("连接打印机") && html.includes("间隙学习") && html.includes("蓝牙打印"));
   // 0.12.28：说明与实验开关都收进折叠区，默认收起 —— 面板上不再铺半屏长文。
