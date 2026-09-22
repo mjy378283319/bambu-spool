@@ -1,6 +1,11 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.32
-sqlmodel>=0.0.22
+sqlmodel>=0.0.22,<0.0.43
+# ⚠️ 上限别去掉：0.0.45 起 sqlmodel 强制 datetime 必须带时区
+#    （`ValueError: Datetime values must have timezone information`），
+#    而本站按「朴素 UTC」存时间（见 app/models.py 的 _now_utc）。
+#    CI 装 requirements 里的最新版 → 2026-09-22 因此红了一次（本地/已验证版本是 0.0.42）。
+#    要放开就得整站改成 aware datetime，或给 datetime 字段标 NaiveDatetime。
 paho-mqtt>=2.1
 httpx>=0.27
 cryptography>=43.0
