@@ -625,6 +625,12 @@
       const pitchRows = Math.round(mm2dot(Number(cfg.hMm), Number(cfg.dpi)));
       const padRows = pitchRows - raster.heightDots;
       if (Number.isFinite(pitchRows) && padRows > 0 && pitchRows <= 4096) {
+        // ⚠️ 0.12.33：垫行必须发**真实光栅数据**（GS v 0 全 0 行），绝不能像 blankSkip
+        //   那样折成 ESC J n。0.12.32 的教训：垫行走 rasterCommands(…, cfg) 原样继承了
+        //   blankSkip=true，22 行垫行被折成一条 3 字节 ESC J 22 —— 测试里写死
+        //   blankSkip:false 所以测出来是光栅、生产里是 ESC J，测试和真机走的不是一条路。
+        //   真机照片实测节距仍 ~28mm/张。光栅行「要打就得走」是物理机制，固件吞不掉
+        //   （官方抓包全流只有 GS v 0，没有一条 ESC J / FF 依赖）。
         padSegs = rasterCommands(
           {
             bytes: new Uint8Array(padRows * raster.bytesPerRow),
@@ -632,7 +638,7 @@
             heightDots: padRows,
             bytesPerRow: raster.bytesPerRow,
           },
-          cfg
+          Object.assign({}, cfg, { blankSkip: false })
         );
       }
     }

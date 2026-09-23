@@ -731,12 +731,15 @@ async function testDialogHtml() {
   }
 }
 
-/* ── 4c. 位图补足整节距（0.12.32） ─────────────────────────── */
+/* ── 4c. 位图补足整节距（0.12.32 引入，0.12.33 修正） ───────────────── */
 // 根因：本机实测 FF(0x0c) 不驱动走纸（单发两轮 _OK_ 纸不动；连打节距 27.1~27.25mm ≈
 //       218 行位图自身高度）。每份 218 行 + 靠 FF 补最后 2.75mm = 每张固定欠走 2.75mm。
-// 修法：fullPitch=true（默认）时每份在内容位图后补全 0 空白行，光栅走纸自己凑满整节距。
+// 修法：fullPitch=true（默认）时每份在内容位图后补**真实光栅空白行**，走纸自己凑满整节距。
+// 0.12.33 教训：垫行曾继承 blankSkip=true 被折成 ESC J 22 —— 测试里写死 blankSkip:false
+//       所以测出的是光栅、生产发的是 ESC J，测试与真机走了两条路。这里主用例必须用
+//       **blankSkip:true（生产默认）**，直接钉「垫行不许被折成非光栅指令」。
 function testFullPitch() {
-  console.log("== 位图补足整节距（0.12.32） ==");
+  console.log("== 位图补足整节距（0.12.33） ==");
   const BPR = 52;
   const rows218 = rasterRowsFor(30, 2.75, 203); // 218
   const raster = mkRaster(rows218, BPR, (y) => {
@@ -745,30 +748,34 @@ function testFullPitch() {
     return row;
   });
   const cfg = {
-    copies: 2, hMm: 30, dpi: 203, resetFirst: false, blankSkip: false, bandRows: 0,
+    copies: 2, hMm: 30, dpi: 203, resetFirst: false, blankSkip: true, bandRows: 0,
     fullPitch: true,
   };
   const job = buildEscPosJob(raster, cfg);
   const ops = parseJob(job);
   const rasters = ops.filter((o) => o.op === "raster");
   const ffs = ops.filter((o) => o.op === "ff");
-  check("补垫后每份 2 条光栅（218 内容 + 22 空白），2 份共 4 条",
-    rasters.length === 4, String(rasters.length));
-  check("每份光栅行数 = 218 + 22 = 240（= 30.00mm 整节距）",
-    rasters.every((r, i) => r.y === (i % 2 === 0 ? 218 : 22)),
-    rasters.map((r) => r.y).join(","));
-  check("每份仍以 FF 收尾（维持与官方抓包同构的块尾；本机实测它走 0，不承担定位）",
-    ffs.length === 2, String(ffs.length));
+  // blankSkip 开时内容位图会被 ESC J 切碎（墨行间隔 29 行空白）——这是设计行为；
+  // 关键不变量只有一条：**每份的 22 行垫行必须是真实光栅（y===22），不许被折成 ESC J**
   const padOps = rasters.filter((r) => r.y === 22);
+  check("blankSkip 开（生产默认）时垫行仍是真实光栅：每份 1 条 y=22，2 份共 2 条",
+    padOps.length === 2, rasters.map((r) => r.y).join(","));
   check("补垫行全为空白（数据字节和 = 0）",
     padOps.length === 2 && padOps.every((r) => r.sum === 0),
     padOps.map((r) => r.sum).join(","));
-  // 总走纸行数 = 每份 240 行 × 2 = 480；这是「连打节距 = 30mm」的直接来源
-  const feedRows = rasters.reduce((a, r) => a + r.y, 0);
+  check("每份仍以 FF 收尾（维持与官方抓包同构的块尾；本机实测它走 0，不承担定位）",
+    ffs.length === 2, String(ffs.length));
+  // blankSkip 关 → 内容 = 一整条 218 行光栅 + 22 行垫行，可精确对账总走纸行数
+  const job2 = buildEscPosJob(raster, { ...cfg, blankSkip: false });
+  const rasters2 = parseJob(job2).filter((o) => o.op === "raster");
+  check("blankSkip 关时每份 2 条光栅（218 + 22），2 份共 4 条",
+    rasters2.length === 4 && rasters2.every((r, i) => r.y === (i % 2 === 0 ? 218 : 22)),
+    rasters2.map((r) => r.y).join(","));
+  const feedRows = rasters2.reduce((a, r) => a + r.y, 0);
   check("两份总光栅行数 = 480（240 × 2，节距完全由位图决定）",
     feedRows === 480, String(feedRows));
-  // 关掉 fullPitch → 回到 0.12.31 形态（每份只有内容位图 + FF）
-  const old = buildEscPosJob(raster, { ...cfg, fullPitch: false });
+  // 关掉 fullPitch → 回到 0.12.31 形态（blankSkip 关时：每份只有内容位图 + FF，无垫行）
+  const old = buildEscPosJob(raster, { ...cfg, fullPitch: false, blankSkip: false });
   const oldOps = parseJob(old);
   check("关掉 fullPitch → 回旧形态：每份 1 条 218 行光栅 + 1 条 FF",
     oldOps.filter((o) => o.op === "raster").length === 2 &&
@@ -784,6 +791,10 @@ function testFullPitch() {
   check("cfg 缺 hMm/dpi 时不补垫（小光栅作业长度不变）",
     parseJob(tinyJob).filter((o) => o.op === "raster").length === 1,
     String(parseJob(tinyJob).length));
+  // 源码级钉住：垫行的 rasterCommands 必须显式覆盖 blankSkip=false（防回归回 0.12.32 形态）
+  const src = fs.readFileSync(SRC, "utf8");
+  check("垫行 rasterCommands 显式传 blankSkip:false（不许继承生产默认被折成 ESC J）",
+    /Object\.assign\(\{\}, cfg, \{ blankSkip: false \}\)/.test(src));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
