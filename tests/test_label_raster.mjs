@@ -129,8 +129,10 @@ function testBleGuards() {
     /pct >= 0\.05/.test(body("labelPrintBle")));
   check("不做自动重发时给出可执行处置（先点「复位打印机」清缓冲）",
     /先点「复位打印机」清掉缓冲/.test(src));
-  check("单包写入超时 6s（缩短「看着像卡死」的窗口）",
-    /withTimeout\(p, 6000,/.test(src) && !/withTimeout\(p, 10000,/.test(src));
+  check("单包写入超时 20s（0.12.34：打印机缓冲满流控停顿 >6s 属正常，勿误判断链）",
+    /withTimeout\(p, 20000,/.test(src) && !/withTimeout\(p, 6000,/.test(src));
+  check("每 ~6KB 停顿让打印机消化（36KB 作业防 RX 缓冲顶满）",
+    /sent % 6144 < size/.test(src));
 }
 
 /* ── 报文解析器 ──────────────────────────────────────────────

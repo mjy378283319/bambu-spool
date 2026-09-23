@@ -861,7 +861,10 @@
       if (useAck) {
         p = char.writeValue(chunk);
         p.catch(() => {});                               // 超时/失败后底层 reject 静默化
-        p = withTimeout(p, 6000, "蓝牙写入超时（链路可能已断）");
+        // 0.12.34：6s→20s。真机实测 36KB 作业在 ~11% 处写包停顿 >6s（打印机缓冲满、
+        // 流控暂停消化已收数据），不是断链；6s 误判导致整份作废。打印速率 ~5KB/s，
+        // 缓冲消化几秒属正常，20s 仍能兜住真断链（链路真断时 gatt 会先报 disconnected）。
+        p = withTimeout(p, 20000, "蓝牙写入超时（链路可能已断）");
       } else {
         p = char.writeValueWithoutResponse(chunk);
       }
@@ -870,6 +873,8 @@
     };
 
     while (sent < bytes.length || inflight.length) {
+      // 0.12.34：每 ~6KB 让打印机消化 50ms，避免其 RX 缓冲长时间顶满导致写包停顿堆积
+      if (sent > 0 && sent % 6144 < size) await sleep(50);
       while (sent < bytes.length && inflight.length < INFLIGHT) {
         const end = Math.min(sent + size, bytes.length);
         issue(bytes.subarray(sent, end));
