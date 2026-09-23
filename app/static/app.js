@@ -1473,6 +1473,12 @@ function sortSpools(list) {
   const sort = S.spoolSort || { key: "id", dir: "asc" };
   const factor = sort.dir === "desc" ? -1 : 1;
   return list.slice().sort((a, b) => {
+    // 用完的盘（余量 ≤ 0）恒排最后 —— 2026-09-22 反馈：库存页一打开默认按 ID 排，
+    // 最早登记的那批全打完了，正好霸占列表最前面，在用的盘反而要翻。任何排序键、
+    // 升降序都不改这条（判定与状态页共用 spoolUseState，别再写第二套口径）。
+    const ea = spoolUseState(a) === "empty";
+    const eb = spoolUseState(b) === "empty";
+    if (ea !== eb) return ea ? 1 : -1;
     if (TEXT_SORT_KEYS[sort.key]) {
       const va = sortValue(a, sort.key);
       const vb = sortValue(b, sort.key);
@@ -2640,9 +2646,17 @@ function spoolOptionHtml(s, selected) {
 }
 
 /** 能出现在「绑定到哪盘料」里的料盘：归档的不进候选（绑上去没意义），
- *  但当前正绑着的那一盘例外 —— 否则打开弹窗看到「不绑定」，用户会以为绑定丢了。 */
+ *  但当前正绑着的那一盘例外 —— 否则打开弹窗看到「不绑定」，用户会以为绑定丢了。
+ *  用完的盘（余量 ≤ 0）排在候选最后 —— 2026-09-22 反馈：选料时最先看到的
+ *  全是 0 g 的空盘，还得往下翻半天；正常要绑的肯定是有料的盘。 */
 function bindCandidates(boundId) {
-  return (S.spools || []).filter((s) => !s.archived || s.id === boundId);
+  const list = (S.spools || []).filter((s) => !s.archived || s.id === boundId);
+  return list.slice().sort((a, b) => {
+    const ea = spoolUseState(a) === "empty";
+    const eb = spoolUseState(b) === "empty";
+    if (ea !== eb) return ea ? 1 : -1;
+    return (a.id || 0) - (b.id || 0);
+  });
 }
 
 /** 槽位弹窗里那份料盘下拉。
@@ -2684,7 +2698,7 @@ async function ensureSpoolOptions(boundId) {
   refreshSlotBindPicked();
   if (!hint) return;
   hint.textContent = ok ? ""
-    : "系统里还没有登记任何料盘 —— 可以点下面的「按槽位信息建料盘」，或先去「料盘库存」新增一盘。";
+    : "系统里还没有登记任何料盘 —— 先去「料盘库存」新增一盘，或用上面的「相机扫码」扫料盘上的二维码。";
 }
 
 function openSlotDialog(printerId, amsId, trayId) {
@@ -2740,10 +2754,7 @@ function openSlotDialog(printerId, amsId, trayId) {
       <button class="sm primary" onclick="scanForSlotBind(${printerId},${amsId},${trayId})">
         ${ICO.scan}相机扫码
       </button>
-      <button class="sm" onclick="closeModal();switchView('spools')">${ICO.spool || ""}去料材列表</button>
-    </div>
-    <div class="slot-actions">
-      <button class="sm" onclick="quickCreateSpoolFromSlot(${printerId},${amsId},${trayId})">按槽位信息建料盘</button>
+      ${boundId ? `<button class="sm" onclick="closeModal();openSpoolDetail(${boundId})">${ICO.spool || ""}查看绑定耗材</button>` : ""}
     </div>
     <div class="slot-qr">
       <img src="/api/labels/slot/${printerId}/${amsId}/${trayId}.png" alt="槽位二维码"
@@ -2944,39 +2955,6 @@ function scanSpoolCode() {
     title: "扫料盘二维码",
     hint: "对准料盘上贴的二维码，扫到后直接打开这盘料的详情。",
   });
-}
-
-async function quickCreateSpoolFromSlot(printerId, amsId, trayId) {
-  const printer = (S.printers_full || []).find((p) => p.id === printerId) || {};
-  const tray = findTray(printer, amsId, trayId);
-  if (!tray || !tray.occupied) { toast("这个槽位没有识别到耗材", "err"); return; }
-  try {
-    const created = await api("/api/spools", {
-      method: "POST",
-      body: JSON.stringify({
-        // ⚠️ 用规范名「拓竹」而不是「Bambu Lab」（2026-09-18）：
-        // 后端 normalize_brand 会收口，所以以前也没坏，但**发出去的**是英文旧写法，
-        // 于是库存页的「品牌」筛选里会同时出现「拓竹」和「Bambu Lab」两个选项
-        // （筛选项是照着 S.spools 里的原值列的），同一家厂被拆成两项。
-        brand: "拓竹",
-        material: tray.tray_type || "PLA",
-        color_name: "按机器识别",
-        color_hex: tray.color,
-        spool_weight: 239,          // 拓竹空盘实测（见 catalog.BRAND_SPOOL_WEIGHTS）
-        initial_weight: tray.tray_weight || 1000,
-        tray_info_idx: tray.info_idx || "",
-      }),
-    });
-    await loadSpools();
-    await api("/api/bindings", {
-      method: "PUT",
-      body: JSON.stringify({ printer_id: printerId, ams_id: amsId, tray_id: trayId, spool_id: created.id }),
-    });
-    await loadBindings();
-    toast(`已按槽位信息创建并绑定「${created.name}」`, "ok");
-    closeModal();
-    if (S.status) await loadStatus();
-  } catch (err) { toast(err.message, "err"); }
 }
 
 async function saveBinding(printerId, amsId, trayId) {

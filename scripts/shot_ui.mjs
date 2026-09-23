@@ -1337,10 +1337,10 @@ async function main() {
       (slotUnbind.gapHintUnbind || 0) >= 8, `gap=${slotUnbind.gapHintUnbind}px`);
     check("解绑行与下方「相机扫码」之间留了间距（用户反馈的挤在一起）",
       (slotUnbind.gapUnbindScan || 0) >= 10, `gap=${slotUnbind.gapUnbindScan}px`);
-    check("「相机扫码」与「按槽位信息建料盘」之间留了间距",
-      (slotUnbind.gapScanCreate || 0) >= 10, `gap=${slotUnbind.gapScanCreate}px`);
-    check("槽位弹窗的两排按钮走 .slot-actions 类名（不是散落的 inline margin）",
-      slotUnbind.hasActionsClass === 2, `count=${slotUnbind.hasActionsClass}`);
+    // 2026-09-22：「按槽位信息建料盘」整行删除（用户：没什么用还碍事），
+    // 槽位弹窗只剩一排 .slot-actions。
+    check("槽位弹窗的按钮走 .slot-actions 类名（不是散落的 inline margin）",
+      slotUnbind.hasActionsClass === 1, `count=${slotUnbind.hasActionsClass}`);
     check("解绑键旁边写清当前绑的是哪盘",
       (slotUnbind.hint || "").includes("当前绑定")
       && (slotUnbind.hint || "").includes(slotUnbind.bound || ""),

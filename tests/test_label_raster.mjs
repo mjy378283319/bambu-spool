@@ -88,14 +88,14 @@ function testDefaultCfgSafe() {
   // 0.12.30：留白锁回官方抓包的 2.75mm —— 0 = 打满整张，结尾 FF 找不到缝 → 逐张往上偏。
   check("默认 footMargin=2.75（= 官方 218/240 行；0 会多张逐张往上偏）",
     cfg.footMargin === 2.75, String(cfg.footMargin));
-  check("默认 topShiftMm=0（内容整体下移量，抵消固定偏上）",
-    cfg.topShiftMm === 0, String(cfg.topShiftMm));
+  check("默认 topShiftMm=1.5（内容居中：上下留白对称、落标签正中）",
+    cfg.topShiftMm === 1.5, String(cfg.topShiftMm));
   const src = fs.readFileSync(SRC, "utf8");
   check("旧存档迁移：cfgRev 不一致时强制重置发送开关与版式参数",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 6;/.test(src) &&
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 7;/.test(src) &&
       /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src) &&
       /cfg\.rewindAfter = false;/.test(src) && /cfg\.footMargin = 2\.75;/.test(src) &&
-      /cfg\.topShiftMm = 0;/.test(src));
+      /cfg\.topShiftMm = 1\.5;/.test(src));
   check("留白下限 FOOT_MIN_MM 有常量（面板红字与信息行共用同一个判据）",
     /const FOOT_MIN_MM = 2;/.test(src));
 }

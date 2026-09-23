@@ -619,6 +619,24 @@ check("排序不会改动原数组（只返回新数组）",
   sortPool.map((s) => s.id).join(",") === "3,1,2", sortPool.map((s) => s.id).join(","));
 state.spoolSort = { key: "id", dir: "asc" };
 
+// 2026-09-22 反馈：用完的盘（余量 ≤ 0）恒排最后 —— 任何排序键、升降序都不变，
+// 不然默认按 ID 排时最早登记的那批空盘正好霸占列表最前面。
+const poolEmpty = [
+  { id: 1, remaining_weight: 0, price: 5 },
+  { id: 2, remaining_weight: 500, price: 10 },
+  { id: 3, remaining_weight: 0, price: 99 },
+  { id: 4, remaining_weight: 200, price: 1 },
+];
+state.spoolSort = { key: "id", dir: "asc" };
+check("用完的盘恒排最后（默认 ID 升序）",
+  sortSpools(poolEmpty).map((s) => s.id).join(",") === "2,4,1,3",
+  sortSpools(poolEmpty).map((s) => s.id).join(","));
+state.spoolSort = { key: "price", dir: "desc" };
+check("用完的盘恒排最后（价格降序也一样）",
+  sortSpools(poolEmpty).map((s) => s.id).join(",") === "2,4,3,1",
+  sortSpools(poolEmpty).map((s) => s.id).join(","));
+state.spoolSort = { key: "id", dir: "asc" };
+
 // ── 11. 料盘行里的快捷入口 + 打印机布局 ─────────────────────────
 console.log("== 料盘行操作 / 打印机布局（源码级） ==");
 
@@ -790,6 +808,16 @@ check("当前正绑着的那盘归档料要保留（否则弹窗看着像绑定�
   bindCandidates(3).map((s) => s.id).join(",") === "1,3",
   bindCandidates(3).map((s) => s.id).join(","));
 
+// 2026-09-22 反馈：槽位绑定候选里用完的盘也排最后（和库存页同一条规则）
+state.spools = [
+  { id: 1, name: "在用", archived: false, remaining_weight: 100 },
+  { id: 2, name: "空盘", archived: false, remaining_weight: 0 },
+  { id: 3, name: "半盘", archived: false, remaining_weight: 300 },
+];
+check("绑定候选里用完的盘排最后",
+  bindCandidates(0).map((s) => s.id).join(",") === "1,3,2",
+  bindCandidates(0).map((s) => s.id).join(","));
+
 // 源码级：料盘列表不能在「只进过仪表盘」时缺席
 check("启动（enterApp）就把料盘列表拉回来，不再只靠进库存页触发",
   /await loadSpools\(\)\.catch/.test(appSrc) && /await loadSpools\(\)\.catch/.test(
@@ -797,6 +825,12 @@ check("启动（enterApp）就把料盘列表拉回来，不再只靠进库存�
   "enterApp 里没看到 loadSpools");
 check("槽位弹窗在列表为空时会自己补拉一次",
   /if \(!\(S\.spools \|\| \[\]\)\.length\) ensureSpoolOptions\(boundId\)/.test(appSrc));
+// 2026-09-22 反馈：删「按槽位信息建料盘」（没什么用还碍事）；
+// 「去料材列表」改成「查看绑定耗材」—— 直接打开这个槽位绑着的那盘料的详情
+check("槽位弹窗不再有「按槽位信息建料盘」按钮",
+  !/按槽位信息建料盘/.test(appSrc));
+check("槽位弹窗「查看绑定耗材」直接跳到绑定的那盘料（不进列表页）",
+  /openSpoolDetail\(\$\{boundId\}\)/.test(appSrc) && !/去料材列表|去材料列表/.test(appSrc));
 check("bind= 深链也会确保料盘列表已加载（与 spool= 分支口径一致）",
   /loadPrinters\(\)\.catch\(\(\) => \{\}\);\s*\/\/[^\n]*\n\s*if \(!\(S\.spools \|\| \[\]\)\.length\) await loadSpools/.test(appSrc)
   || (appSrc.match(/if \(!\(S\.spools \|\| \[\]\)\.length\) await loadSpools\(\)\.catch/g) || []).length >= 2,
@@ -1262,8 +1296,10 @@ check("弹窗里候选默认全列出来（不预筛，点开就像个普通下�
   (moveList.match(/pick-item/g) || []).length === 4, `候选数=${(moveList.match(/pick-item/g) || []).length}`);
 check("归档的料盘不进候选（不能把消耗转到已归档的盘上）",
   !/已归档的盘/.test(moveList), moveList.slice(0, 200));
-check("打开时默认选中第一盘并在提示里写明选了谁",
-  state.moveTargetId === 1 && /魔创 PLA 天蓝色/.test(movePicker),
+// 2026-09-22 反馈后候选里用完的盘排最后 —— 默认选中值也跟着变成第一个**有料**的盘
+// （把消耗转到一盘 0 g 的空盘上本来就没意义，以前默认偏偏选中它）。
+check("打开时默认选中第一个有料的候选并在提示里写明选了谁",
+  state.moveTargetId === 2 && /大简 PETG-HT 工程黑/.test(movePicker),
   `id=${state.moveTargetId} picked=${movePicker}`);
 check("输入框初始是空的（不能把选中项当搜索词填进去，那样会把别的候选滤掉）",
   (sandbox.document.getElementById("moveTargetSearch").value || "") === "",
