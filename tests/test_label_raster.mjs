@@ -90,12 +90,16 @@ function testDefaultCfgSafe() {
     cfg.footMargin === 2.75, String(cfg.footMargin));
   check("默认 topShiftMm=1.5（内容居中：上下留白对称、落标签正中）",
     cfg.topShiftMm === 1.5, String(cfg.topShiftMm));
+  // 0.12.32：位图补足整节距默认开 —— 本机实测 FF(0x0c) 不驱动走纸，每份 218 行 + FF =
+  //   固定欠走 2.75mm/张（连打节距 27.1~27.25mm 实证），节距必须由位图行数自己凑满。
+  check("默认 fullPitch=true（位图补足整节距，走纸不靠 FF）",
+    cfg.fullPitch === true, String(cfg.fullPitch));
   const src = fs.readFileSync(SRC, "utf8");
   check("旧存档迁移：cfgRev 不一致时强制重置发送开关与版式参数",
-    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 7;/.test(src) &&
+    /cfgRev !== CFG_REV/.test(src) && /const CFG_REV = 8;/.test(src) &&
       /cfg\.headWaitMs = 0;/.test(src) && /cfg\.perCopyPos = false;/.test(src) &&
       /cfg\.rewindAfter = false;/.test(src) && /cfg\.footMargin = 2\.75;/.test(src) &&
-      /cfg\.topShiftMm = 1\.5;/.test(src));
+      /cfg\.topShiftMm = 1\.5;/.test(src) && /cfg\.fullPitch = true;/.test(src));
   check("留白下限 FOOT_MIN_MM 有常量（面板红字与信息行共用同一个判据）",
     /const FOOT_MIN_MM = 2;/.test(src));
 }
@@ -727,6 +731,61 @@ async function testDialogHtml() {
   }
 }
 
+/* ── 4c. 位图补足整节距（0.12.32） ─────────────────────────── */
+// 根因：本机实测 FF(0x0c) 不驱动走纸（单发两轮 _OK_ 纸不动；连打节距 27.1~27.25mm ≈
+//       218 行位图自身高度）。每份 218 行 + 靠 FF 补最后 2.75mm = 每张固定欠走 2.75mm。
+// 修法：fullPitch=true（默认）时每份在内容位图后补全 0 空白行，光栅走纸自己凑满整节距。
+function testFullPitch() {
+  console.log("== 位图补足整节距（0.12.32） ==");
+  const BPR = 52;
+  const rows218 = rasterRowsFor(30, 2.75, 203); // 218
+  const raster = mkRaster(rows218, BPR, (y) => {
+    const row = new Uint8Array(BPR);
+    if (y % 30 === 0) row[2] = 0xff;
+    return row;
+  });
+  const cfg = {
+    copies: 2, hMm: 30, dpi: 203, resetFirst: false, blankSkip: false, bandRows: 0,
+    fullPitch: true,
+  };
+  const job = buildEscPosJob(raster, cfg);
+  const ops = parseJob(job);
+  const rasters = ops.filter((o) => o.op === "raster");
+  const ffs = ops.filter((o) => o.op === "ff");
+  check("补垫后每份 2 条光栅（218 内容 + 22 空白），2 份共 4 条",
+    rasters.length === 4, String(rasters.length));
+  check("每份光栅行数 = 218 + 22 = 240（= 30.00mm 整节距）",
+    rasters.every((r, i) => r.y === (i % 2 === 0 ? 218 : 22)),
+    rasters.map((r) => r.y).join(","));
+  check("每份仍以 FF 收尾（维持与官方抓包同构的块尾；本机实测它走 0，不承担定位）",
+    ffs.length === 2, String(ffs.length));
+  const padOps = rasters.filter((r) => r.y === 22);
+  check("补垫行全为空白（数据字节和 = 0）",
+    padOps.length === 2 && padOps.every((r) => r.sum === 0),
+    padOps.map((r) => r.sum).join(","));
+  // 总走纸行数 = 每份 240 行 × 2 = 480；这是「连打节距 = 30mm」的直接来源
+  const feedRows = rasters.reduce((a, r) => a + r.y, 0);
+  check("两份总光栅行数 = 480（240 × 2，节距完全由位图决定）",
+    feedRows === 480, String(feedRows));
+  // 关掉 fullPitch → 回到 0.12.31 形态（每份只有内容位图 + FF）
+  const old = buildEscPosJob(raster, { ...cfg, fullPitch: false });
+  const oldOps = parseJob(old);
+  check("关掉 fullPitch → 回旧形态：每份 1 条 218 行光栅 + 1 条 FF",
+    oldOps.filter((o) => o.op === "raster").length === 2 &&
+      oldOps.every((o) => o.op !== "raster" || o.y === 218),
+    JSON.stringify(oldOps.map((o) => [o.op, o.y || ""])));
+  // cfg 不带 hMm/dpi（老调用方/测试里的小光栅）→ 不补垫，行为不变
+  const tiny = mkRaster(2, 2, (y) => {
+    const row = new Uint8Array(2);
+    row[0] = 0xaa + y;
+    return row;
+  });
+  const tinyJob = buildEscPosJob(tiny, { copies: 1, fullPitch: true, blankSkip: false, bandRows: 0 });
+  check("cfg 缺 hMm/dpi 时不补垫（小光栅作业长度不变）",
+    parseJob(tinyJob).filter((o) => o.op === "raster").length === 1,
+    String(parseJob(tinyJob).length));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testDefaultCfgSafe();
@@ -737,6 +796,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testJobParts();
   testRasterCommands();
   testFootMargin();
+  testFullPitch();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {

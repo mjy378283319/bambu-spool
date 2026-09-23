@@ -143,7 +143,11 @@
   // rev 7（0.12.30 后续）：把「内容下移」默认从 0 提到 1.5mm —— 版式把有效高度 27.25mm
   //   的内容块贴在标签最上面 27.25mm（底部留 2.75mm 留白），导致内容整体偏上约 1.5mm；
   //   默认 1.5mm 让内容块上下留白对称、落标签正中（用户 09-22 要求「内容在中间」）。
-  const CFG_REV = 7;
+  // rev 8（0.12.32）：新增「位图补足整节距」并默认开 —— 本机实测 FF(0x0c) 根本不驱动走纸
+  //   （单发两轮回 _OK_ 纸不动；连打节距 27.1~27.25mm ≈ 218 行位图自身高度，欠的正是留白
+  //   那截），节距的另外 2.75mm 不能再押在 FF 上。勾不勾「每份重新定位」/改不改份间隔都
+  //   分毫不变，证明欠走纸是结构性的 → 改成每份补发空白位图行凑满整节距（见 buildJobParts）。
+  const CFG_REV = 8;
 
   /** 底部留白的下限（mm）。低于它 = 位图打满整张标签，打印头停在标签边缘/缝上，
    *  结尾 FF 的间隙定位就失准 → 多张连打逐张往上偏。
@@ -204,6 +208,14 @@
       //   （同一轮实测里单发 `setp 01 + FF×2 / FF×3` 也都不走纸，只回 `_OK_`。）
       //   所以「间隙学习不浪费贴纸」这件事在这台机器上做不到，功能降级为实验、默认关。
       rewindAfter: false,
+      // fullPitch = 位图补足整节距。默认 **开**（0.12.32）：内容位图（218 行 = 27.25mm）
+      //   之后每份再补发一段空白位图行，把每份的光栅走纸凑满整节距（50×30 → 240 行 = 30.00mm）。
+      //   动机：本机实测结尾 FF(0x0c) 只回 _OK_ 不驱动走纸（单发两轮 + 连打节距 27.1~27.25mm
+      //   三线证据），靠 FF 补最后 2.75mm 等于**每张固定欠走 2.75mm** → 逐张往上爬、勾
+      //   「每份重新定位」/调大份间隔都分毫不变（09-23 实测）。补空白行 = 走纸全部由光栅
+      //   决定，不依赖传感器找缝、也不依赖 FF。内容区不动，只是尾部多一段全 0 行；
+      //   比改用 ESC J（本机实测会断链）安全得多。
+      fullPitch: true,
       // topShiftMm = 内容整体下移（mm）：版式整体（二维码 + 文字 + 页脚）往下挪这么多，
       //   打印长度不变。用来抵消「打出来内容偏上」这种固定偏移 —— 那是纸位对齐的
       //   固定误差，不是版式问题，改留白是改不掉的。0.25mm 一档，203dpi 下 1 点 ≈ 0.125mm。
@@ -236,8 +248,10 @@
       // rev 6：留白回 2.75（官方同款）。用户存档里的 0 会让「多张逐张往上偏」这一条
       // bug 在升级后**照样复现**——不重置等于没升。
       // rev 7：内容下移回 1.5（居中）。用户存档里的 0 会让内容贴在标签上沿、整体偏上。
+      // rev 8：位图补足整节距回开。旧存档里的 false 会让「每份欠走 2.75mm」在升级后照样复现。
       cfg.footMargin = 2.75;
       cfg.topShiftMm = 1.5;
+      cfg.fullPitch = true;
       cfg.cfgRev = CFG_REV;
     }
     LABEL.cfg = cfg;
@@ -600,17 +614,42 @@
     if (gsP) head.push(Uint8Array.from([0x1d, 0x50, 0xcb, 0x00, 0xcb, 0x00]));
 
     const segs = rasterCommands(raster, cfg);
+    // fullPitch（位图补足整节距）：内容位图后每份再补一段**全 0 空白行**，把光栅走纸凑满
+    //   整节距（如 50×30：218 行内容 + 22 行空白 = 240 行 = 30.00mm）。这样份与份的间距
+    //   完全由位图行数决定 —— 本机实测 FF 不驱动走纸（0.12.29 回退定位实验 + 0.12.32 前的
+    //   连打节距 27.1~27.25mm ≈ 218 行高度），靠它补最后 2.75mm 就是每张固定欠走。
+    //   肯定式判断 + 防御：cfg 里没有 hMm/dpi（测试里的小光栅）或算不出正垫行时一律不补，
+    //   保持旧形态。
+    let padSegs = null;
+    if (cfg && cfg.fullPitch === true) {
+      const pitchRows = Math.round(mm2dot(Number(cfg.hMm), Number(cfg.dpi)));
+      const padRows = pitchRows - raster.heightDots;
+      if (Number.isFinite(pitchRows) && padRows > 0 && pitchRows <= 4096) {
+        padSegs = rasterCommands(
+          {
+            bytes: new Uint8Array(padRows * raster.bytesPerRow),
+            widthDots: raster.widthDots,
+            heightDots: padRows,
+            bytesPerRow: raster.bytesPerRow,
+          },
+          cfg
+        );
+      }
+    }
     const copies = [];
     const n = Math.max(1, Math.min(50, cfg.copies || 1));
     for (let c = 0; c < n; c++) {
       const one = [];
       if (c > 0 && perCopy) one.push(labelModeBytes());
       for (const s of segs) one.push(s);
+      if (padSegs) for (const s of padSegs) one.push(s);
       // FF (0x0c)：间隙走纸到下一标签起点。
       // 汉码官方抓包（50×30 ×3 份，10685 字节）确认：每份标签逐字节相同，块尾就是单个 0c。
       // 那份流每份 218 行（27.25mm）而不是打满 240 行 —— 留白让打印头停在标签面上，
       // 间隙传感器随即看到前方有缝，FF 才能干净地定位到下一张起点；打满 240 行的头停在
       // 标签边缘/缝里，FF 判定失准 → 逐张累积偏移。ESC d n 那种固定行数进给已弃用。
+      // ⚠️ 0.12.32 修正：fullPitch 开（默认）时这份位图已含 240 行 = 整节距，本机实测 FF
+      // 走 0，留着它只是维持与官方同构的块尾结构，不再承担定位职责。
       one.push(labelFeedBytes());
       copies.push(concatBytes(one));
     }
@@ -951,7 +990,9 @@
         info.textContent =
           Math.round(cfg.wMm) + "×" + Math.round(cfg.hMm) + " mm · " + cfg.dpi + " dpi · " +
           raster.widthDots + "×" + raster.heightDots + " 点 · 位图 " + bytes + " 字节" +
-          " · 底部留白 " + margin + " mm（" + raster.heightDots + "/" + fullRows + " 行）" +
+          " · 底部留白 " + margin + " mm（" + raster.heightDots +
+          (cfg.fullPitch === true ? "+补" + Math.max(0, fullRows - raster.heightDots) : "") +
+          "/" + fullRows + " 行）" +
           (shift ? " · 内容下移 " + shift + " mm" : "") +
           // 留白不足就写进这一行：截图即可自证，不用去翻表单。
           (margin < FOOT_MIN_MM ? " · ⚠ 留白不足 " + FOOT_MIN_MM + "mm（多张会逐张往上偏）" : "") +
@@ -1382,6 +1423,10 @@
           '<label class="field"><span>多份间隔 ms</span><input type="number" id="labelCopyDelay" min="0" max="10000" step="100" value="' +
             (cfg.copyDelayMs == null ? 1500 : cfg.copyDelayMs) +
             '" onchange="labelPickCopyDelay(this.value)" /></label>' +
+          '<label class="field check"><input type="checkbox" id="labelFullPitch"' +
+            (cfg.fullPitch === true ? " checked" : "") + ' onchange="labelPickFullPitch(this.checked)" />' +
+            "<span>位图补足整节距（默认开）：每份补发空白位图行凑满 240 行 = 30mm，" +
+            "份间走纸由位图决定 —— 本机实测结尾 FF 不走纸，靠它补留白那截会每张欠走 2.75mm</span></label>" +
           '<label class="field check"><input type="checkbox" id="labelResetFirst"' +
             (cfg.resetFirst ? " checked" : "") + ' onchange="labelPickResetFirst(this.checked)" />' +
             "<span>打印前复位打印机（发 ESC @，默认开；去掉后实测发送会中途停住、打不出来）</span></label>" +
@@ -1423,10 +1468,11 @@
         "它必然会吃掉 2~4 张贴纸，这是打印机自己的机械动作，改不了。" +
         "（以前想用「回退定位」把纸退回来省纸，真机实测<b>纸不动</b> —— 0.12.30 已把那个按钮和" +
         "「走纸测试」一起删掉：单发 <code>0x0c</code> 这台机器只回 <code>_OK_</code> 不驱动走纸。）</li>" +
-        "<li><b>多张连打逐张往上偏</b>（第一张正、第三张少了第一行字）⇒ 几乎总是<b>「底部留白 mm」太小</b>。" +
-        "留白 0 = 位图把整张标签打满，打印头正好停在标签边缘的缝上，结尾 <code>FF</code> 找不到可用于" +
-        "定位的缝 → 每张少走约 2mm 累积。汉码官方每张只发 218 行（30mm 标签留 2.75mm）就是为了这个。" +
-        "<b>保持 ≥ 2.5mm，别调 0</b>；留白 <2mm 时上面那行参数下面会出红字提示。</li>" +
+        "<li><b>多张连打逐张往上偏</b>（第一张正、后面每张往上爬、爬幅固定）⇒ 0.12.32 已定位根因：" +
+        "这台机器结尾 <code>FF</code>(0x0c) <b>根本不驱动走纸</b>（单发只回 <code>_OK_</code>；连打节距实测 ≈ 218 行位图" +
+        "自身高度），旧版每份 218 行 + 靠 FF 补最后 2.75mm = <b>每张固定欠走 2.75mm</b>。" +
+        "修法就是上面的「<b>位图补足整节距</b>」（默认开）：每份补空白行凑满 240 行 = 30.00mm，" +
+        "份间走纸由位图行数决定、不再依赖 FF。若关掉它复现串位，恰好反过来证明根因。</li>" +
         "<li><b>整张内容偏上 / 偏下</b>（每张都一样、不累积）⇒ 这是固定纸位误差，用「<b>内容下移 mm</b>」" +
         "补偿：偏上就加、偏下就减，只挪内容、不打印长度，所以不会影响走纸。" +
         "默认已是 1.5mm（内容上下留白对称、落标签正中；09-22 按你要求做的居中）；" +
@@ -1577,6 +1623,12 @@
     saveCfg();
     labelRefresh();
   }
+  function labelPickFullPitch(checked) {
+    const cfg = loadCfg();
+    cfg.fullPitch = !!checked;
+    saveCfg();
+    labelRefresh();
+  }
 
   /** 官方同款分带：每 10 行一条 GS v 0（对齐汉码抓包 22 块 × 10 行）。 */
   function labelPickBandRows(checked) {
@@ -1633,6 +1685,7 @@
     labelPickCopyDelay,
     labelPickResetFirst,
     labelPickPerCopyPos,
+    labelPickFullPitch,
     labelPickRewind,
     labelPickBandRows,
     labelPickBlankSkip,
