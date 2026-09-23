@@ -1092,6 +1092,162 @@
     }
   }
 
+  /* ── USB / 官方驱动通道（汉印 HMarkService）───────────────────────
+   *
+   * 为什么要有第二条路（0.12.35）：BLE 直发 ESC/POS 时这台固件「不按全 0 垫行走纸、
+   * FF 走 0」，多份内容逐张往上爬约 2.4mm —— 0.12.31~0.12.34 连改三次都没稳住。
+   * 官方网页走的是「Windows 打印池 + 汉印驱动」，定位由驱动负责，实测 PrintNum=3 不串位。
+   * 这条路的前提：本机装了「汉印 HMark Services」，且打印机用 **USB** 接着。
+   */
+
+  var HMARK_URL = "ws://127.0.0.1:9004/";
+
+  /** 连本机 HMarkService。官方网页就是这么连的，浏览器原生 WebSocket 即可
+   *  （Node 的内置 WebSocket 反而会被 SuperSocket 1.6 拒掉，别照搬那套手写帧）。 */
+  function hmarkConnect() {
+    return new Promise(function (resolve, reject) {
+      var ws;
+      try {
+        ws = new WebSocket(HMARK_URL);
+      } catch (e) {
+        reject(new Error("无法创建连接：" + e.message));
+        return;
+      }
+      var timer = setTimeout(function () {
+        try { ws.close(); } catch (e) { /* ignore */ }
+        reject(new Error("连接超时：本机没装「汉印 HMark Services」或它没在运行"));
+      }, 5000);
+      ws.onopen = function () { clearTimeout(timer); resolve(ws); };
+      ws.onerror = function () {
+        clearTimeout(timer);
+        reject(new Error(
+          "连不上汉印打印服务（" + HMARK_URL + "）。确认本机装了「汉印 HMark Services」" +
+          "并且正在运行，打印机用 USB 接在本机"
+        ));
+      };
+    });
+  }
+
+  /** 发一条命令并等回包。
+   *  ★ 外层格式是「命令名 + 空格 + JSON」：`hmarkwebclient {…}`
+   *    —— SuperSocket 子协议的默认约定，不是 JSON 再包一层 key。这个错了服务端会静默不回。
+   *  回包形如 {"fun":"outputPrintting","code":200,"data":"output Success"}。 */
+  function hmarkCall(ws, fun, data, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        reject(new Error("打印服务无响应（" + fun + "）"));
+      }, timeoutMs || 30000);
+      ws.onmessage = function (ev) {
+        var o = null;
+        try { o = JSON.parse(ev.data); } catch (e) { o = null; }
+        if (!o) return;
+        if (o.fun && o.fun !== fun) return;   // 别的命令的回包，继续等
+        clearTimeout(timer);
+        resolve(o);
+      };
+      ws.send("hmarkwebclient " + JSON.stringify({ fun: fun, data: data }));
+    });
+  }
+
+  /** 从本机打印机列表里挑一台汉印的。用户选过就记住（存 localStorage）。 */
+  function hmarkPickPrinter(list) {
+    var names = [];
+    try { names = JSON.parse(list) || []; } catch (e) { names = []; }
+    if (!names.length) return "HPRT HM-T260LR";
+    var saved = "";
+    try { saved = localStorage.getItem("bambu.hmarkPrinter") || ""; } catch (e) { saved = ""; }
+    if (saved && names.indexOf(saved) >= 0) return saved;
+    for (var i = 0; i < names.length; i++) {
+      if (/HPRT|HM-|hprt/i.test(names[i])) return names[i];
+    }
+    return names[0];
+  }
+
+  /** 组装 outputPrintting 的文档。
+   *
+   *  ★★ 结构逐字照抄 2026-09-24 从本机 HMarkService 日志里抓到的 **官方网页真实报文**。
+   *     别再照着反编译源码「猜」—— 猜了几十个变体全是 404。与猜测版本的关键差异：
+   *       · 根是 PrtLable（不是 LabelData），还带着 ?xml 声明头和 "#comment":[]；
+   *       · ObjectList 直接挂在 PrtLable 下、是 **数组**，中间没有 GraphicsList 这一层；
+   *       · LabelPage 的 MeasureUnit/LabelShape/Height/Width 是 XML **属性**（@ 前缀），
+   *         其余（Rows/Columns/各 Margin/PrinterName/PrintNum…）是子元素；
+   *       · AreaSize 与 DrawObject 的宽高用「4 单位/mm」（官方 50×30mm → 200×120）；
+   *       · Image 元素里放 **裸 base64 PNG**，不能带 data:image/png;base64, 前缀。
+   */
+  function hmarkDoc(b64, printer, copies, unitW, unitH, cfg) {
+    var wMm = Number(cfg.wMm) || 50;
+    var hMm = Number(cfg.hMm) || 30;
+    return {
+      "?xml": { "@version": "1.0", "@encoding": "utf-8" },
+      PrtLable: {
+        "#comment": [],
+        FileInfo: { Creator: { "@Platform": "Web", "@Version": "V2.6.4" } },
+        PictureArea: {
+          AreaSize: { "@Width": Math.round(wMm * 4), "@Height": Math.round(hMm * 4) },
+          LabelPage: {
+            "@MeasureUnit": "Mm",
+            "@LabelShape": "Rectangle",
+            "@Height": hMm.toFixed(3),
+            "@Width": wMm.toFixed(3),
+            Rows: 1, Columns: 1, RowSpacing: 0, ColumnSpacing: 0,
+            LeftMargin: 0, RightMargin: 0, UpperMargin: 0, LowerMargin: 0,
+            LabelWidth: wMm.toFixed(3), LabelHeight: hMm.toFixed(3),
+            Background: "", PrintBackground: "False",
+            PrinterName: printer,
+            PrintNum: Math.max(1, Number(copies) || 1)
+          }
+        },
+        ObjectList: [{
+          "@Count": 1, page: 1, row: 1, cloumn: 1,
+          DrawObject: [{
+            Id: String(Date.now() % 100000000), zOrder: 0, Name: "label",
+            OriginalImage: "", Mirror: "None", Inverse: "False", Halftone: "None",
+            ISParticipating: "True", ImageFilePath: "", Image: b64,
+            StartX: 0, StartY: 0, Width: unitW, Height: unitH, AngleRound: 0,
+            Data: null, Type: "Image", Color: "-16777216", PenWidth: 0,
+            DashStyle: 0, FillColor: "-16777216", Lock: "False"
+          }]
+        }]
+      }
+    };
+  }
+
+  /** USB / 驱动打印：把标签 PNG 交给本机汉印服务出纸。 */
+  async function labelPrintUsb() {
+    if (LABEL.busy) return;
+    LABEL.busy = true;
+    var ws = null;
+    try {
+      var cfg = loadCfg();
+      var canvas = await labelCanvas();
+      var dataUrl = canvas.toDataURL("image/png");
+      var b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+      var dpi = Number(cfg.dpi) || 203;
+      var mmPerDot = 25.4 / dpi;
+      // 图片绘制尺寸换算成「4 单位/mm」，与官方一致（50mm → 200）
+      var unitW = Math.round(canvas.width * mmPerDot * 4);
+      var unitH = Math.round(canvas.height * mmPerDot * 4);
+
+      toast("正在连接汉印打印服务…", "ok");
+      ws = await hmarkConnect();
+      var printers = await hmarkCall(ws, "getComputerPrinters", null, 8000);
+      var printer = hmarkPickPrinter(printers.data);
+      try { localStorage.setItem("bambu.hmarkPrinter", printer); } catch (e) { /* ignore */ }
+
+      var doc = hmarkDoc(b64, printer, cfg.copies, unitW, unitH, cfg);
+      var res = await hmarkCall(ws, "outputPrintting", doc, 60000);
+      if (Number(res.code) !== 200) {
+        throw new Error("打印失败（code " + res.code + "）：" + (res.data || "无说明"));
+      }
+      toast("已通过汉印驱动送到 " + printer + "（" + Math.max(1, Number(cfg.copies) || 1) + " 份）", "ok");
+    } catch (err) {
+      toast(err.message, "err");
+    } finally {
+      if (ws) { try { ws.close(); } catch (e) { /* ignore */ } }
+      LABEL.busy = false;
+    }
+  }
+
   /** 分块写入：作业头 →（等 headWaitMs）→ 位图，多份之间再等 copyDelayMs。
    *
    *  为什么不能一口气发完（0.12.25，本轮主问题的修法）：
@@ -1512,6 +1668,7 @@
         '<button onclick="labelDownload()">下载标签图</button>' +
         '<button onclick="labelExportJob()">导出作业(.bin)</button>' +
         '<button onclick="labelBleReset()">复位打印机</button>' +
+        '<button onclick="labelPrintUsb()">USB 打印（驱动）</button>' +
         '<button class="primary" onclick="labelPrintBle()">蓝牙打印</button>',
       true
     );
@@ -1690,6 +1847,7 @@
     labelDownload,
     labelExportJob,
     labelPrintBle,
+    labelPrintUsb,
     labelPickFootMargin,
     labelPickTopShift,
     labelPickHeadWait,

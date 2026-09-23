@@ -187,7 +187,7 @@ const BLANK_ROW_52 = () => new Uint8Array(52);
 // 少一个的表现是「按钮点了没反应」，而 JS 控制台只报一个 ReferenceError，
 // 很容易漏 —— 所以这里按名单逐个点名。
 const REQUIRED_HANDLERS = [
-  "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle",
+  "openLabelDialog", "labelRefresh", "labelDownload", "labelExportJob", "labelPrintBle", "labelPrintUsb",
   "labelBleProbe", "labelBleCalibrate", "labelBleReset", "labelBleRaw", "labelBleDisconnect", "labelBleConnect",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
   "labelPickDensity", "labelPickCopies", "labelPickFootMargin", "labelPickTopShift", "labelPickResetFirst",
@@ -799,6 +799,38 @@ function testFullPitch() {
     /Object\.assign\(\{\}, cfg, \{ blankSkip: false \}\)/.test(src));
 }
 
+/** 取某个顶层函数的函数体（到下一个 "\n  }" 为止）。 */
+function fnBody(src, name) {
+  const i = src.indexOf("function " + name + "(");
+  return i < 0 ? "" : src.slice(i, src.indexOf("\n  }", i) + 4);
+}
+
+/* ── N. USB / 驱动通道（汉印 HMarkService）───────────────────────
+ * 钉的是 2026-09-24 从官方网页**真实报文**里逐字抄下来的结构。
+ * 教训：照着反编译源码「猜」结构猜了几十个变体，全是 code:404 —— 而且猜错时
+ * 服务端**不报错**（异常被吞），只有正确/错误两种结果、没有任何线索。
+ * 所以这些细节必须在这里钉死，改坏了立刻红。
+ */
+function testHmarkUsb() {
+  const src = fs.readFileSync(SRC, "utf8");
+  const doc = fnBody(src, "hmarkDoc");   // 只看报文构造函数体，别被注释里的说明文字误伤
+  check("命令外层是「hmarkwebclient + 空格 + JSON」（SuperSocket 子协议约定，不是再包一层 key）",
+    /"hmarkwebclient " \+ JSON\.stringify/.test(src));
+  check("报文根是 PrtLable，且带 ?xml 声明头",
+    /"\?xml":\s*\{/.test(doc) && /PrtLable:\s*\{/.test(doc));
+  check("ObjectList 直接挂在 PrtLable 下、是数组（中间没有 GraphicsList 这层）",
+    /ObjectList:\s*\[\{/.test(doc) && !/GraphicsList/.test(doc));
+  check("LabelPage 的 MeasureUnit/LabelShape/Height/Width 是 XML 属性（@ 前缀）",
+    /"@MeasureUnit":\s*"Mm"/.test(doc) && /"@LabelShape"/.test(doc) &&
+      /"@Height":\s*hMm\.toFixed\(3\)/.test(doc));
+  check("Image 放裸 base64（不带 data:image/png 前缀）",
+    /Image:\s*b64/.test(doc) && !/data:image\/png/.test(doc));
+  check("宽高按「4 单位/mm」换算（官方 50mm → 200）", /mmPerDot\s*\*\s*4/.test(src));
+  check("面板上有 USB 打印按钮", /labelPrintUsb\(\)/.test(src));
+  check("打印结束必定关 WebSocket 并释放 busy 锁",
+    /finally\s*\{[\s\S]{0,300}ws\.close\(\)[\s\S]{0,200}LABEL\.busy\s*=\s*false/.test(src));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testDefaultCfgSafe();
@@ -810,6 +842,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testRasterCommands();
   testFootMargin();
   testFullPitch();
+  testHmarkUsb();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {
