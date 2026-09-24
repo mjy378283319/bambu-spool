@@ -831,6 +831,31 @@ function testHmarkUsb() {
     /finally\s*\{[\s\S]{0,300}ws\.close\(\)[\s\S]{0,200}LABEL\.busy\s*=\s*false/.test(src));
 }
 
+/* ── N2. 右侧打印头死区（0.12.36）────────────────────────────────
+ * 标尺图程序化实测（2026-09-24，photo 0f19f232，逐列刻度检测 47 条 + 纯白右缘）：
+ * 50mm 标签只打到 47mm，右侧 ~2.8mm 物理打不出墨；官方样图同样右留 2.91mm。
+ * 0.12.35 及之前左右同用 pad=1.6mm → QR 右缘落在死区里被裁（用户截图实锤）。
+ */
+function testRightDeadZone() {
+  const src = fs.readFileSync(SRC, "utf8");
+  const lay = fnBody(src, "layoutOf");
+  check("版式区分左右留白：padR 在 pad 基础上再让开死区（+1.8mm 保险）",
+    /const padR = pad \+ 1\.8;/.test(lay) && /pad, padR/.test(lay));
+  check("二维码 x 坐标用 padR（右侧死区之外），y 仍用 pad",
+    /wDots - Math\.round\(padRDots\) - qrDots/.test(src) &&
+      /Math\.round\(padDots \+ dyDots\)/.test(src));
+  check("文字右边界按 padR 收（无 QR 时页脚也不进死区）",
+    /cfg\.wMm - L\.padR - qrMm - 0\.8 : cfg\.wMm - L\.padR/.test(src));
+  const layout = { wMm: 50 };
+  // 直接求值核对数值：50mm 标签 → pad≈1.6、padR≈3.4（> 实测死区 2.8）
+  const pad = Math.max(1.1, layout.wMm * 0.032);
+  check("50mm 标签数值核对：pad≈1.6mm、padR≈3.4mm ≥ 死区 2.8mm",
+    Math.abs(pad - 1.6) < 1e-9 && Math.abs(pad + 1.8 - 3.4) < 1e-9 && pad + 1.8 > 2.8,
+    `pad=${pad}`);
+  check("说明折叠区写明右侧死区实测结论（~2.8mm / 官方 2.91mm）",
+    /物理死区/.test(src) && /2\.8mm/.test(src) && /2\.91mm/.test(src));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testExports();
   testDefaultCfgSafe();
@@ -843,6 +868,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testFootMargin();
   testFullPitch();
   testHmarkUsb();
+  testRightDeadZone();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {

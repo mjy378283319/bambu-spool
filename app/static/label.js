@@ -274,8 +274,14 @@
    *  行数少了间距自动变大也不会留出一大块空白（固定几档 y 值时，
    *  副行省略后会空一块）。 */
   function layoutOf(wMm, hMm) {
+    const pad = Math.max(1.1, wMm * 0.032);
+    // ★ 打印头右侧有一段**物理打不出来的死区**（标尺图实测：50mm 标签只打到 47mm，
+    //   最后 ~2.8mm 纯白无墨；汉印官方样图同样在右侧留 2.91mm 白边 —— 互相印证）。
+    //   右侧留白 = 左侧 pad + 1.8mm 保险，确保二维码/页脚不越界被裁竖线。
+    //   （0.12.35 之前左右同用 1.6mm，QR 右缘落在死区里，用户截图右竖线被裁。）
+    const padR = pad + 1.8;
     return {
-      pad: Math.max(1.1, wMm * 0.032),
+      pad, padR,
       top: hMm * 0.155,  // 第一行文字基线
       foot: hMm * 0.91,  // 页脚基线（固定在最下面，不参与均分）
     };
@@ -411,16 +417,18 @@
     const probe = await loadQrImage(spool.id, 4);
     const modules = probe ? Math.round(probe.naturalWidth / 4) : 0;
     const padDots = mm2dot(L.pad, dpi);
+    const padRDots = mm2dot(L.padR, dpi);
     const targetDots = Math.min(wDots * QR_WIDTH_RATIO, Math.max(8, hDots - padDots * 2 - dyDots));
     const box = qrBoxFor(targetDots, modules);
     const qr = (probe && box === 4 ? probe : await loadQrImage(spool.id, box)) || probe;
     const qrDots = qr ? qr.naturalWidth : 0;
     const qrMm = qrDots / mm2dot(1, dpi);
     if (qr) {
-      ctx.drawImage(qr, wDots - Math.round(padDots) - qrDots, Math.round(padDots + dyDots));
+      // x 用 padR：右侧死区（实测 ~2.8mm）之外才打得出墨
+      ctx.drawImage(qr, wDots - Math.round(padRDots) - qrDots, Math.round(padDots + dyDots));
     }
     // 文字列的右边界：让开二维码
-    const textMax = (qr ? cfg.wMm - L.pad - qrMm - 0.8 : cfg.wMm - L.pad) - L.pad;
+    const textMax = (qr ? cfg.wMm - L.padR - qrMm - 0.8 : cfg.wMm - L.padR) - L.pad;
 
     const textX = L.pad;
     const name = String(spool.name || "");
@@ -1650,8 +1658,13 @@
         "<li><b>打印期间别点其它蓝牙按钮</b>（查询状态 / 复位 / 连接 / 断开）：" +
         "这台机器容不下并发 GATT 操作，两条写入砸同一个特征会当场把链路掐了" +
         "（表现为进度停在某个百分比、蓝牙也掉了）。0.12.27 起打印期间这些按钮会被自动挡下并提示。</li>" +
-        "<li><b>打不出内容</b>：汉印 T260LR 用私有「汉码协议」，这台机器没网口、USB 只充电，所以只能走蓝牙。" +
-        "先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
+        "<li><b>右侧竖线 / 二维码右缘被裁</b> ⇒ 打印头右侧有一段<b>物理死区</b>：标尺图实测 50mm 标签" +
+        "只打到 47mm，最后 ~2.8mm 打不出墨（汉印官方样图同样右留 2.91mm 白边）。" +
+        "0.12.36 起版式右侧留白已自动加上这段（左侧 1.6 + 1.8mm），旧版打的东西别拿来判断版式。</li>" +
+        "<li><b>打不出内容</b>：汉印 T260LR 用私有「汉码协议」。蓝牙走 Web Bluetooth 直发；" +
+        "USB 数据口由本机 <b>汉印 HMarkService 服务</b>（官方驱动自带，ws://127.0.0.1:9004）代打，" +
+        "点「USB 打印（驱动）」即可，需要电脑上装着汉印官方驱动/网页打印插件（服务没起时按钮会连不上）。</li>" +
+        "<li><b>蓝牙打不出内容</b>：先点「查询状态」看有没有回执（有回执说明链路通，可调浓度或换尺寸重试）；" +
         "完全没回执才是指令集不匹配 —— 「收发记录」里能看到实际发出的字节，" +
         "也可以在那里用「原始指令」手工试协议。</li>" +
         "<li><b>面板上找不到这里说到的某个旋钮 / 按钮，或版本看着旧</b>：先 <code>Ctrl+F5</code> 强刷一次，" +
