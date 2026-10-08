@@ -385,7 +385,7 @@
 
   /** 连本机 HMarkService。官方网页就是这么连的，浏览器原生 WebSocket 即可
    *  （Node 的内置 WebSocket 反而会被 SuperSocket 1.6 拒掉，别照搬那套手写帧）。 */
-  function hmarkConnect() {
+  function hmarkConnect(timeoutMs) {
     return new Promise(function (resolve, reject) {
       var ws;
       try {
@@ -397,7 +397,7 @@
       var timer = setTimeout(function () {
         try { ws.close(); } catch (e) { /* ignore */ }
         reject(new Error("连接超时：本机没装「汉印 HMark Services」或它没在运行"));
-      }, 5000);
+      }, timeoutMs || 5000);
       ws.onopen = function () { clearTimeout(timer); resolve(ws); };
       ws.onerror = function () {
         clearTimeout(timer);
@@ -430,18 +430,83 @@
     });
   }
 
-  /** 从本机打印机列表里挑一台汉印的。用户选过就记住（存 localStorage）。 */
-  function hmarkPickPrinter(list) {
+  /** 静默拉一次本机打印机列表。
+   *  读不到返回 **null**（不弹错）—— 面板上只是没法选，打印时仍会自动挑一台。
+   *  1.0.1：有了这个，对话框里才能把打印机摆出来给用户挑。 */
+  async function hmarkPrinterList() {
+    var ws = null;
+    try {
+      ws = await hmarkConnect(3000);
+      var res = await hmarkCall(ws, "getComputerPrinters", null, 5000);
+      var names = [];
+      try { names = JSON.parse(res.data) || []; } catch (e) { names = []; }
+      return Array.isArray(names) ? names : [];
+    } catch (err) {
+      return null;
+    } finally {
+      if (ws) { try { ws.close(); } catch (e) { /* ignore */ } }
+    }
+  }
+
+  /** 从本机打印机列表里挑一台。
+   *  wanted = 面板下拉里用户**手动指定**的名字（空 = 自动）。
+   *  返回 {name, auto}：auto=true 表示这台是程序挑的，打印失败可以放心忘掉重挑；
+   *  auto=false 是用户自己选的，失败也要保留他的选择。
+   *
+   *  ★ 1.0.1 为什么多返回一个 auto：10-08 家里电脑卡死的根因就是「程序挑错一台
+   *    然后把错名字永久记住」，分不清「谁挑的」就没法决定失败时要不要忘掉。 */
+  function hmarkPickPrinter(list, wanted) {
     var names = [];
     try { names = JSON.parse(list) || []; } catch (e) { names = []; }
-    if (!names.length) return "HPRT HM-T260LR";
+    // 用户在下拉里点名的那台**照用**，哪怕列表里已经没了（机器拔了/改名了）：
+    // 悄悄换成别的机器才是真危险（可能打到 PDF 虚拟打印机上），要换就让用户自己换。
+    if (wanted) return { name: wanted, auto: false };
+    if (!names.length) return { name: "HPRT HM-T260LR", auto: true };
     var saved = "";
     try { saved = localStorage.getItem("bambu.hmarkPrinter") || ""; } catch (e) { saved = ""; }
-    if (saved && names.indexOf(saved) >= 0) return saved;
+    if (saved && names.indexOf(saved) >= 0) return { name: saved, auto: true };
     for (var i = 0; i < names.length; i++) {
-      if (/HPRT|HM-|hprt/i.test(names[i])) return names[i];
+      if (/HPRT|HM-|hprt/i.test(names[i])) return { name: names[i], auto: true };
     }
-    return names[0];
+    return { name: names[0], auto: true };
+  }
+
+  /** 把本机打印机异步填进对话框的下拉。
+   *  ★ 1.0.1：以前打印机是**静默挑**的——挑哪台用户看不见、挑错了也没法改，
+   *    10-08 家里电脑就因此把错名字永久记住、永远卡在「正在连接」。
+   *    现在摆出来给用户看、给用户选；读不到列表只是没法选，不影响自动模式。 */
+  async function loadPrinterOptions() {
+    var saved = "";
+    try { saved = localStorage.getItem("bambu.hmarkPrinter") || ""; } catch (e) { saved = ""; }
+    var names = await hmarkPrinterList();
+    // 异步回来时对话框可能已经被关掉/重开，元素要重新取
+    var sel = document.getElementById("labelPrinter");
+    var hint = document.getElementById("labelPrinterHint");
+    if (!sel) return;
+
+    if (names === null) {
+      var keep = saved
+        ? '<option value="' + esc(saved) + '" selected>' + esc(saved) + "（上次用的）</option>"
+        : "";
+      sel.innerHTML = '<option value="">自动（读不到本机打印机）</option>' + keep;
+      if (hint) {
+        hint.textContent = "读不到本机打印机列表：确认装了「汉印 HMark Services」并在运行" +
+          "（打印时仍会自动挑一台）。";
+      }
+      return;
+    }
+    if (!names.length) {
+      sel.innerHTML = '<option value="">自动（本机没列出打印机）</option>';
+      if (hint) hint.textContent = "本机没列出任何打印机：先在 Windows 里装好汉印驱动。";
+      return;
+    }
+    sel.innerHTML =
+      '<option value="">自动（优先挑汉印）</option>' +
+      names.map(function (n) {
+        return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
+      }).join("");
+    if (saved && names.indexOf(saved) >= 0) sel.value = saved;
+    if (hint) hint.textContent = "";
   }
 
   /** 组装 outputPrintting 的文档。
@@ -498,6 +563,8 @@
     if (LABEL.busy) return;
     LABEL.busy = true;
     var ws = null;
+    var printer = "";
+    var autoPicked = true;
     try {
       var cfg = loadCfg();
       var canvas = await labelCanvas();
@@ -509,20 +576,39 @@
       var unitW = Math.round(canvas.width * mmPerDot * 4);
       var unitH = Math.round(canvas.height * mmPerDot * 4);
 
+      // 面板下拉里指定了哪台就用哪台；留「自动」才让代码去挑
+      var sel = document.getElementById("labelPrinter");
+      var wanted = sel ? String(sel.value || "") : "";
+
       toast("正在连接汉印打印服务…", "ok");
       ws = await hmarkConnect();
       var printers = await hmarkCall(ws, "getComputerPrinters", null, 8000);
-      var printer = hmarkPickPrinter(printers.data);
-      try { localStorage.setItem("bambu.hmarkPrinter", printer); } catch (e) { /* ignore */ }
+      var picked = hmarkPickPrinter(printers.data, wanted);
+      printer = picked.name;
+      autoPicked = picked.auto;
 
       var doc = hmarkDoc(b64, printer, cfg.copies, unitW, unitH, cfg);
       var res = await hmarkCall(ws, "outputPrintting", doc, 60000);
       if (Number(res.code) !== 200) {
         throw new Error("打印失败（code " + res.code + "）：" + (res.data || "无说明"));
       }
-      toast("已通过汉印驱动送到 " + printer + "（" + Math.max(1, Number(cfg.copies) || 1) + " 份）", "ok");
+      // ★ 只有**真的打成功了**才记住这台打印机。1.0.0 及以前是「挑完立刻存」，
+      //   挑错一次错名字就被永久记住，之后每次都卡在「正在连接」——
+      //   10-08 家里电脑就是这么卡死的（最后靠手删 localStorage 才恢复）。
+      try { localStorage.setItem("bambu.hmarkPrinter", printer); } catch (e) { /* ignore */ }
+      toast("已通过汉印驱动送到「" + printer + "」（" +
+        Math.max(1, Number(cfg.copies) || 1) + " 份）", "ok");
     } catch (err) {
-      toast(err.message, "err");
+      var msg = err.message;
+      if (autoPicked) {
+        // 程序自己挑的机器没打成 → 忘掉这个名字，下次重新挑
+        try { localStorage.removeItem("bambu.hmarkPrinter"); } catch (e) { /* ignore */ }
+      } else if (printer) {
+        msg += "（打印机「" + printer + "」，可在下拉里换一台）";
+      }
+      toast(msg, "err");
+      // 顺手刷新下拉，让用户能立刻换一台（刚清掉的名字也从选项里消失）
+      try { loadPrinterOptions(); } catch (e) { /* ignore */ }
     } finally {
       if (ws) { try { ws.close(); } catch (e) { /* ignore */ } }
       LABEL.busy = false;
@@ -599,6 +685,11 @@
           "</select></label>" +
           '<label class="field"><span>份数</span><input type="number" id="labelCopies" min="1" max="50" value="' +
             cfg.copies + '" onchange="labelPickCopies(this.value)" /></label>' +
+          // ★ 1.0.1：打印机摆出来让用户挑。以前是程序静默挑 + 挑完立刻记住，
+          //   挑错一次就永久卡住（10-08 家里电脑）。留「自动」= 交给程序挑汉印。
+          '<label class="field"><span>打印机</span><select id="labelPrinter" onchange="labelPickPrinter(this.value)">' +
+            '<option value="">自动（读取中…）</option></select></label>' +
+          '<div class="tiny muted" id="labelPrinterHint"></div>' +
         "</div>" +
         '<div class="label-side">' +
           '<div id="labelPreviewHost" class="label-preview"></div>' +
@@ -613,6 +704,9 @@
         "<li><b>点打印没反应 / 提示连不上服务</b> ⇒ 本机没装汉印官方驱动或服务没起：" +
         "确认装了「汉印 HMark Services」（网页打印插件），打印机 USB 接在本机。" +
         "手机浏览器打不了（服务只在电脑上），手机用「下载标签图」存相册后走汉码 App。</li>" +
+        "<li><b>一直卡在「正在连接」/ 打印失败</b> ⇒ 多半是<b>挑错了打印机</b>：" +
+        "在「打印机」下拉里直接选对本机那台汉印（选过就会记住）。" +
+        "留「自动」时程序会自己挑，挑错会立刻忘掉、下次重挑，不会像旧版那样记住错名字卡死。</li>" +
         "<li><b>右侧竖线 / 二维码右缘被裁</b> ⇒ 打印头右侧有一段<b>物理死区</b>：标尺图实测 50mm 标签" +
         "只打到 47mm，最后 ~2.8mm 打不出墨（汉印官方样图同样右留 2.91mm 白边）。" +
         "1.0.0 版式右侧留白已自动加上这段（左侧 1.6 + 1.8mm），旧版打的东西别拿来判断版式。</li>" +
@@ -635,6 +729,8 @@
     );
 
     labelRefresh();
+    // 打印机列表要从本机 9004 拉，异步填；不 await（对话框先出来再说）
+    loadPrinterOptions();
   }
 
   function labelPickSpool(value) {
@@ -693,10 +789,20 @@
     saveCfg();
   }
 
+  /** 打印机下拉：选了就记住，选「自动」就把记住的名字忘掉。 */
+  function labelPickPrinter(value) {
+    try {
+      if (value) localStorage.setItem("bambu.hmarkPrinter", value);
+      else localStorage.removeItem("bambu.hmarkPrinter");
+    } catch (err) {
+      /* 隐私模式下写不了，忽略 */
+    }
+  }
+
   /* ── 导出到全局（onclick 要用） ─────────────────────────── */
 
   // 无头测试用：把渲染暴露出来，便于在浏览器里直接核对版式结果。
-  window.labelDebug = { renderLabel, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor, runningVersion };
+  window.labelDebug = { renderLabel, loadCfg, mm2dot, layoutOf, qrBoxFor, dedupeAgainst, residualName, effHeightMm, rasterRowsFor, runningVersion, hmarkPickPrinter };
 
   Object.assign(window, {
     openLabelDialog,
@@ -709,5 +815,6 @@
     labelPickCustom,
     labelPickDpi,
     labelPickCopies,
+    labelPickPrinter,
   });
 })();

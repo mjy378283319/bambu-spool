@@ -59,6 +59,7 @@ const sandbox = {
   localStorage: {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
   },
   navigator: {},
 };
@@ -123,7 +124,7 @@ function testDefaultCfgSafe() {
 const REQUIRED_HANDLERS = [
   "openLabelDialog", "labelRefresh", "labelDownload", "labelPrintUsb",
   "labelA4", "labelPickSpool", "labelPickSize", "labelPickCustom", "labelPickDpi",
-  "labelPickCopies",
+  "labelPickCopies", "labelPickPrinter",
 ];
 
 // 由 app.js 提供、label.js 直接引用的外部函数（不是 label.js 的职责）
@@ -216,6 +217,10 @@ async function testDialogHtml() {
   check("含尺寸预设", html.includes("50×30 mm"));
   check("含 dpi 选项", html.includes('value="203"') && html.includes('value="300"'));
   check("含份数", html.includes('id="labelCopies"'));
+  // ★ 1.0.1：打印机摆出来给用户挑（以前静默挑 + 挑完就存，错了就永久卡死）
+  check("含打印机下拉（打印机不再静默挑）", html.includes('id="labelPrinter"'));
+  check("打印机下拉默认「自动」、不预先写入任何机器名",
+    /<option value="">自动（读取中…）<\/option>/.test(html));
   // ★ 用户 09-24 要求：用完的料盘排到最后，默认选中第一个还有料的
   const opt1 = html.indexOf('value="1"');
   const opt2 = html.indexOf('value="2"');
@@ -347,6 +352,67 @@ function testRightDeadZone() {
     /物理死区/.test(src) && /2\.8mm/.test(src) && /2\.91mm/.test(src));
 }
 
+/* ── 8. 打印机选择 / 记住策略（1.0.1）────────────────────────────
+ * ★ 10-08 家里电脑「永远卡在正在连接」的真根因：程序静默挑了一台机器，
+ *   **挑完立刻写进 localStorage**，之后每次打印都复用那个错名字，用户全程
+ *   看不见、也改不了。1.0.1 三条改动在这里钉死：
+ *     ① 打印机摆进下拉让用户挑；
+ *     ② 只有 outputPrintting 返回 200 才记住；
+ *     ③ 程序自己挑的（auto=true）打失败 → 立刻忘掉，下次重挑。
+ */
+function testPrinterPick() {
+  console.log("== 打印机选择 / 记住策略（1.0.1） ==");
+  const pick = (sandbox.labelDebug || {}).hmarkPickPrinter;
+  check("hmarkPickPrinter 已暴露（可直接跑，不靠正则猜）", typeof pick === "function");
+  const LIST = JSON.stringify(["Microsoft Print to PDF", "HPRT HM-T260LR"]);
+
+  store.delete("bambu.hmarkPrinter");
+  let r = pick(LIST, "HPRT HM-T260LR");
+  check("面板手动指定的机器优先，且 auto=false（用户的选择，失败不清除）",
+    r && r.name === "HPRT HM-T260LR" && r.auto === false, JSON.stringify(r));
+
+  r = pick(LIST, "");
+  check("自动模式挑中汉印那台，且 auto=true（打失败要忘掉）",
+    r && r.name === "HPRT HM-T260LR" && r.auto === true, JSON.stringify(r));
+
+  store.set("bambu.hmarkPrinter", "HPRT HM-T260LR");
+  r = pick(LIST, "");
+  check("记住的名字仍优先，但仍算 auto（失败照样清）",
+    r && r.name === "HPRT HM-T260LR" && r.auto === true, JSON.stringify(r));
+
+  store.set("bambu.hmarkPrinter", "HPRT 早就没了的机器");
+  r = pick(LIST, "");
+  check("★ 记住的名字已不在列表 → 回退重挑（旧版正是这里卡死）",
+    r && r.name === "HPRT HM-T260LR" && r.auto === true, JSON.stringify(r));
+
+  r = pick("[]", "");
+  check("列表为空时兜底成 HPRT HM-T260LR", r && r.name === "HPRT HM-T260LR" && r.auto === true);
+
+  r = pick(JSON.stringify(["HPRT HM-T260LR"]), "HPRT 手动指定的一台");
+  check("手动指定的名字即使不在列表也照用（尊重用户选择）",
+    r && r.name === "HPRT 手动指定的一台" && r.auto === false, JSON.stringify(r));
+
+  // 核心回归：成功后才存 / 自动挑失败要清
+  const fn = fnBody(fs.readFileSync(SRC, "utf8"), "labelPrintUsb");
+  check("★ 挑完不再立刻持久化：setItem 写在 outputPrintting 成功之后",
+    /res\.code\) !== 200[\s\S]{0,300}localStorage\.setItem\("bambu\.hmarkPrinter"/.test(fn));
+  check("★ 自动挑的打印失败会清掉记住的名字（10-08 卡死根因）",
+    /if \(autoPicked\) \{[\s\S]{0,300}removeItem\("bambu\.hmarkPrinter"\)/.test(fn));
+  check("★ 手动指定的机器打失败时保留名字、并把机器名写进报错里",
+    /else if \(printer\) \{[\s\S]{0,200}可在下拉里换一台/.test(fn));
+  check("成功 toast 带实际打印机名（打错机器一眼能看出）",
+    /已通过汉印驱动送到「" \+ printer/.test(fn));
+  check("失败后刷新打印机下拉（用户能立刻换一台）", /loadPrinterOptions\(\)/.test(fn));
+
+  // 面板下拉本身也要能记住 / 忘掉
+  sandbox.labelPickPrinter("HPRT 手动 A");
+  check("下拉选了就记住", store.get("bambu.hmarkPrinter") === "HPRT 手动 A",
+    String(store.get("bambu.hmarkPrinter")));
+  sandbox.labelPickPrinter("");
+  check("下拉选「自动」就把记住的名字忘掉", !store.get("bambu.hmarkPrinter"),
+    String(store.get("bambu.hmarkPrinter")));
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   testBleRemoved();
   testExports();
@@ -355,6 +421,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   testFootMargin();
   testHmarkUsb();
   testRightDeadZone();
+  testPrinterPick();
   await testDialogHtml();
   console.log(`\n通过 ${PASSED.length} 项，失败 ${FAILED.length} 项`);
   if (FAILED.length) {
