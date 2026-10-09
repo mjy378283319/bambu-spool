@@ -2044,10 +2044,18 @@ function syncBrandDeleteHint() {
   const presets = S.catalog.preset_brands || [];
   const isCustom = brand && brand !== "__custom__" && !presets.includes(brand);
   row.classList.toggle("hidden", !isCustom);
-  row.innerHTML = isCustom
-    ? `<button class="linklike" onclick="removeBrandFromForm()">删除「${esc(brand)}」这个自定义品牌</button>
-       <span class="small muted">—— 只影响下拉候选，已录入的料盘不受影响</span>`
-    : "";
+  if (!isCustom) { row.innerHTML = ""; return; }
+  const registered = (S.catalog.custom_brands || []).includes(brand);
+  const used = S.spools.filter((s) => s.brand === brand).length;
+  if (!registered) {
+    // 只存在于料盘上的历史品牌（不在自定义清单里）：没有可删的东西，删除按钮不该出现
+    row.innerHTML = `<span class="small muted">「${esc(brand)}」不是自定义品牌，是库里 ${used} 盘料盘在用的名字——把这些料盘改了品牌它自然消失。</span>`;
+    return;
+  }
+  row.innerHTML = `<button class="linklike" onclick="removeBrandFromForm()">删除「${esc(brand)}」这个自定义品牌</button>
+     <span class="small muted">—— 只影响下拉候选，已录入的料盘不受影响${
+       used ? `；还有 ${used} 盘料在用这个名字，删后下拉里仍会显示，直到它们改品牌` : ""
+     }</span>`;
 }
 
 /** 在料盘表单里删掉当前选中的自定义品牌。
@@ -2060,7 +2068,14 @@ async function removeBrandFromForm() {
   const name = sel.value;
   const presets = S.catalog.preset_brands || [];
   if (!name || name === "__custom__" || presets.includes(name)) return;
-  if (!window.confirm(`删除自定义品牌「${name}」？\n已录入的料盘不受影响，只是下拉候选里不再出现。`)) return;
+  if (!(S.catalog.custom_brands || []).includes(name)) {
+    // 历史品牌（只在料盘上，不在自定义清单）：无可删，指路
+    const used = S.spools.filter((s) => s.brand === name).length;
+    toast(`「${name}」不在自定义品牌清单里，是 ${used} 盘料盘在用这个名字；改掉这些料盘的品牌它才会从下拉消失`, "err");
+    return;
+  }
+  const usedCount = S.spools.filter((s) => s.brand === name).length;
+  if (!window.confirm(`删除自定义品牌「${name}」？\n已录入的料盘不受影响，只是下拉候选里不再出现${usedCount ? `（这 ${usedCount} 盘料在用，下拉里会保留到它们改品牌）` : ""}。`)) return;
   try {
     const data = await api(`/api/brands/${encodeURIComponent(name)}`, { method: "DELETE" });
     S.catalog = { ...(S.catalog || {}), brands: data.brands, custom_brands: data.custom_brands };
@@ -2073,7 +2088,9 @@ async function removeBrandFromForm() {
     const custom = document.getElementById("f_brand_custom");
     if (custom) custom.value = name;
     syncBrandDeleteHint();
-    toast(`已删除品牌「${name}」，这盘料的品牌保持不变`, "ok");
+    toast(usedCount
+      ? `已从自定义清单移除「${name}」；还有 ${usedCount} 盘料盘在用，下拉里会保留到它们改品牌为止`
+      : `已删除品牌「${name}」，这盘料的品牌保持不变`, "ok");
   } catch (err) { toast(err.message, "err"); }
 }
 
@@ -4008,8 +4025,9 @@ function renderSettings() {
       <tr><td class="muted small">版本</td><td>${esc(system.version)}</td></tr>
       <tr><td class="muted small">运行模式</td><td>${system.mock ? "模拟打印机" : "接入拓竹云"}</td></tr>
       <tr><td class="muted small">云连接</td><td>
-        <span class="dot ${mqtt.connected ? "ok" : "bad"}"></span>
-        ${mqtt.connected ? "已连接" : esc(mqtt.message || "未连接")}</td></tr>
+        <span class="state-line"><span class="dot ${mqtt.connected ? "ok" : "bad"}"></span>${
+    mqtt.connected ? "已连接" : esc(mqtt.message || "未连接")
+  }</span></td></tr>
       <tr><td class="muted small">最近轮询</td><td>${esc(fmtTime(cloud.last_poll))}</td></tr>
       <tr><td class="muted small">云端任务数</td><td>${cloud.tasks_seen || 0}</td></tr>
       ${cloud.last_error ? `<tr><td class="muted small">轮询错误</td><td class="small">${esc(cloud.last_error)}</td></tr>` : ""}

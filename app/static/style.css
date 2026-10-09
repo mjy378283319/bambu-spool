@@ -109,6 +109,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor;
 .dot.ok { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
 .dot.warn { background: #d97706; box-shadow: 0 0 0 3px var(--amber-soft); }
 .dot.bad { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
+/* 状态点 + 文字的组合（系统页「云连接」等）：点在前、留 7px 间距，不再贴成一团 */
+.state-line { display: inline-flex; align-items: center; gap: 7px; }
 
 .icon-btn {
   width: 34px; height: 34px; padding: 0; flex: none;
