@@ -221,6 +221,14 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "iBOSS": [200.0],                  # 官网未公布空盘重量，估算值，建议称重校准
     "R3D": [200.0],                    # 官网未公布空盘重量，估算值，建议称重校准
     "彩多屋": [200.0],                 # 官网未公布空盘重量，估算值，建议称重校准
+    # ↓ 2026-10 新增色卡的 5 个品牌：色卡进了 BRAND_COLOR_SERIES，就必须同时在
+    #   这份预设里 —— BRAND_PRESETS 只取自本字典，不在这儿的牌子下拉框里选不到，
+    #   色卡等于白加。皮重一律按常见 1kg 塑料盘 200g 估算，建议称重校准。
+    "三绿 Sunlu": [200.0],             # 估算值，建议称重校准
+    "eSUN易生": [200.0],               # 估算值，建议称重校准
+    "Inslogic": [200.0],               # 估算值，建议称重校准
+    "FusRock": [200.0],                # 估算值，建议称重校准
+    "闪铸": [200.0],                   # 估算值，建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -263,6 +271,17 @@ BRAND_ALIASES: dict[str, str] = {
     "cailab3d": "彩多屋",
     "彩多屋cailab": "彩多屋",
     "彩多屋旗舰店": "彩多屋",
+    "sunlu": "三绿 Sunlu",
+    "三绿": "三绿 Sunlu",
+    "三绿sunlu": "三绿 Sunlu",
+    "esun": "eSUN易生",
+    "esun易生": "eSUN易生",
+    "易生": "eSUN易生",
+    "inslogic": "Inslogic",
+    "fusrock": "FusRock",
+    "flashforge": "闪铸",
+    "闪铸科技": "闪铸",
+    "闪铸三维": "闪铸",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭

@@ -3505,6 +3505,347 @@ FUSROCK_S_PAHT: list[dict] = [
 ]
 
 
+# ---- 闪铸 Flashforge（官网 products.json 官方色名，HEX 近似）----
+
+# HS PLA  (27 色)
+
+FLASHFORGE_HS_PLA: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('浅粉色', 'Light Pink', '#F8C8D8'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('本色', 'Natural', '#363638'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('青色', 'Cyan', '#41E9B7'),
+    _c('冰蓝', 'Ice Blue', '#9CC8E2'),
+    _c('品红', 'Magenta', '#E93096'),
+    _c('天空蓝', 'Sky Blue', '#3EA6DC'),
+    _c('荧光橙', 'Neon Orange', '#FF6207'),
+    _c('宝石红', 'Ruby Red', '#C2183C'),
+    _c('荧光黄', 'Neon Yellow', '#EEFD04'),
+    _c('纯绿', 'Pure Green', '#2E9E4F'),
+    _c('极光绿', 'Aurora Green', '#3AB8B4'),
+    _c('极光紫', 'Aurora Purple', '#9A6BD6'),
+    _c('极光红', 'Aurora Red', '#FF5A6E'),
+    _c('橄榄绿', 'Oliver Green', '#3A4A2C'),
+    _c('铁灰', 'Iron Gray', '#5A5A5A'),
+    _c('夜光旋律', 'Luminous Melody', '#9099A6'),
+    _c('浅棕色', 'Ligjht Brown', '#C17D3D'),
+    _c('星空紫', 'Galaxy Purple', '#3E2A63'),
+    _c('星空蓝', 'Galaxy Blue', '#27356B'),
+    _c('星空黑', 'Galaxy Black', '#14161C'),
+    _c('变色龙彩虹糖', 'Chameleon Rainbow Candy', '#9099A6'),
+
+]
+
+
+# HS PLA 多色  (7 色)
+
+FLASHFORGE_HS_PLA_MULTI: list[dict] = [
+    _c('钛烧色', 'Burnt Titanium', '#9099A6'),
+    _c('深渊紫', 'Abyssal Purple', '#9099A6'),
+    _c('深渊红', 'Abyssal Red', '#9099A6'),
+    _c('天际蓝', 'Skydiver', '#9099A6'),
+    _c('玫瑰石英', 'Rose Quartz', '#9099A6'),
+    _c('星云紫', 'Nebula Purple', '#9099A6'),
+    _c('钛烧+深渊红', 'Burnt Titanium&Abyssal Red', '#9099A6'),
+
+]
+
+
+# HS PLA 彩虹  (3 色)
+
+FLASHFORGE_HS_PLA_RAINBOW: list[dict] = [
+    _c('糖果色', 'Candy', '#9099A6'),
+    _c('珊瑚色', 'Corals', '#9099A6'),
+    _c('夏日遐想', 'Summer Reverie', '#9099A6'),
+
+]
+
+
+# HS PETG  (13 色)
+
+FLASHFORGE_HS_PETG: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('玫瑰红', 'Rose', '#C71585'),
+    _c('粉色', 'Pink', '#FC737F'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('棕色', 'Brown', '#7C4628'),
+    _c('金色', 'Gold', '#D8AB62'),
+    _c('银白', 'Sliver', '#D6D9DD'),
+
+]
+
+
+# HS PETG 金属  (6 色)
+
+FLASHFORGE_HS_PETG_METALLIC: list[dict] = [
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('金色', 'Gold', '#D8AB62'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('银色', 'Silver', '#B9BABF'),
+
+]
+
+
+# HS PETG 透明  (6 色)
+
+FLASHFORGE_HS_PETG_TRANSP: list[dict] = [
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('天空蓝', 'Sky Blue', '#3EA6DC'),
+    _c('宝石红', 'Ruby Red', '#C2183C'),
+    _c('透明', 'Transparent', '#254C85'),
+
+]
+
+
+# HS PETG 多色  (1 色)
+
+FLASHFORGE_HS_PETG_MULTI: list[dict] = [
+    _c('钛烧色', 'Burnt Titanium', '#9099A6'),
+
+]
+
+
+# PLA Basic  (16 色)
+
+FLASHFORGE_PLA_BASIC: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('本色', 'Natural', '#363638'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('棕色', 'Brown', '#7C4628'),
+    _c('肤色', 'Skin', '#F0DBCC'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('银色', 'Silver', '#B9BABF'),
+    _c('金色', 'Gold', '#D8AB62'),
+    _c('粉色', 'Pink', '#FC737F'),
+    _c('浅绿色', 'Light Green', '#A5D66A'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('紫色', 'Purple', '#B131A5'),
+
+]
+
+
+# PLA Crystal  (9 色)
+
+FLASHFORGE_PLA_CRYSTAL: list[dict] = [
+    _c('彩虹糖', 'Rainbow Candy', '#9099A6'),
+    _c('人鱼之泪', 'Mermaid Tears', '#9099A6'),
+    _c('夏日遐想', 'Summer Reverie', '#9099A6'),
+    _c('绿野仙踪绿', 'Oz Wizard Green', '#9099A6'),
+    _c('薄荷冰沙', 'Mint Slush', '#9099A6'),
+    _c('深海秘境', 'Deep Sea Realm', '#9099A6'),
+    _c('夏夜萤火', 'Summer Night Fireflies', '#9099A6'),
+    _c('粉海豚', 'Pink Dolphin', '#9099A6'),
+    _c('哥特玫瑰', 'Gothic Rose', '#6E2639'),
+
+]
+
+
+# PLA Pro  (17 色)
+
+FLASHFORGE_PLA_PRO: list[dict] = [
+    _c('玫瑰红', 'Rose', '#C71585'),
+    _c('棕色', 'Brown', '#7C4628'),
+    _c('肤色', 'Skin', '#F0DBCC'),
+    _c('冷白', 'Cool White', '#ECECEC'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('银灰', 'Silver  Gray', '#B8BCC2'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('本色', 'Natural', '#363638'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('粉色', 'Pink', '#FC737F'),
+    _c('银色', 'Silver', '#B9BABF'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('蓝色', 'Blue', '#2239A7'),
+
+]
+
+
+# PLA 多色  (4 色)
+
+FLASHFORGE_PLA_MULTI: list[dict] = [
+    _c('钛烧色', 'Burnt Titanium', '#9099A6'),
+    _c('星云紫', 'Nebula Purple', '#9099A6'),
+    _c('玫瑰石英', 'Rose Quartz', '#9099A6'),
+    _c('天际蓝', 'Skydiver', '#9099A6'),
+
+]
+
+
+# PLA Silk+  (27 色)
+
+FLASHFORGE_PLA_SILK: list[dict] = [
+    _c('红色', 'Red', '#D0070D'),
+    _c('金色', 'Gold', '#D8AB62'),
+    _c('银色', 'Silver', '#B9BABF'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('肤色', 'Skin', '#F0DBCC'),
+    _c('紫罗兰', 'Violet', '#5252A0'),
+    _c('古铜色', 'Bronze', '#8C6A3B'),
+    _c('金属灰', 'Metal Gray', '#8A8F98'),
+    _c('银蓝双色', 'Dual Color (Sliver&Blue)', '#9099A6'),
+    _c('黑红双色', 'Dual Color (Black & Red)', '#9099A6'),
+    _c('黑绿双色', 'Dual Color (Black & Green)', '#9099A6'),
+    _c('金红紫三色', 'Tri-Color (Gold & Red & Purple)', '#9099A6'),
+    _c('金银铜三色', 'Tri-Color (Gold & Silver & Copper)', '#9099A6'),
+    _c('黑金紫三色', 'Tri-Color (Black & Gold & Purple)', '#9099A6'),
+    _c('冷白', 'Cool White', '#ECECEC'),
+    _c('珍珠白', 'Pearl White', '#F3F1E8'),
+    _c('木槿紫', 'Hibiscus Purple', '#8E5EA2'),
+    _c('玫瑰粉', 'Rose Pink', '#F2789F'),
+    _c('奶油粉', 'Cream Pink', '#FBE3E6'),
+    _c('奶油黄', 'Cream Yellow', '#FFF0B5'),
+    _c('晴空蓝', 'Clear Sky Blue', '#1E88E5'),
+    _c('竹绿', 'Bamboo Green', '#6A9B3C'),
+    _c('绿松石绿', 'Turquoise Green', '#38CAB7'),
+    _c('香槟粉', 'Champagne Pink', '#F2DCD2'),
+    _c('奶蓝', 'Milk Blue', '#BFD9E8'),
+
+]
+
+
+# PLA Silk+ 彩虹  (7 色)
+
+FLASHFORGE_PLA_SILK_RAINBOW: list[dict] = [
+    _c('金属彩虹', 'Metal Rainbow', '#9099A6'),
+    _c('金红双色', 'Gold&Red', '#9099A6'),
+    _c('银蓝', 'Sliver&Blue', '#9099A6'),
+    _c('梦幻三色', 'Dreamy Trio', '#9099A6'),
+    _c('糖果色', 'Candy', '#9099A6'),
+    _c('马卡龙', 'Macaron', '#9099A6'),
+    _c('梦幻粉彩', 'Dreamy Pastel', '#9099A6'),
+
+]
+
+
+# PLA Silk+ 双色  (4 色)
+
+FLASHFORGE_PLA_SILK_DUAL: list[dict] = [
+    _c('蓝玫双色', 'Blue&Rose', '#9099A6'),
+    _c('粉黄双色', 'Pink&Yellow', '#9099A6'),
+    _c('蓝绿双色', 'Blue&Green', '#9099A6'),
+    _c('银蓝', 'Sliver&Blue', '#9099A6'),
+
+]
+
+
+# PLA-CF  (7 色)
+
+FLASHFORGE_PLA_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('午夜蓝', 'Midnight Blue', '#1B2A4A'),
+    _c('玛萨拉红', 'Marsala', '#7E2B3A'),
+    _c('藕粉色', 'Dusty Pink', '#D8A7A0'),
+    _c('航海蓝', 'Sailor Blue', '#1F4E79'),
+    _c('鸢尾紫', 'Iris Purple', '#5A4E9E'),
+    _c('火山岩灰', 'Volcanic Rock Gray', '#4E4B48'),
+
+]
+
+
+# ABS Basic  (3 色)
+
+FLASHFORGE_ABS_BASIC: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('钛烧色', 'Burnt Titanium', '#9099A6'),
+
+]
+
+
+# ABS Pro  (1 色)
+
+FLASHFORGE_ABS_PRO: list[dict] = [
+    _c('宝石红', 'Ruby Red', '#C2183C'),
+
+]
+
+
+# ASA  (14 色)
+
+FLASHFORGE_ASA: list[dict] = [
+    _c('本色', 'Natural', '#363638'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('闪粉白', 'Sparkle White', '#EC407A'),
+    _c('闪粉蓝', 'Sparkle Blue', '#EC407A'),
+    _c('闪粉墨绿', 'Sparkle Black Green', '#EC407A'),
+    _c('黄绿', 'Yellow Green', '#87F196'),
+    _c('天空蓝', 'Sky Blue', '#3EA6DC'),
+    _c('铁灰', 'Iron Gray', '#5A5A5A'),
+    _c('闪粉天蓝', 'Sparkle Sky Blue', '#EC407A'),
+    _c('闪粉黑', 'Sparkle Black', '#EC407A'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('交通红', 'Traffic Red', '#E43226'),
+    _c('多色钛烧', 'Multicolor Burnt Titanium', '#9099A6'),
+
+]
+
+
+# ASA-CF  (3 色)
+
+FLASHFORGE_ASA_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('午夜蓝', 'Midnight Blue', '#1B2A4A'),
+    _c('玛萨拉红', 'Marsala', '#7E2B3A'),
+
+]
+
+
+# PET-CF  (1 色)
+
+FLASHFORGE_PET_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PET-GF  (1 色)
+
+FLASHFORGE_PET_GF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PETG-CF  (8 色)
+
+FLASHFORGE_PETG_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('玛萨拉红', 'Marsala', '#7E2B3A'),
+    _c('航海蓝', 'Sailor Blue', '#1F4E79'),
+    _c('鸢尾紫', 'Iris Purple', '#5A4E9E'),
+    _c('藕粉色', 'Dusty Pink', '#D8A7A0'),
+    _c('草绿色', 'Grass Green', '#76FB85'),
+    _c('午夜蓝', 'Midnight Blue', '#1B2A4A'),
+    _c('火山岩灰', 'Volcanic Rock Gray', '#4E4B48'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -3717,6 +4058,30 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "S-Multi": FUSROCK_S_MULTI,
         "S-PAHT": FUSROCK_S_PAHT,
     },
+    "闪铸": {
+        "HS PLA": FLASHFORGE_HS_PLA,
+        "HS PLA 多色": FLASHFORGE_HS_PLA_MULTI,
+        "HS PLA 彩虹": FLASHFORGE_HS_PLA_RAINBOW,
+        "HS PETG": FLASHFORGE_HS_PETG,
+        "HS PETG 金属": FLASHFORGE_HS_PETG_METALLIC,
+        "HS PETG 透明": FLASHFORGE_HS_PETG_TRANSP,
+        "HS PETG 多色": FLASHFORGE_HS_PETG_MULTI,
+        "PLA Basic": FLASHFORGE_PLA_BASIC,
+        "PLA Crystal": FLASHFORGE_PLA_CRYSTAL,
+        "PLA Pro": FLASHFORGE_PLA_PRO,
+        "PLA 多色": FLASHFORGE_PLA_MULTI,
+        "PLA Silk+": FLASHFORGE_PLA_SILK,
+        "PLA Silk+ 彩虹": FLASHFORGE_PLA_SILK_RAINBOW,
+        "PLA Silk+ 双色": FLASHFORGE_PLA_SILK_DUAL,
+        "PLA-CF": FLASHFORGE_PLA_CF,
+        "ABS Basic": FLASHFORGE_ABS_BASIC,
+        "ABS Pro": FLASHFORGE_ABS_PRO,
+        "ASA": FLASHFORGE_ASA,
+        "ASA-CF": FLASHFORGE_ASA_CF,
+        "PET-CF": FLASHFORGE_PET_CF,
+        "PET-GF": FLASHFORGE_PET_GF,
+        "PETG-CF": FLASHFORGE_PETG_CF,
+    },
 }
 
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
@@ -3730,7 +4095,15 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PLA Rainbow",
         "PLA 魔幻双色",
         "PLA 变色龙",
-        "PLA-Aero Pro",],
+        "PLA-Aero Pro",
+        "HS PLA 多色",
+        "HS PLA 彩虹",
+        "PLA Crystal",
+        "PLA 多色",
+        "PLA Silk+",
+        "PLA Silk+ 彩虹",
+        "PLA Silk+ 双色",
+        "PLA-CF",],
     "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光", "K5 PETG Rapid",
              "PETG Basic", "PETG HF", "PETG-CF", "PETG 夜光", "HS PETG 哑光", "PETG-Eco", "PETG GF", "PETG 闪粉", "PETG 金属", "PETG 星河", "PETG 大理石", "PETG Transparent", "HS PETG", "PETG Matte", "PETG Marble", "PETG Translucent",
         "PETG 2.0"
@@ -3740,7 +4113,10 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PETG Pro",
         "PETG-HF",
         "PETG-GF",
-        "PETG-CF HF",],
+        "PETG-CF HF",
+        "HS PETG 金属",
+        "HS PETG 透明",
+        "HS PETG 多色",],
     "PA": ["PA6-GF"
         "PA-CF",
         "PA6/66",
@@ -3753,13 +4129,16 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
-        "NexASA-CF20",],
+        "NexASA-CF20",
+        "ASA-CF",],
     "ABS": ["ABS", "ABS-Pro"
         "ABS+",
         "ABS-CF",
         "ABS-HF",
         "ABS-GF",
-        "NexABS-CF20",],
+        "NexABS-CF20",
+        "ABS Basic",
+        "ABS Pro",],
     "TPU": ["TPU 95A", "TPU", "TPU95A"
         "TPU90A",
         "TPU 95A HF",

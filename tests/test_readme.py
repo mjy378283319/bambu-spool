@@ -186,7 +186,11 @@ lines = md.splitlines()
 # 约 400 行 / 15k 字符。这两条上界就是防它再胀回去——把旧版拷回来必然红。
 check("README 不超过 440 行", len(lines) <= 440, f"{len(lines)} 行")
 check("README 不超过 16000 字符", len(md) <= 16000, f"{len(md)} 字符")
-check("没有 CRLF 换行（.gitattributes 要求 eol=lf）", "\r\n" not in md)
+# ⚠️ 必须按字节读：用 open(..., encoding="utf-8") 的文本模式读会被通用换行
+# 把 \r\n 就地翻译成 \n，这条检查就永远为真 —— 2026-10 踩过：README 被 Python
+# 文本写入改成了整份 CRLF，测试照样报绿。
+_md_raw = open(os.path.join(ROOT, "README.md"), "rb").read()
+check("没有 CRLF 换行（.gitattributes 要求 eol=lf）", b"\r\n" not in _md_raw)
 
 print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
 if FAILED:
