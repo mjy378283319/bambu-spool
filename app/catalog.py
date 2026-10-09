@@ -229,6 +229,7 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "Inslogic": [200.0],               # 估算值，建议称重校准
     "FusRock": [200.0],                # 估算值，建议称重校准
     "闪铸": [200.0],                   # 估算值，建议称重校准
+    "Nature3d": [200.0],               # 估算值，建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -282,6 +283,10 @@ BRAND_ALIASES: dict[str, str] = {
     "flashforge": "闪铸",
     "闪铸科技": "闪铸",
     "闪铸三维": "闪铸",
+    "nature3d": "Nature3d",
+    "nature3d造物新材料": "Nature3d",
+    "造物新材料": "Nature3d",
+    "造物新材料工厂店": "Nature3d",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭
