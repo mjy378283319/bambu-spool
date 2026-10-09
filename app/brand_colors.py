@@ -1957,29 +1957,10 @@ R3D_PLA_SILK: list[dict] = [
 
 ]
 
-# ---- 爱丽兹 Allizz（官网 Color Options 色卡，商品图提色，近似值）----
-
-ALLIZZ_ABS: list[dict] = [
-    _c('冷白色', 'Cold White', '#E2E2E2'),
-    _c('紫色', 'Purple', '#4C2D7E'),
-    _c('浅蓝色', 'Light blue', '#AFE5D5'),
-    _c('米色', 'Beige', '#E4DBA8'),
-    _c('紫红', 'fuchsia', '#AE359A'),
-    _c('银色', 'silver', '#858585'),
-    _c('天蓝色', 'Sky blue', '#6EAFE2'),
-    _c('藏红花黄', 'saffron yellow', '#F1C958'),
-    _c('草绿色', 'grass green', '#6F9551'),
-    _c('浅橙', 'oranger', '#E99C69'),
-    _c('藏青色', 'Navy Blue', '#2E3255'),
-    _c('红色', 'red', '#E54B46'),
-    _c('黄色', 'yellow', '#F3D603'),
-    _c('绿色', 'green', '#38C64B'),
-    _c('蓝色', 'blue', '#4969CB'),
-    _c('白色', 'ABS white', '#EBEBEB'),
-    _c('黑色', 'ABS black', '#303030'),
+# ---- 爱丽兹 Allizz（淘宝/天猫旗舰店色卡，商品图提色，近似值；部分沿用既有 hex）----
 
 
-]
+# ASA (沿用既有)
 
 ALLIZZ_ASA: list[dict] = [
     _c('黑色', 'Black', '#151719'),
@@ -1992,35 +1973,8 @@ ALLIZZ_ASA: list[dict] = [
 
 ]
 
-ALLIZZ_PETG_HF: list[dict] = [
-    _c('绿色', 'Green', '#126032'),
-    _c('品红色', 'Magenta', '#B23167'),
-    _c('紫罗兰', 'Violet', '#5A3C79'),
-    _c('樱花粉色', 'Cherry Blossom Pink', '#B99894'),
-    _c('肤色', 'Skin Color', '#B6A997'),
-    _c('柠檬绿', 'Lemon Green', '#57AE4B'),
-    _c('橙色', 'Orange', '#CA4F08'),
-    _c('浅灰', 'Light Gray', '#818074'),
-    _c('白色', 'White', '#E2E2E2'),
-    _c('黄色', 'Yellow', '#D5BA30'),
-    _c('青色', 'Cyan', '#046EA5'),
-    _c('湖蓝色', 'Lake Blue', '#255F99'),
-    _c('亮红色', 'Bright Red', '#C10807'),
-    _c('朱砂红色', 'Cinnabar Red', '#960F12'),
-    _c('米色', 'Beige', '#BEAA7F'),
-    _c('黑镍色', 'Black Nickel', '#393939'),
-    _c('铜色', 'Copper', '#7D614B'),
-    _c('橄榄绿', 'Olive Green', '#606829'),
-    _c('克莱因蓝', 'Klein Blue', '#072E6A'),
-    _c('酒红色', 'Red Wine', '#5F261E'),
-    _c('咖啡色', 'Coffee Color', '#5E3020'),
-    _c('深灰色', 'Dark Gray', '#4F4F4F'),
-    _c('琥珀金色', 'Amber Gold', '#A99421'),
-    _c('红铜色', 'Red Copper', '#8F583F'),
-    _c('大理石色', 'Marble PETG', '#CCCCCC'),
 
-
-]
+# PETG Translucent (沿用既有)
 
 ALLIZZ_PETG_TRANSLUCENT: list[dict] = [
     _c('透明色', 'Clear', '#E1E6EB'),
@@ -2036,52 +1990,292 @@ ALLIZZ_PETG_TRANSLUCENT: list[dict] = [
 
 ]
 
-ALLIZZ_PLA_MATTE: list[dict] = [
-    _c('白色', 'White', '#E2E2E2'),
-    _c('冰蓝色', 'Ice Blue', '#86C6D9'),
-    _c('橙色', 'orange', '#D1814A'),
-    _c('炭黑色', 'charcoal', '#070707'),
-    _c('沙漠黄色', 'Desert Yellow', '#B59E6A'),
-    _c('绯红色', 'Crimson', '#931B26'),
-    _c('深蓝色', 'Deep Blue', '#14264C'),
-    _c('深绿色', 'Dark green', '#575C38'),
-    _c('棕色', 'brown', '#826252'),
-    _c('紫色', 'Purple', '#5A3C79'),
-    _c('深棕色', 'Dark Brown', '#674235'),
 
+# ABS  (6 色)
+
+ALLIZZ_ABS: list[dict] = [
+    _c('柔肤色', 'ABB3100', '#E4C9B0'),
+    _c('白色', 'ABB8000', '#E5E5E5'),
+    _c('黑色', 'ABB8900', '#1C1C1C'),
+    _c('冷白', 'ABB8001', '#ECECEC'),
+    _c('灰色', 'ABB8400', '#888888'),
+    _c('消防红', 'ABB1600', '#C21E1E'),
 
 ]
+
+# PETG HF  (30 色)
+
+ALLIZZ_PETG_HF: list[dict] = [
+    _c('黑色', 'AEB8900', '#1C1C1C'),
+    _c('白色', 'AEB8000', '#E5E5E5'),
+    _c('奶白色', 'AEB8001', '#F3EAD9'),
+    _c('肤色', 'AEB3100', '#F0DBCC'),
+    _c('冷灰色', 'AEB8400', '#363A41'),
+    _c('铁灰色', 'AEB8700', '#4A4D50'),
+    _c('浅灰色', 'AEB8300', '#C6C6C6'),
+    _c('蓝灰色', 'AEB6601', '#565E68'),
+    _c('青色', 'AEB5500', '#41E9B7'),
+    _c('克莱因蓝', 'AEB6700', '#2A49B3'),
+    _c('湖蓝色', 'AEB6500', '#0097D3'),
+    _c('蓝色', 'AEB6600', '#2239A7'),
+    _c('紫罗兰', 'AEB7500', '#5252A0'),
+    _c('绿色', 'AEB4502', '#1E8436'),
+    _c('柠檬绿', 'AEB4400', '#85B742'),
+    _c('薄荷绿', 'AEB4500', '#C4CF84'),
+    _c('军绿色', 'AEB4700', '#788142'),
+    _c('橄榄绿', 'AEB4501', '#3A4A2C'),
+    _c('墨绿色', 'AEB4600', '#47522A'),
+    _c('酒红色', 'AEB1700', '#5F261E'),
+    _c('大红色', 'AEB1501', '#C81F1A'),
+    _c('朱砂红', 'AEB1401', '#B11A14'),
+    _c('品红色', 'AEB1500', '#B23167'),
+    _c('冰粉色', 'AEB1300', '#F2C9D4'),
+    _c('樱花粉', 'AEB1200', '#F0B9C4'),
+    _c('橙色', 'AEB2500', '#FC6A17'),
+    _c('黄色', 'AEB3500', '#FEEC03'),
+    _c('米黄色', 'AEB3200', '#D9C48A'),
+    _c('咖啡色', 'AEB1800', '#7F4434'),
+    _c('棕色', 'AEB1600', '#7C4628'),
+
+]
+
+# PLA Matte  (30 色)
+
+ALLIZZ_PLA_MATTE: list[dict] = [
+    _c('莫兰迪灰绿', 'APE4300', '#7E8B7A'),
+    _c('莫兰迪绿', 'APE4402', '#244F59'),
+    _c('莫兰迪蓝', 'APE6400', '#6E84A0'),
+    _c('浅紫色', 'APE7200', '#554BBA'),
+    _c('南瓜橙', 'APE2300', '#D97B2B'),
+    _c('芒果黄', 'APE3400', '#E8C84B'),
+    _c('湖蓝色', 'APE6500', '#0097D3'),
+    _c('普罗旺斯番茄红', 'APE1600', '#C23B2E'),
+    _c('芝麻黑', 'APE8900', '#2B2B2B'),
+    _c('椰奶白', 'APE8000', '#F0E9D8'),
+    _c('草木灰', 'APE8700', '#9A9B92'),
+    _c('西瓜红', 'APE1400', '#D83A3A'),
+    _c('榴莲黄', 'APE3600', '#C9A93A'),
+    _c('白橡木', 'APE2100', '#E4DCC3'),
+    _c('白桃粉', 'APE1100', '#F4C4C0'),
+    _c('麦芽绿', 'APE4400', '#B7C66A'),
+    _c('薄荷蓝', 'APE6300', '#61C9CF'),
+    _c('抹茶绿', 'APE4401', '#657654'),
+    _c('樱花粉', 'APE1101', '#F0B9C4'),
+    _c('拿铁褐', 'APE1300', '#B98E5E'),
+    _c('桃粉色', 'APE1200', '#F0CED8'),
+    _c('鹅黄色', 'APE3300', '#E8D24B'),
+    _c('绿松石', 'APE4500', '#2E9B9B'),
+    _c('柠檬黄', 'APE3500', '#BCBF3D'),
+    _c('玫红', 'APE1301', '#D64A6A'),
+    _c('焦糖棕', 'APE1800', '#8A5A3A'),
+    _c('棕色', 'APE1602', '#7C4628'),
+    _c('木色', 'APE1601', '#B98E5E'),
+    _c('奶绿', 'APE4200', '#D9E4CA'),
+    _c('米黄色', '米黄色', '#D9C48A'),
+
+]
+
+# PLA Silk  (19 色)
 
 ALLIZZ_PLA_SILK: list[dict] = [
-    _c('丝绸亮银', 'Silk Shiny Silver', '#8E8C8D'),
-    _c('丝绸银', 'Silk Silver', '#807F85'),
-    _c('丝绸亮金', 'Silk Shiny Gold', '#E99601'),
-    _c('丝绸白', 'Silk white', '#D3D3D3'),
-    _c('丝绸奢华金', 'Silk Luxury Gold', '#FEA910'),
-    _c('丝绸黄', 'Silk Yellow', '#E3B403'),
-    _c('丝绸橙', 'Silk Orange', '#DA5D0D'),
-    _c('丝绸粉', 'Silk Pink', '#DE6C6D'),
-    _c('丝绸红', 'Silk Red', '#E41D0E'),
-    _c('丝绸紫', 'Silk Purple', '#9035A6'),
-    _c('丝绸蓝紫', 'Silk Blueviolet', '#522C74'),
-    _c('丝绸蓝', 'Silk Blue', '#1D3062'),
-    _c('丝绸幻彩绿', 'Silk Magic Green', '#387E29'),
-    _c('丝绸奶绿', 'Silk Milk Green', '#69BC5E'),
-    _c('丝绸黑', 'Silk Black', '#030303'),
-
+    _c('丝绸淡雅金', 'APS9700', '#BCBFC3'),
+    _c('丝绸纯金色', 'APS9600', '#BCBFC3'),
+    _c('丝绸亮金', 'APS9502', '#E99601'),
+    _c('丝绸土豪金Pro', 'APS9504', '#BCBFC3'),
+    _c('丝绸银', 'APS9501', '#E6E7F5'),
+    _c('丝绸亮银', 'APS9500', '#8E8C8D'),
+    _c('丝绸红', 'APS1400', '#B62B49'),
+    _c('丝绸橙', 'APS2500', '#FE9342'),
+    _c('丝绸黄', 'APS3500', '#E3B403'),
+    _c('丝绸绿', 'APS4500', '#08852F'),
+    _c('丝绸牛奶绿', 'APS4300', '#BCBFC3'),
+    _c('丝绸蓝', 'APS6500', '#434345'),
+    _c('丝绸紫', 'APS7500', '#7B58B6'),
+    _c('丝绸蓝紫', 'APS7600', '#522C74'),
+    _c('丝绸黑', 'APS8900', '#CBC9CE'),
+    _c('丝绸白', 'APS8000', '#DADAD6'),
+    _c('丝绸粉', 'APS1300', '#F2F2F2'),
+    _c('丝绸水晶粉', 'APS1100', '#F2C6D2'),
+    _c('丝绸土豪金', '丝绸土豪金', '#D9A93A'),
 
 ]
+
+# TPU95A  (2 色)
 
 ALLIZZ_TPU95A: list[dict] = [
-    _c('红色', 'red', '#D04E44'),
-    _c('灰色', 'grey', '#999999'),
-    _c('蓝色', 'blue', '#4499D0'),
-    _c('黄色', 'yellow', '#E5E12D'),
-    _c('白色', 'white', '#E8E8E8'),
-    _c('黑色', 'black', '#494949'),
-
+    _c('黑色', 'ATB8920', '#1C1C1C'),
+    _c('白色', 'ATB8020', '#E5E5E5'),
 
 ]
+
+# PLA Pro  (34 色)
+
+ALLIZZ_PLA_PRO: list[dict] = [
+    _c('PRO黑色', 'APP8900', '#1A1A1A'),
+    _c('PRO白色', 'APP8000', '#F2F2F2'),
+    _c('PRO银色', 'APP9500', '#BFC2C4'),
+    _c('PRO灰色', 'APP8500', '#9A9DA0'),
+    _c('PRO蓝灰色', 'APP6600', '#7E97A8'),
+    _c('PRO红砖色', 'APP1700', '#9A3B2E'),
+    _c('PRO品红色', 'APP1500', '#B23A8C'),
+    _c('PRO红色', 'APP1501', '#C81F1A'),
+    _c('PRO橙色', 'APP2600', '#E06A1F'),
+    _c('PRO黄色', 'APP3500', '#F2C81E'),
+    _c('PRO肤色', 'APP3100', '#E4C9B0'),
+    _c('PRO嫩绿色', 'APP4301', '#8FCB5A'),
+    _c('PRO橄榄绿', 'APP4500', '#6B7233'),
+    _c('PRO赛车绿', 'APP4300', '#1F6B3A'),
+    _c('PRO苹果绿', 'APP4200', '#7BC043'),
+    _c('PRO绿色', 'APP4501', '#2E9B4F'),
+    _c('PRO墨绿色', 'APP4600', '#1F4D2E'),
+    _c('PRO松绿色', 'APP4701', '#3E8E5A'),
+    _c('PRO军绿色', 'APP4700', '#5C6B3A'),
+    _c('PRO粉色', 'APP1200', '#EEB6C4'),
+    _c('PRO青色', 'APP5500', '#22A7C9'),
+    _c('PRO天蓝色', 'APP6200', '#6EAFE2'),
+    _c('PRO蓝色', 'APP6601', '#2B5CB8'),
+    _c('PRO兰花紫', 'APP7700', '#7A5BB0'),
+    _c('PRO紫色', 'APP7701', '#5A3C79'),
+    _c('PRO蜜桃粉', 'APP1300', '#F4C4C0'),
+    _c('PRO深咖色', 'APP1800', '#4A2E20'),
+    _c('PRO榴莲黄', 'APP3600', '#C9A93A'),
+    _c('PRO巧克力色', 'APP1701', '#503726'),
+    _c('PRO骨骼色', 'APP3200', '#E8E2D4'),
+    _c('PRO浅棕色', 'APP1301', '#B98C5E'),
+    _c('PRO棕色', 'APP1600', '#7A4F37'),
+    _c('PRO大理石', 'APM8100', '#CFCFCF'),
+    _c('闪光银', 'APC9600', '#C8CBD0'),
+
+]
+
+# PLA Basic  (9 色)
+
+ALLIZZ_PLA_BASIC: list[dict] = [
+    _c('黑色', 'APB8900', '#1C1C1C'),
+    _c('白色', 'APB8000', '#E5E5E5'),
+    _c('红色', '红色', '#D0070D'),
+    _c('绿色', '绿色', '#1E8436'),
+    _c('墨绿色', '墨绿色', '#47522A'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('浅棕色', '浅棕色', '#C17D3D'),
+    _c('闪光银', 'APC9600', '#C8CBD0'),
+
+]
+
+# PETG Metal  (14 色)
+
+ALLIZZ_PETG_METAL: list[dict] = [
+    _c('寒武岩灰蓝', 'AEC6600', '#6E8499'),
+    _c('松湖绿', 'AEC4600', '#4E9A6E'),
+    _c('钛暮紫', 'AEC7700', '#7A5B9A'),
+    _c('金属紫', 'AEC7600', '#8F6AA9'),
+    _c('闪光银', 'AEC9600', '#C8CBD0'),
+    _c('金属银', 'AEC9500', '#E3A87E'),
+    _c('黑镍色', 'AEC8900', '#393939'),
+    _c('香槟金', 'AEC9700', '#9A8163'),
+    _c('黄铜色', 'AEC3600', '#C58807'),
+    _c('铜色', 'AEC1700', '#7D614B'),
+    _c('红铜色', 'AEC1600', '#B0561A'),
+    _c('琥珀金', 'AEC9601', '#B8902A'),
+    _c('大理石', 'AEM8100', '#CFCED7'),
+    _c('钛空橙', 'AEC2600', '#E07A2A'),
+
+]
+
+# PETG Shiny  (2 色)
+
+ALLIZZ_PETG_SHINY: list[dict] = [
+    _c('闪耀黑', 'AEG8900', '#15181A'),
+    _c('闪耀红', 'AEG1700', '#C81F1A'),
+
+]
+
+# PETG CF  (2 色)
+
+ALLIZZ_PETG_CF: list[dict] = [
+    _c('PETG-CF 15%', 'AEF8961', '#26262A'),
+    _c('PETG-CF 5%', 'AEF8960', '#34343A'),
+
+]
+
+# PLA Translucent  (6 色)
+
+ALLIZZ_PLA_TRANSLUCENT: list[dict] = [
+    _c('天青绿', 'APT4300', '#7FBF9A'),
+    _c('碧落蓝', 'APT6300', '#5FA8D8'),
+    _c('霜雾白', 'APT8000', '#EAEFF2'),
+    _c('日照橙', 'APT2300', '#E07A2A'),
+    _c('云胭粉', 'APT1300', '#EFC6D2'),
+    _c('烟罗紫', 'APT7300', '#9B7FC0'),
+
+]
+
+# PLA Silk Multi  (8 色)
+
+ALLIZZ_PLA_SILK_MULTI: list[dict] = [
+    _c('丝绸双色蓝绿', 'APS9550', '#BCBFC3'),
+    _c('丝绸双色红蓝', 'APS9551', '#BCBFC3'),
+    _c('丝绸三色红金绿', 'APS9552', '#BCBFC3'),
+    _c('丝绸三色红金蓝', 'APS9554', '#BCBFC3'),
+    _c('丝绸三色蓝绿红', 'APS9553', '#BCBFC3'),
+    _c('丝绸三色金银铜', 'APS9555', '#BCBFC3'),
+    _c('丝绸三色青橙绿', 'APS9556', '#BCBFC3'),
+    _c('丝绸三色紫金红', 'APS9557', '#BCBFC3'),
+
+]
+
+# ABS Metal  (4 色)
+
+ALLIZZ_ABS_METAL: list[dict] = [
+    _c('黑镍色', 'ABC8900', '#393939'),
+    _c('氧化铝', 'ABC9500', '#AEB2B6'),
+    _c('闪亮银', 'ABC9600', '#C5C8CC'),
+    _c('香槟金', 'ABC9700', '#9A8163'),
+
+]
+
+# PA CF  (1 色)
+
+ALLIZZ_PA_CF: list[dict] = [
+    _c('黑色', 'AOF8960', '#1C1C1C'),
+
+]
+
+# PETG Matte  (11 色)
+
+ALLIZZ_PETG_MATTE: list[dict] = [
+    _c('黑', 'AEE8900', '#1A1A1A'),
+    _c('白色', 'AEE8000', '#E5E5E5'),
+    _c('浅灰色', 'AEE8300', '#C6C6C6'),
+    _c('肤色', 'AEE3100', '#F0DBCC'),
+    _c('红色', 'AEE1500', '#D0070D'),
+    _c('橙色', 'AEE2400', '#FC6A17'),
+    _c('柠檬绿', 'AEE4300', '#85B742'),
+    _c('军绿色', 'AEE4700', '#788142'),
+    _c('青色', 'AEE5500', '#41E9B7'),
+    _c('湖蓝色', 'AEE6500', '#0097D3'),
+    _c('克莱因蓝', 'AEE6700', '#2A49B3'),
+
+]
+
+# PETG Transparent  (11 色)
+
+ALLIZZ_PETG_TRANSPARENT: list[dict] = [
+    _c('透明黑', 'AET8900', '#65605D'),
+    _c('透明红', 'AET1500', '#F42F38'),
+    _c('透明橙', 'AET2500', '#ED9F12'),
+    _c('透明黄', 'AET3500', '#FDE41C'),
+    _c('透明绿', 'AET4500', '#CBEBAF'),
+    _c('透明青蓝', 'AET5500', '#7FD0D8'),
+    _c('透明蓝', 'AET6500', '#5974B9'),
+    _c('透明紫', 'AET7500', '#B7B1CC'),
+    _c('透明橘', 'AET2501', '#E89A6A'),
+    _c('透明茶', 'AET2300', '#C9A86A'),
+    _c('透明色', 'AET8000', '#E3E7E2'),
+
+]
+
 
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
@@ -2195,13 +2389,24 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PLA Silk": R3D_PLA_SILK,
     },
     "爱丽兹 Allizz": {
-        "ABS": ALLIZZ_ABS,
         "ASA": ALLIZZ_ASA,
-        "PETG HF": ALLIZZ_PETG_HF,
         "PETG Translucent": ALLIZZ_PETG_TRANSLUCENT,
+        "ABS": ALLIZZ_ABS,
+        "PETG HF": ALLIZZ_PETG_HF,
         "PLA Matte": ALLIZZ_PLA_MATTE,
         "PLA Silk": ALLIZZ_PLA_SILK,
         "TPU95A": ALLIZZ_TPU95A,
+        "PLA Pro": ALLIZZ_PLA_PRO,
+        "PLA Basic": ALLIZZ_PLA_BASIC,
+        "PETG Metal": ALLIZZ_PETG_METAL,
+        "PETG Shiny": ALLIZZ_PETG_SHINY,
+        "PETG CF": ALLIZZ_PETG_CF,
+        "PLA Translucent": ALLIZZ_PLA_TRANSLUCENT,
+        "PLA Silk Multi": ALLIZZ_PLA_SILK_MULTI,
+        "ABS Metal": ALLIZZ_ABS_METAL,
+        "PA CF": ALLIZZ_PA_CF,
+        "PETG Matte": ALLIZZ_PETG_MATTE,
+        "PETG Transparent": ALLIZZ_PETG_TRANSPARENT,
     },
 }
 
