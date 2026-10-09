@@ -4805,6 +4805,237 @@ DOWELL_PETG_MATTE: list[dict] = [
 ]
 
 
+# PLA  (8 色)
+
+RAISE3D_PLA: list[dict] = [
+    _c('白色', 'White', '#F5F5F5'),
+    _c('灰色', 'Grey / RAL 7000', '#78858B'),
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('红色', 'Red / RAL 3028', '#CB3234'),
+    _c('蓝色', 'Blue / RAL 5019', '#1B5583'),
+    _c('艺术白', 'Art White', '#F0EDE4'),
+    _c('黄色', 'Yellow / RAL 1026', '#FFFF00'),
+    _c('橙色', 'Orange / RAL 2001', '#C93C20'),
+
+]
+
+
+# HS PLA  (7 色)
+
+RAISE3D_HS_PLA: list[dict] = [
+    _c('白色', 'White', '#E8E8E2'),
+    _c('红色', 'Red / RAL 3028', '#CB3234'),
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('灰色', 'Grey / RAL 7045', '#8E959A'),
+    _c('蓝色', 'Blue / RAL 5010', '#0E294B'),
+    _c('黄色', 'Yellow / RAL 1023', '#FAD201'),
+    _c('橙色', 'Orange / RAL 2001', '#C93C20'),
+
+]
+
+
+# HS PLA Pro  (4 色)
+
+RAISE3D_HS_PLA_PRO: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('深蓝', 'Dark Blue / RAL 5003', '#1D1E7C'),
+    _c('砖红', 'Brick Red / RAL 3009', '#642424'),
+    _c('深绿', 'Dark Green / RAL 6005', '#0F4336'),
+
+]
+
+
+# ABS  (3 色)
+
+RAISE3D_ABS: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('灰色', 'Grey', '#8A8D8F'),
+    _c('白色', 'White', '#F5F5F5'),
+
+]
+
+
+# HS ABS  (3 色)
+
+RAISE3D_HS_ABS: list[dict] = [
+    _c('本色', 'Natural', '#E8E0CE'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('灰色', 'Grey', '#8A8D8F'),
+
+]
+
+
+# ABS-CF  (1 色)
+
+RAISE3D_ABS_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# ASA  (1 色)
+
+RAISE3D_ASA: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PETG  (4 色)
+
+RAISE3D_PETG: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('蓝色', 'Blue / RAL 5002', '#20214F'),
+    _c('红色', 'Red / RAL 2002', '#CC2A1E'),
+    _c('白色', 'White', '#F5F5F5'),
+
+]
+
+
+# PETG-ESD  (1 色)
+
+RAISE3D_PETG_ESD: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+
+]
+
+
+# PETG-CF  (1 色)
+
+RAISE3D_PETG_CF: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+
+]
+
+
+# PET-CF  (1 色)
+
+RAISE3D_PET_CF: list[dict] = [
+    _c('黑色', 'Black / RAL 7021', '#23282B'),
+
+]
+
+
+# HS PET-CF  (1 色)
+
+RAISE3D_HS_PET_CF: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+
+]
+
+
+# PET-GF  (4 色)
+
+RAISE3D_PET_GF: list[dict] = [
+    _c('黑色', 'Black / RAL 9017', '#222222'),
+    _c('红色', 'Red / RAL 3024', '#F80018'),
+    _c('橙色', 'Orange / RAL 2007', '#FFA420'),
+    _c('灰色', 'Gray / RAL 7040', '#9DA3A6'),
+
+]
+
+
+# PET 支撑  (1 色)
+
+RAISE3D_PET_SUPPORT: list[dict] = [
+    _c('本色', 'Natural', '#EDEAE2'),
+
+]
+
+
+# PA12-CF  (1 色)
+
+RAISE3D_PA12_CF: list[dict] = [
+    _c('黑色', 'Black / RAL 9004', '#282828'),
+
+]
+
+
+# PA12-CF 支撑  (1 色)
+
+RAISE3D_PA12_CF_SUPPORT: list[dict] = [
+    _c('粉色', 'Pink / RAL 3015', '#E2B1B2'),
+
+]
+
+
+# PPA-CF  (1 色)
+
+RAISE3D_PPA_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PPA-CF25  (1 色)
+
+RAISE3D_PPA_CF25: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PPA-GF  (2 色)
+
+RAISE3D_PPA_GF: list[dict] = [
+    _c('本色', 'Natural / RAL 9016', '#E8E0CE'),
+    _c('橙色', 'Orange / PMS 151', '#F47B20'),
+
+]
+
+
+# PPA-GF25  (1 色)
+
+RAISE3D_PPA_GF25: list[dict] = [
+    _c('白色', 'White', '#F5F5F5'),
+
+]
+
+
+# PPA 支撑  (1 色)
+
+RAISE3D_PPA_SUPPORT: list[dict] = [
+    _c('紫色', 'Purple / PMS 2635', '#A98FC7'),
+
+]
+
+
+# PPS-CF  (1 色)
+
+RAISE3D_PPS_CF: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+
+]
+
+
+# PC  (3 色)
+
+RAISE3D_PC: list[dict] = [
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('白色', 'White', '#F5F5F5'),
+    _c('透明', 'Transparent', '#DDE6EA'),
+
+]
+
+
+# TPU 95A  (3 色)
+
+RAISE3D_TPU_95A: list[dict] = [
+    _c('本色', 'Natural', '#E6E0D4'),
+    _c('黑色', 'Black / RAL 9011', '#1C1C1C'),
+    _c('白色', 'White', '#F5F5F5'),
+
+]
+
+
+# PVA+  (1 色)
+
+RAISE3D_PVA: list[dict] = [
+    _c('本色', 'Natural', '#EDEAE0'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -5098,6 +5329,33 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PETG": DOWELL_PETG,
         "PETG 哑光": DOWELL_PETG_MATTE,
     },
+    "Raise3D": {
+        "PLA": RAISE3D_PLA,
+        "HS PLA": RAISE3D_HS_PLA,
+        "HS PLA Pro": RAISE3D_HS_PLA_PRO,
+        "ABS": RAISE3D_ABS,
+        "HS ABS": RAISE3D_HS_ABS,
+        "ABS-CF": RAISE3D_ABS_CF,
+        "ASA": RAISE3D_ASA,
+        "PETG": RAISE3D_PETG,
+        "PETG-ESD": RAISE3D_PETG_ESD,
+        "PETG-CF": RAISE3D_PETG_CF,
+        "PET-CF": RAISE3D_PET_CF,
+        "HS PET-CF": RAISE3D_HS_PET_CF,
+        "PET-GF": RAISE3D_PET_GF,
+        "PET 支撑": RAISE3D_PET_SUPPORT,
+        "PA12-CF": RAISE3D_PA12_CF,
+        "PA12-CF 支撑": RAISE3D_PA12_CF_SUPPORT,
+        "PPA-CF": RAISE3D_PPA_CF,
+        "PPA-CF25": RAISE3D_PPA_CF25,
+        "PPA-GF": RAISE3D_PPA_GF,
+        "PPA-GF25": RAISE3D_PPA_GF25,
+        "PPA 支撑": RAISE3D_PPA_SUPPORT,
+        "PPS-CF": RAISE3D_PPS_CF,
+        "PC": RAISE3D_PC,
+        "TPU 95A": RAISE3D_TPU_95A,
+        "PVA+": RAISE3D_PVA,
+    },
 }
 
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
@@ -5148,7 +5406,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "HS PETG 透明",
         "HS PETG 多色",
         "PETG 燃烧钛",
-        "PETG 透光",],
+        "PETG 透光",
+        "PETG-ESD",],
     "PA": ["PA6-GF"
         "PA-CF",
         "PA6/66",
@@ -5157,7 +5416,13 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "NexPA-CF25",
         "NexPA-GF25",
         "PAHT-GF",
-        "S-PAHT",],
+        "S-PAHT",
+        "PA12-CF 支撑",
+        "PPA-CF",
+        "PPA-CF25",
+        "PPA-GF",
+        "PPA-GF25",
+        "PPA 支撑",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -5188,12 +5453,15 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     "PVA": [
         "PVA",
     
-        "S-Multi",],
+        "S-Multi",
+        "PVA+",],
 
     "PET": [
         "PET-CF",
         "PET-GF",
-    ],
+    
+        "HS PET-CF",
+        "PET 支撑",],
 
     "PEBA": [
         "PEBA 95A",
@@ -5201,5 +5469,9 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "PC": [
         "PC/ABS",
+    ],
+
+    "PPS": [
+        "PPS-CF",
     ],
 }
