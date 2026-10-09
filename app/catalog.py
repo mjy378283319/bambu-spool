@@ -230,6 +230,7 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "FusRock": [200.0],                # 估算值，建议称重校准
     "闪铸": [200.0],                   # 估算值，建议称重校准
     "Nature3d": [200.0],               # 估算值，建议称重校准
+    "卓普": [200.0],                    # 估算值，建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -287,6 +288,11 @@ BRAND_ALIASES: dict[str, str] = {
     "nature3d造物新材料": "Nature3d",
     "造物新材料": "Nature3d",
     "造物新材料工厂店": "Nature3d",
+    "zhuopu": "卓普",
+    "cc3d": "卓普",
+    "卓普cc3d": "卓普",
+    "卓普新材料": "卓普",
+    "杭州卓普": "卓普",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭
