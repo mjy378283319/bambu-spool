@@ -231,6 +231,7 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "闪铸": [200.0],                   # 估算值，建议称重校准
     "Nature3d": [200.0],               # 估算值，建议称重校准
     "卓普": [200.0],                    # 估算值，建议称重校准
+    "点维": [200.0],                    # 估算值，建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -293,6 +294,10 @@ BRAND_ALIASES: dict[str, str] = {
     "卓普cc3d": "卓普",
     "卓普新材料": "卓普",
     "杭州卓普": "卓普",
+    "dowell": "点维",
+    "dowell3d": "点维",
+    "点维dowell": "点维",
+    "洛阳点维": "点维",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭
