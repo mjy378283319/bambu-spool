@@ -3187,6 +3187,324 @@ INSLOGIC_PA12_CF: list[dict] = [
 ]
 
 
+# ---- FusRock / 闪铸 Flashforge（天猫/淘宝商品页 SKU 提色，近似值）----
+
+# PLA-Aero Pro  (3 色)
+
+FUSROCK_PLA_AERO_PRO: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('灰色', '灰色', '#888888'),
+    _c('军绿色', '军绿色', '#788142'),
+
+]
+
+
+# PETG-HF  (11 色)
+
+FUSROCK_PETG_HF: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('绿色', '绿色', '#1E8436'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('红色', '红色', '#D0070D'),
+    _c('黄色', '黄色', '#FEEC03'),
+    _c('肤色', '肤色', '#F0DBCC'),
+    _c('灰色', '灰色', '#888888'),
+    _c('棕色', '棕色', '#7C4628'),
+
+]
+
+
+# PETG-GF  (6 色)
+
+FUSROCK_PETG_GF: list[dict] = [
+    _c('磨砂黑', '磨砂黑', '#949494'),
+    _c('磨砂白', '磨砂白', '#E3E0D7'),
+    _c('磨砂红', '磨砂红', '#B62422'),
+    _c('磨砂蓝', '磨砂蓝', '#0B4693'),
+    _c('磨砂紫', '磨砂紫', '#5B4B8A'),
+    _c('磨砂绿', '磨砂绿', '#27B148'),
+
+]
+
+
+# PETG-CF HF  (1 色)
+
+FUSROCK_PETG_CF_HF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PET-CF  (1 色)
+
+FUSROCK_PET_CF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PET-GF  (8 色)
+
+FUSROCK_PET_GF: list[dict] = [
+    _c('米白色', '米白色', '#E3E3DF'),
+    _c('灰色', '灰色', '#888888'),
+    _c('红色', '红色', '#D0070D'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('天蓝色', '天蓝色', '#5596E3'),
+    _c('橘橙色', '橘橙色', '#F97C01'),
+    _c('棕色', '棕色', '#7C4628'),
+    _c('白色', '白色', '#E5E5E5'),
+
+]
+
+
+# ABS  (14 色)
+
+FUSROCK_ABS: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#E5E5E5'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('黄色', '黄色', '#FEEC03'),
+    _c('灰色', '灰色', '#888888'),
+    _c('红色', '红色', '#D0070D'),
+    _c('米白', '米白', '#F5F0E6'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('绿色', '绿色', '#1E8436'),
+    _c('军绿色', '军绿色', '#788142'),
+    _c('棕色', '棕色', '#7C4628'),
+    _c('肤色', '肤色', '#F0DBCC'),
+    _c('银色', '银色', '#B9BABF'),
+
+]
+
+
+# ABS-HF  (4 色)
+
+FUSROCK_ABS_HF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('米白色', '米白色', '#E3E3DF'),
+    _c('灰色', '灰色', '#888888'),
+    _c('白色', '白色', '#E5E5E5'),
+
+]
+
+
+# ABS-GF  (9 色)
+
+FUSROCK_ABS_GF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('黄色', '黄色', '#FEEC03'),
+    _c('灰色', '灰色', '#888888'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('草绿', '草绿', '#7FD530'),
+    _c('军绿', '军绿', '#343D1A'),
+    _c('红色', '红色', '#D0070D'),
+
+]
+
+
+# NexABS-CF20  (1 色)
+
+FUSROCK_NEXABS_CF20: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# ASA  (13 色)
+
+FUSROCK_ASA: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('米白色', '米白色', '#E3E3DF'),
+    _c('白色', '白色', '#E5E5E5'),
+    _c('红色', '红色', '#D0070D'),
+    _c('黄色', '黄色', '#FEEC03'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('灰色', '灰色', '#888888'),
+    _c('绿色', '绿色', '#1E8436'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('棕色', '棕色', '#7C4628'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('军绿色', '军绿色', '#788142'),
+    _c('银色', '银色', '#B9BABF'),
+
+]
+
+
+# ASA-Aero LT  (5 色)
+
+FUSROCK_ASA_AERO_LT: list[dict] = [
+    _c('本白色', '本白色', '#C54D5F'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('红色', '红色', '#D0070D'),
+    _c('灰色', '灰色', '#888888'),
+    _c('黄色', '黄色', '#FEEC03'),
+
+]
+
+
+# NexASA-CF20  (1 色)
+
+FUSROCK_NEXASA_CF20: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# TPU 95A HF  (5 色)
+
+FUSROCK_TPU_95A_HF: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('鲜绿色', '鲜绿色', '#3CB371'),
+    _c('灰色', '灰色', '#888888'),
+    _c('透明色', '透明色', '#E3E7E2'),
+
+]
+
+
+# TPU 85A  (5 色)
+
+FUSROCK_TPU_85A: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('肤色', '肤色', '#F0DBCC'),
+    _c('透明', '透明', '#254C85'),
+    _c('鲜绿色', '鲜绿色', '#3CB371'),
+
+]
+
+
+# TPU 90A HF  (3 色)
+
+FUSROCK_TPU_90A_HF: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('鲜绿色', '鲜绿色', '#3CB371'),
+
+]
+
+
+# TPU-Aero  (4 色)
+
+FUSROCK_TPU_AERO: list[dict] = [
+    _c('本白色', '本白色', '#C54D5F'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('荧光绿', '荧光绿', '#71F03F'),
+    _c('肤色', '肤色', '#F0DBCC'),
+
+]
+
+
+# TPU 64D  (2 色)
+
+FUSROCK_TPU_64D: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# TPU 78D  (2 色)
+
+FUSROCK_TPU_78D: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#E5E5E5'),
+
+]
+
+
+# PAHT  (2 色)
+
+FUSROCK_PAHT: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('本色', '本色', '#363638'),
+
+]
+
+
+# PA-CF  (1 色)
+
+FUSROCK_PA_CF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# NexPA-CF25  (1 色)
+
+FUSROCK_NEXPA_CF25: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# NexPA-GF25  (4 色)
+
+FUSROCK_NEXPA_GF25: list[dict] = [
+    _c('本色', '本色', '#363638'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('蓝色', '蓝色', '#2239A7'),
+
+]
+
+
+# PAHT-GF  (8 色)
+
+FUSROCK_PAHT_GF: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('本色', '本色', '#363638'),
+    _c('红色', '红色', '#D0070D'),
+    _c('灰色', '灰色', '#888888'),
+    _c('棕色', '棕色', '#7C4628'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('深灰色', '深灰色', '#4E4E4E'),
+
+]
+
+
+# PEBA 95A  (1 色)
+
+FUSROCK_PEBA_95A: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PC/ABS  (2 色)
+
+FUSROCK_PC_ABS: list[dict] = [
+    _c('本色', '本色', '#363638'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# S-Multi  (1 色)
+
+FUSROCK_S_MULTI: list[dict] = [
+    _c('本色', '本色', '#363638'),
+
+]
+
+
+# S-PAHT  (2 色)
+
+FUSROCK_S_PAHT: list[dict] = [
+    _c('本色', '本色', '#363638'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -3369,6 +3687,36 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PA6/66": INSLOGIC_PA6_66,
         "PA12-CF": INSLOGIC_PA12_CF,
     },
+    "FusRock": {
+        "PLA-Aero Pro": FUSROCK_PLA_AERO_PRO,
+        "PETG-HF": FUSROCK_PETG_HF,
+        "PETG-GF": FUSROCK_PETG_GF,
+        "PETG-CF HF": FUSROCK_PETG_CF_HF,
+        "PET-CF": FUSROCK_PET_CF,
+        "PET-GF": FUSROCK_PET_GF,
+        "ABS": FUSROCK_ABS,
+        "ABS-HF": FUSROCK_ABS_HF,
+        "ABS-GF": FUSROCK_ABS_GF,
+        "NexABS-CF20": FUSROCK_NEXABS_CF20,
+        "ASA": FUSROCK_ASA,
+        "ASA-Aero LT": FUSROCK_ASA_AERO_LT,
+        "NexASA-CF20": FUSROCK_NEXASA_CF20,
+        "TPU 95A HF": FUSROCK_TPU_95A_HF,
+        "TPU 85A": FUSROCK_TPU_85A,
+        "TPU 90A HF": FUSROCK_TPU_90A_HF,
+        "TPU-Aero": FUSROCK_TPU_AERO,
+        "TPU 64D": FUSROCK_TPU_64D,
+        "TPU 78D": FUSROCK_TPU_78D,
+        "PAHT": FUSROCK_PAHT,
+        "PA-CF": FUSROCK_PA_CF,
+        "NexPA-CF25": FUSROCK_NEXPA_CF25,
+        "NexPA-GF25": FUSROCK_NEXPA_GF25,
+        "PAHT-GF": FUSROCK_PAHT_GF,
+        "PEBA 95A": FUSROCK_PEBA_95A,
+        "PC/ABS": FUSROCK_PC_ABS,
+        "S-Multi": FUSROCK_S_MULTI,
+        "S-PAHT": FUSROCK_S_PAHT,
+    },
 }
 
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
@@ -3381,27 +3729,61 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     
         "PLA Rainbow",
         "PLA 魔幻双色",
-        "PLA 变色龙",],
+        "PLA 变色龙",
+        "PLA-Aero Pro",],
     "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光", "K5 PETG Rapid",
              "PETG Basic", "PETG HF", "PETG-CF", "PETG 夜光", "HS PETG 哑光", "PETG-Eco", "PETG GF", "PETG 闪粉", "PETG 金属", "PETG 星河", "PETG 大理石", "PETG Transparent", "HS PETG", "PETG Matte", "PETG Marble", "PETG Translucent",
         "PETG 2.0"
     
         "PETG+HS",
         "PETG UV变色",
-        "PETG Pro",],
+        "PETG Pro",
+        "PETG-HF",
+        "PETG-GF",
+        "PETG-CF HF",],
     "PA": ["PA6-GF"
         "PA-CF",
         "PA6/66",
-        "PA12-CF",],
+        "PA12-CF",
+        "PAHT",
+        "NexPA-CF25",
+        "NexPA-GF25",
+        "PAHT-GF",
+        "S-PAHT",],
     "ASA": ["ASA", "ASA 大理石"
-        "ASA+",],
+        "ASA+",
+        "ASA-Aero LT",
+        "NexASA-CF20",],
     "ABS": ["ABS", "ABS-Pro"
         "ABS+",
-        "ABS-CF",],
+        "ABS-CF",
+        "ABS-HF",
+        "ABS-GF",
+        "NexABS-CF20",],
     "TPU": ["TPU 95A", "TPU", "TPU95A"
-        "TPU90A",],
+        "TPU90A",
+        "TPU 95A HF",
+        "TPU 85A",
+        "TPU 90A HF",
+        "TPU-Aero",
+        "TPU 64D",
+        "TPU 78D",],
 
     "PVA": [
         "PVA",
+    
+        "S-Multi",],
+
+    "PET": [
+        "PET-CF",
+        "PET-GF",
+    ],
+
+    "PEBA": [
+        "PEBA 95A",
+    ],
+
+    "PC": [
+        "PC/ABS",
     ],
 }
