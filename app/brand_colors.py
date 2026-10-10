@@ -1417,6 +1417,78 @@ JAYO_丝绸_PLA: list[dict] = [
 
 ]
 
+# ---- JAYO 工程料（官方商城商品页色号）----
+
+# ABS  (8 色，官方商城 JAYO ABS 1KG)
+
+JAYO_ABS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('橙色', 'Orange', '#FF8C1A'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+
+]
+
+# ASA  (2 色，官方商城 ASA/Red、ASA/natural color)
+
+JAYO_ASA: list[dict] = [
+    _c('红色', 'Red', '#D0070D'),
+    _c('自然色', 'Natural', '#E8E4D8'),
+
+]
+
+# TPU 95A  (2 色，官方商城 0.5KG 95A)
+
+JAYO_TPU_95A: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+
+]
+
+# TPU Silk 98A  (5 色，官方商城 TPU SILK 1.1KG 98A)
+
+JAYO_TPU_SILK_98A: list[dict] = [
+    _c('浅蓝', 'Light Blue', '#7FB8DE'),
+    _c('酒红', 'Burgundy', '#7A2338'),
+    _c('奶油白', 'Cream White', '#F2EAD8'),
+    _c('深蓝', 'Dark Blue', '#1B3A6B'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA（Easy Nylon E-PA）  (2 色，官方商城 Black / Natural Color)
+
+JAYO_PA: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('自然色', 'Natural', '#E8E4D8'),
+
+]
+
+# PA6-CF  (1 色，80% PA6 + 20% 碳纤)
+
+JAYO_PA6_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
+# PA12-CF  (1 色，80% PA12 + 20% 碳纤)
+
+JAYO_PA12_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
+# PA6-GF  (1 色，75% PA6 + 25% 玻纤)
+
+JAYO_PA6_GF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
 # ---- 天瑞（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 TINMORRY_ASA_大理石: list[dict] = [
@@ -6293,6 +6365,14 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PLA 闪点": JAYO_PLA_闪点,
         "PLA+ 2.0": JAYO_PLA_20,
         "丝绸 PLA+": JAYO_丝绸_PLA,
+        "ABS": JAYO_ABS,
+        "ASA": JAYO_ASA,
+        "TPU 95A": JAYO_TPU_95A,
+        "TPU Silk 98A": JAYO_TPU_SILK_98A,
+        "PA": JAYO_PA,
+        "PA6-CF": JAYO_PA6_CF,
+        "PA12-CF": JAYO_PA12_CF,
+        "PA6-GF": JAYO_PA6_GF,
     },
     "天瑞": {
         "ASA 大理石": TINMORRY_ASA_大理石,
@@ -6744,13 +6824,16 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PA6 GF30",
         "K8 PA CF",
         "K9 PPA CF15",
-        "PA6-CF",],
+        "PA6-CF",
+        "PA12-CF",],
 
     "PA-CF": [
         "PA CF",
     
         "PAHT-CF",
-        "PA-CF",],
+        "PA-CF",
+        "PA6-CF",
+        "PA12-CF",],
 
     "PLA-CF": [
         "PLA碳纤维",
