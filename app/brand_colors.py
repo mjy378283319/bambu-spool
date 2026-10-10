@@ -3877,6 +3877,95 @@ FLASHFORGE_PETG_CF: list[dict] = [
 ]
 
 
+# TPU 95A  (3 色)
+
+FLASHFORGE_TPU95A: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# HIPS  (3 色，可溶性支撑，溶于柠檬烯)
+
+FLASHFORGE_HIPS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# PVA  (1 色，水溶性支撑)
+
+FLASHFORGE_PVA: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# PC  (3 色)
+
+FLASHFORGE_PC: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PC-ABS  (2 色)
+
+FLASHFORGE_PC_ABS: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PA6/66  (2 色)
+
+FLASHFORGE_PA6_66: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PA1010  (2 色)
+
+FLASHFORGE_PA1010: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PA12-CF  (1 色)
+
+FLASHFORGE_PA12_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PPA-CF  (1 色)
+
+FLASHFORGE_PPA_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PPS-CF  (1 色)
+
+FLASHFORGE_PPS_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
 # ---- Nature3d / 造物新材料（金华 Nature 3D，淘宝官方店 SKU 提色，近似值）----
 
 # PLA Pro  (15 色)
@@ -5895,6 +5984,16 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PET-CF": FLASHFORGE_PET_CF,
         "PET-GF": FLASHFORGE_PET_GF,
         "PETG-CF": FLASHFORGE_PETG_CF,
+        "TPU 95A": FLASHFORGE_TPU95A,
+        "HIPS": FLASHFORGE_HIPS,
+        "PVA": FLASHFORGE_PVA,
+        "PC": FLASHFORGE_PC,
+        "PC-ABS": FLASHFORGE_PC_ABS,
+        "PA6/66": FLASHFORGE_PA6_66,
+        "PA1010": FLASHFORGE_PA1010,
+        "PA12-CF": FLASHFORGE_PA12_CF,
+        "PPA-CF": FLASHFORGE_PPA_CF,
+        "PPS-CF": FLASHFORGE_PPS_CF,
     },
     "Nature3d": {
         "PLA Pro": NATURE3D_PLA_PRO,
