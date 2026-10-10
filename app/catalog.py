@@ -504,19 +504,188 @@ POLYMAKER_PETG: list[dict] = [
     _c("星空红", "Galaxy Red", "#BF1A11"),
 ]
 
+# ── Polymaker 全材料品类补全（2026-09-26 新增）─────────────────────
+# 官方站点商品页色卡；未公布 HEX 的按色名取近似（official=False）。
+
+# Panchroma™ Silk PLA（shop.polymaker.com，25 色）
+POLYMAKER_PANCHROMA_SILK: list[dict] = [
+    _c("丝绸黑", "Silk Black", "#363538"),
+    _c("丝绸紫", "Silk Purple", "#786BB0"),
+    _c("丝绸品红", "Silk Magenta", "#AA538E"),
+    _c("丝绸玫瑰", "Silk Rose", "#CF6076"),
+    _c("丝绸红", "Silk Red", "#C1443F"),
+    _c("丝绸玫瑰金", "Silk Rose Gold", "#CBB0B1"),
+    _c("丝绸石英粉", "Silk Quartz Pink", "#DBBBBB"),
+    _c("丝绸古铜", "Silk Bronze", "#AF6B4C"),
+    _c("丝绸橙", "Silk Orange", "#EB6232"),
+    _c("丝绸白", "Silk White", "#DFE4E4"),
+    _c("丝绸金", "Silk Gold", "#C49449"),
+    _c("丝绸黄", "Silk Yellow", "#EEC810"),
+    _c("丝绸青柠", "Silk Lime", "#C4CF4C"),
+    _c("丝绸绿", "Silk Green", "#55B687"),
+    _c("丝绸蓝绿", "Silk Teal", "#66C2B6"),
+    _c("丝绸浅蓝", "Silk Light Blue", "#4CC1CB"),
+    _c("丝绸蓝", "Silk Blue", "#4999C9"),
+    _c("丝绸铬", "Silk Chrome", "#85898B"),
+    _c("丝绸银", "Silk Silver", "#BCC2C8"),
+    _c("丝绸黄铜", "Silk Brass", "#968162"),
+    _c("丝绸橄榄绿", "Silk Peridot Green", "#7F865B"),
+    _c("丝绸长春花", "Silk Periwinkle", "#768EC7"),
+    _c("丝绸深蓝", "Silk Dark Blue", "#23599A"),
+    _c("丝绸枪灰", "Silk Gunmetal Grey", "#676B6A"),
+    _c("丝绸粉", "Silk Pink", "#FFA7C4"),
+]
+
+# Panchroma™ Galaxy PLA（6 色）
+POLYMAKER_PANCHROMA_GALAXY: list[dict] = [
+    _c("星空黑", "Galaxy Black", "#161617"),
+    _c("星空深蓝", "Galaxy Dark Blue", "#18192D"),
+    _c("星空深红", "Galaxy Dark Red", "#451E14"),
+    _c("星空深绿", "Galaxy Dark Green", "#13484D"),
+    _c("星空深灰", "Galaxy Dark Grey", "#4E5658"),
+    _c("星空红（Hedgehog）", "Hedgehog Makes Galaxy Red", "#760007"),
+]
+
+# Panchroma™ Marble PLA（5 色）
+POLYMAKER_PANCHROMA_MARBLE: list[dict] = [
+    _c("大理石白", "Marble White", "#D7D4DA"),
+    _c("大理石石灰蓝", "Marble Slate Grey", "#94B9C2"),
+    _c("大理石砖红", "Marble Brick", "#CD7456"),
+    _c("大理石石灰岩", "Marble Limestone", "#BCBEBE"),
+    _c("大理石砂岩", "Marble Sandstone", "#C1BE97"),
+]
+
+# PolyWood™（PLA 基木纹发泡，1 色）
+POLYMAKER_POLYWOOD: list[dict] = [
+    _c("木色", "Wood", "#D2A273"),
+]
+
+# PolyMax™ PETG（2 色）
+POLYMAKER_POLYMAX_PETG: list[dict] = [
+    _c("黑色", "Black", "#181718"),
+    _c("白色", "White", "#EFECEB"),
+]
+
+# PolyLite™ ABS（1 色，官方页面仅显 Black）
+POLYMAKER_POLYLITE_ABS: list[dict] = [
+    _c("黑色", "Black", "#16161A"),
+]
+
+# Polymaker™ ASA（原 PolyLite™ ASA，1 色）
+POLYMAKER_ASA: list[dict] = [
+    _c("黑色", "Black", "#17161A"),
+]
+
+# PolyLite™ PC（1 色，透明）
+POLYMAKER_POLYLITE_PC: list[dict] = [
+    _c("透明", "Transparent", "#DAD5D4"),
+]
+
+# PolyMide™ CoPA（共聚酰胺，2 色）
+POLYMAKER_POLYMIDE_COPA: list[dict] = [
+    _c("黑色", "Black", "#161618"),
+    _c("本白", "Natural", "#E8D795"),
+]
+
+# PolyMide™ PA6-GF（玻纤尼龙，1 色）
+POLYMAKER_POLYMIDE_PA6_GF: list[dict] = [
+    _c("灰色", "Grey", "#615D5C"),
+]
+
+# PolyMide™ PA6-CF（碳纤尼龙，1 色）
+POLYMAKER_POLYMIDE_PA6_CF: list[dict] = [
+    _c("黑色", "Black", "#312F2F"),
+]
+
+# PolyMide™ PA12-CF（碳纤尼龙，1 色）
+POLYMAKER_POLYMIDE_PA12_CF: list[dict] = [
+    _c("黑色", "Black", "#161618"),
+]
+
+# PolyFlex™ TPU95（邵氏 95A，6 色；非黑为近似）
+POLYMAKER_POLYFLEX_TPU95: list[dict] = [
+    _c("黑色", "Black", "#16161A"),
+    _c("白色", "White", "#F2F2F2", official=False),
+    _c("蓝色", "Blue", "#1B4F9C", official=False),
+    _c("红色", "Red", "#DD1116", official=False),
+    _c("黄色", "Yellow", "#F5D400", official=False),
+    _c("橙色", "Orange", "#F07B22", official=False),
+]
+
+# PolyFlex™ TPU90（邵氏 90A，5 色；Clear 为近似）
+POLYMAKER_POLYFLEX_TPU90: list[dict] = [
+    _c("黑色", "Black", "#101820"),
+    _c("白色", "White", "#FFFFFF"),
+    _c("灰色", "Grey", "#453536"),
+    _c("品牌青", "Polymaker Teal", "#2DCCD3"),
+    _c("透明", "Clear", "#D6E4E4", official=False),
+]
+
+# PolySmooth™（PVB 基，易抛光，12 色；HEX 均为近似）
+POLYMAKER_POLYSMOOTH: list[dict] = [
+    _c("雪白", "Snow White", "#F2EFE9", official=False),
+    _c("透明", "Transparent", "#D8E4E4", official=False),
+    _c("砂岩米", "Sandstone Beige", "#D8C9A8", official=False),
+    _c("芥末黄", "Mustard Yellow", "#E3B23C", official=False),
+    _c("粉色", "Pink", "#E3A6B8", official=False),
+    _c("橙色", "Orange", "#F0882E", official=False),
+    _c("珊瑚红", "Coral Red", "#E5564E", official=False),
+    _c("电光蓝", "Electric Blue", "#1B6FC4", official=False),
+    _c("品牌青", "Polymaker Teal", "#2DCCD3", official=False),
+    _c("三叶草绿", "Shamrock Green", "#2E9E5B", official=False),
+    _c("石板灰", "Slate Grey", "#5B6166", official=False),
+    _c("亮黑", "Jet Black", "#16161A", official=False),
+]
+
+# PolyCast™（PVB 基可浇铸，1 色）
+POLYMAKER_POLYCAST: list[dict] = [
+    _c("本白", "Natural", "#E9DFD3"),
+]
+
+# PolyDissolve™ S1（PVA 支撑，1 色；近似）
+POLYMAKER_POLYDISSOLVE_S1: list[dict] = [
+    _c("本白", "Natural", "#EAE3D2", official=False),
+]
+
 # 品牌 -> 系列 -> 色卡
 BRAND_COLOR_SERIES: dict[str, dict[str, list[dict]]] = {
     "Polymaker": {
         "Panchroma PLA": POLYMAKER_PANCHROMA_PLA,
         "Panchroma 哑光 PLA": POLYMAKER_PANCHROMA_MATTE,
         "PETG": POLYMAKER_PETG,
+        "Panchroma Silk PLA": POLYMAKER_PANCHROMA_SILK,
+        "Panchroma Galaxy PLA": POLYMAKER_PANCHROMA_GALAXY,
+        "Panchroma Marble PLA": POLYMAKER_PANCHROMA_MARBLE,
+        "PolyWood": POLYMAKER_POLYWOOD,
+        "PolyMax PETG": POLYMAKER_POLYMAX_PETG,
+        "PolyLite ABS": POLYMAKER_POLYLITE_ABS,
+        "Polymaker ASA": POLYMAKER_ASA,
+        "PolyLite PC": POLYMAKER_POLYLITE_PC,
+        "PolyMide CoPA": POLYMAKER_POLYMIDE_COPA,
+        "PolyMide PA6-GF": POLYMAKER_POLYMIDE_PA6_GF,
+        "PolyMide PA6-CF": POLYMAKER_POLYMIDE_PA6_CF,
+        "PolyMide PA12-CF": POLYMAKER_POLYMIDE_PA12_CF,
+        "PolyFlex TPU95": POLYMAKER_POLYFLEX_TPU95,
+        "PolyFlex TPU90": POLYMAKER_POLYFLEX_TPU90,
+        "PolySmooth": POLYMAKER_POLYSMOOTH,
+        "PolyCast": POLYMAKER_POLYCAST,
+        "PolyDissolve S1": POLYMAKER_POLYDISSOLVE_S1,
     },
 }
 
 # 材料 -> 该品牌下适用的系列
 MATERIAL_COLOR_SERIES: dict[str, list[str]] = {
-    "PLA": ["Panchroma PLA", "Panchroma 哑光 PLA"],
-    "PETG": ["PETG"],
+    "PLA": ["Panchroma PLA", "Panchroma 哑光 PLA", "Panchroma Silk PLA",
+            "Panchroma Galaxy PLA", "Panchroma Marble PLA", "PolyWood"],
+    "PETG": ["PETG", "PolyMax PETG"],
+    "ABS": ["PolyLite ABS"],
+    "ASA": ["Polymaker ASA"],
+    "PC": ["PolyLite PC"],
+    "PA": ["PolyMide CoPA", "PolyMide PA6-GF"],
+    "PA-CF": ["PolyMide PA6-CF", "PolyMide PA12-CF"],
+    "TPU": ["PolyFlex TPU95", "PolyFlex TPU90"],
+    "其他": ["PolySmooth", "PolyCast"],
+    "PVA": ["PolyDissolve S1"],
 }
 
 # Kexcelled / 兰博 / 魔创 / 大简 的配色数据在 brand_colors.py（自动生成），在此合并
