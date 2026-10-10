@@ -4590,6 +4590,60 @@ NATURE3D_HS_PETG: list[dict] = [
 ]
 
 
+# ---- Nature3d 工程料 / 支撑料（官网 FAQ 烘干表所列在产材料，工程常规配色）----
+
+# PC  (2 色)
+
+NATURE3D_PC: list[dict] = [
+    _c('透明', 'Transparent', '#DCE6E8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA  (2 色)
+
+NATURE3D_PA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA-CF  (1 色，碳纤增强尼龙)
+
+NATURE3D_PA_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
+# TPU（Flexible/Elastic）  (2 色)
+
+NATURE3D_TPU: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+
+]
+
+# PVA  (1 色，水溶性支撑)
+
+NATURE3D_PVA: list[dict] = [
+    _c('自然色', 'Natural', '#F2ECDD'),
+
+]
+
+# PP  (1 色；MATERIALS 无 PP 键 -> 归「其他」)
+
+NATURE3D_PP: list[dict] = [
+    _c('本色', 'Natural', '#EDEAE0'),
+
+]
+
+# PP-CF  (1 色，碳纤增强聚丙烯；归「其他」)
+
+NATURE3D_PP_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
 # ---- 卓普 CC3D（杭州卓普新材料，淘宝官方店 SKU 提色，近似值）----
 
 # PLA  (53 色)
@@ -6439,6 +6493,13 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "HS PLA": NATURE3D_HS_PLA,
         "HS ABS": NATURE3D_HS_ABS,
         "HS PETG": NATURE3D_HS_PETG,
+        "PC": NATURE3D_PC,
+        "PA": NATURE3D_PA,
+        "PA-CF": NATURE3D_PA_CF,
+        "TPU": NATURE3D_TPU,
+        "PVA": NATURE3D_PVA,
+        "PP": NATURE3D_PP,
+        "PP-CF": NATURE3D_PP_CF,
     },
     "卓普": {
         "PLA": ZHUOPU_PLA,
@@ -6651,7 +6712,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     "PA-CF": [
         "PA CF",
     
-        "PAHT-CF",],
+        "PAHT-CF",
+        "PA-CF",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -6729,7 +6791,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PP-CF",
         "PP",
         "PVB",
-        "PEBA 90A",],
+        "PEBA 90A",
+        "PP-CF",],
 
     "PBT": [
         "PBT 基础",
