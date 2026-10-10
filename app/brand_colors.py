@@ -3395,6 +3395,35 @@ INSLOGIC_PA12_CF: list[dict] = [
 ]
 
 
+# ASA  (3 色)
+
+INSLOGIC_ASA: list[dict] = [
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('灰色', '灰色', '#888888'),
+
+]
+
+
+# PC  (3 色)
+
+INSLOGIC_PC: list[dict] = [
+    _c('本色', '本色', '#D8D4C8'),
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PC-ABS  (2 色)
+
+INSLOGIC_PC_ABS: list[dict] = [
+    _c('本色', '本色', '#D8D4C8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
 # ---- FusRock / 闪铸 Flashforge（天猫/淘宝商品页 SKU 提色，近似值）----
 
 # PLA-Aero Pro  (3 色)
@@ -6145,6 +6174,9 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "TPU90A": INSLOGIC_TPU90A,
         "PA6/66": INSLOGIC_PA6_66,
         "PA12-CF": INSLOGIC_PA12_CF,
+        "ASA": INSLOGIC_ASA,
+        "PC": INSLOGIC_PC,
+        "PC-ABS": INSLOGIC_PC_ABS,
     },
     "FusRock": {
         "PLA-Aero Pro": FUSROCK_PLA_AERO_PRO,
