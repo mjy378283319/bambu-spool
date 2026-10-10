@@ -6861,7 +6861,9 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "ABS Pro 闪光",
         "HS ABS",
         "ABS 基础",
-        "K5 ABS",],
+        "K5 ABS",
+        "PC-ABS",
+        "PC/ABS",],
     "TPU": ["TPU 95A", "TPU", "TPU95A"
         "TPU90A",
         "TPU 95A HF",
@@ -6904,7 +6906,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PC 基础",
         "PC GF30",
         "K8 PC",
-        "PC",],
+        "PC",
+        "PC-ABS",],
 
     "PPS": [
         "PPS-CF",
