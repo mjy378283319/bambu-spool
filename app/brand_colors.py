@@ -2691,6 +2691,47 @@ SUNLU_PA6_GF: list[dict] = [
 ]
 
 
+# PC  (1 色，官方 SKU：PC Natural)
+
+SUNLU_PC: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# PC-ABS  (2 色，官方 SKU：PCABS White / Black)
+
+SUNLU_PC_ABS: list[dict] = [
+    _c('白色', 'White', '#E5E5E5'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PA6-CF  (1 色，官方 SKU：PA6CF Black)
+
+SUNLU_PA6_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PA12-CF  (1 色，官方 SKU：PA12CF Black)
+
+SUNLU_PA12_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# PVA  (1 色，官方公布色号：透明黄 #F6EB61)
+
+SUNLU_PVA: list[dict] = [
+    _co('透明黄', 'Transparent Yellow', '#F6EB61'),
+
+]
+
+
 # ---- eSUN 易生（天猫/淘宝旗舰店色卡，商品页 SKU 提色，近似值）----
 
 # PLA+  (56 色)
@@ -6035,6 +6076,11 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "ABS": SUNLU_ABS,
         "ASA": SUNLU_ASA,
         "PA6-GF": SUNLU_PA6_GF,
+        "PC": SUNLU_PC,
+        "PC-ABS": SUNLU_PC_ABS,
+        "PA6-CF": SUNLU_PA6_CF,
+        "PA12-CF": SUNLU_PA12_CF,
+        "PVA": SUNLU_PVA,
     },
     "eSUN易生": {
         "PLA+": ESUN_PLA_PLUS,
@@ -6354,7 +6400,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PA 基础",
         "PA6 GF30",
         "K8 PA CF",
-        "K9 PPA CF15",],
+        "K9 PPA CF15",
+        "PA6-CF",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -6415,7 +6462,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     
         "PC 基础",
         "PC GF30",
-        "K8 PC",],
+        "K8 PC",
+        "PC",],
 
     "PPS": [
         "PPS-CF",
