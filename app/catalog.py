@@ -233,6 +233,7 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "卓普": [200.0],                    # 估算值，建议称重校准
     "点维": [200.0],                    # 估算值，建议称重校准
     "Raise3D": [200.0],                 # 估算值，建议称重校准
+    "FULLJOY": [1000.0],                # 估算值（1kg 标准盘），建议称重校准
 }
 # 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
@@ -305,6 +306,11 @@ BRAND_ALIASES: dict[str, str] = {
     "raise3d复志": "Raise3D",
     "复志": "Raise3D",
     "上海复志": "Raise3D",
+    # FULLJOY（元嘉生物科技）：淘宝官方旗舰店
+    "fulljoy": "FULLJOY",
+    "fulljoy旗舰店": "FULLJOY",
+    "元嘉": "FULLJOY",
+    "元嘉生物": "FULLJOY",
 }
 
 # 规范名自己也进查找表，这样 normalize_brand 可以一把梭
