@@ -94,13 +94,24 @@ def test_normalize() -> None:
     # 这一条是防回归的 —— 品牌表在 catalog.py 里，删掉之后如果别名表没跟着删，
     # 老写法还会被「复活」成已删除的品牌名，界面上就又冒出来了。
     # ⚠️ JAYO 已回归（2026-09：补齐官方 225 色色卡后重新上架），不再列在这里。
-    removed = ["eSUN 易生", "三绿 Sunlu", "创想三维 Creality", "Overture", "Prusament"]
+    # ⚠️ eSUN易生 / 三绿 Sunlu 已回归（2026-10：补齐色卡后重新上架），不再列在这里。
+    removed = ["创想三维 Creality", "Overture", "Prusament"]
     for name in removed:
         check(f"已删除品牌不在预设里：{name}", name not in BRAND_PRESETS, str(BRAND_PRESETS))
-    for raw in ("esun", "易生", "三绿", "sunlu", "creality", "创想三维",
-                "overture", "prusament"):
+    for raw in ("creality", "创想三维", "overture", "prusament"):
         got = normalize_brand(raw)
         check(f"已删除品牌的写法原样保留：{raw}", got == raw, f"实际 {got!r}")
+
+    # 回归品牌：老写法要能归一到新规范名，且在预设里、有皮重
+    returned = [
+        ("esun", "eSUN易生"), ("易生", "eSUN易生"), ("esun易生", "eSUN易生"),
+        ("sunlu", "三绿 Sunlu"), ("三绿", "三绿 Sunlu"), ("三绿sunlu", "三绿 Sunlu"),
+    ]
+    for raw, want in returned:
+        got = normalize_brand(raw)
+        check(f"回归品牌归一 {raw!r} -> {want}", got == want, f"实际 {got!r}")
+        check(f"回归品牌在预设里：{want}", want in BRAND_PRESETS, str(BRAND_PRESETS))
+        check(f"回归品牌有皮重：{want}", spool_weight_options(want) != [], "空列表")
 
     # 保留的品牌照旧
     for name in ("拓竹", "Polymaker", "大简", "爱丽兹 Allizz", "Kexcelled", "兰博", "魔创",

@@ -237,7 +237,9 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
     "易泰龙": [1000.0],                 # 估算值（1kg 标准盘），建议称重校准
     "巴斯夫": [1000.0],                 # 估算值（1kg 标准盘），建议称重校准
 }
-# 说明：eSUN 易生 / 三绿 Sunlu / 创想三维 Creality / Overture / Prusament
+# 说明：eSUN易生 / 三绿 Sunlu 已于 2026-10 补齐色卡后重新上架（老别名
+# esun/易生/三绿/sunlu 等同步指回规范名，见下方 BRAND_ALIASES）。
+# 创想三维 Creality / Overture / Prusament 仍在下架名单：
 # 曾经在列表里，现已按下架处理（用不到的品牌留在下拉里只会拖长候选）。
 # 老库里若有这些品牌的料盘，数据不动，只是不再出现在预设中；
 # 用户如果想再要，可以在「设置 → 自定义品牌」里自己加回来。
