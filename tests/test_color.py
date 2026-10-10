@@ -563,8 +563,11 @@ else:
         check("scope=inventory 不查色卡", "catalog" not in body4 and "inventory" in body4)
 
         # 阈值外兜底：给 nearest 但不给 matches
+        # ⚠️ 阈值取下限 0.5（接口的最小值）：色卡补到 4000+ 色后，纯绿 #00FF00
+        # 已经能匹配到 Kexcelled 夜光绿 #39FF14（ΔE≈0.89），用原来的 1.0 会变成
+        # 「有匹配」而走不到兜底分支。0.5 仍能完整检验「阈值内无结果→给 nearest」。
         r = client.post("/api/color/match", json={
-            "colors": ["#00FF00"], "max_delta_e": 1.0,
+            "colors": ["#00FF00"], "max_delta_e": 0.5,
         })
         body5 = r.json()["colors"][0]
         check("阈值内无结果时给 nearest", not body5["catalog"] and body5.get("nearest_catalog"),

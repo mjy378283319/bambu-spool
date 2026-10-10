@@ -834,6 +834,142 @@ MOCRE_ABS: list[dict] = [
     _c('蓝色', "", '#0A6ADD'),
 ]
 
+# K5 ABS  (34 色，官方 SKU 色名)
+
+KEXCELLED_K5_ABS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('自然色', 'Natural', '#D8D4C8'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('透明白', 'Transparent White', '#E8F4F8'),
+    _c('消防红', 'Fire Engine Red', '#C1121F'),
+    _c('粉色', 'Pink', '#FC737F'),
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('橘黄色', 'Tangerine Yellow', '#FFB300'),
+    _c('卡其色', 'Beige', '#C3B091'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('肤色', 'Skin', '#F0DBCC'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('天蓝色', 'Sky Blue', '#4FA8E0'),
+    _c('湖蓝色', 'Lake Blue', '#2DCDCC'),
+    _c('蔚蓝色', 'Azure', '#1E7FD4'),
+    _c('孔雀蓝', 'Peacock Blue', '#1B9AAA'),
+    _c('海军蓝', 'Navy', '#1B2A4A'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('青色', 'Cyan', '#41E9B7'),
+    _c('嫩绿色', 'Light Green', '#8FD14F'),
+    _c('荧光绿', 'Fluorescent Green', '#6BFF3D'),
+    _c('橄榄绿', 'Olive Green', '#719764'),
+    _c('墨绿', 'Dark Green', '#1E4D2B'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('金色', 'Gold', '#D4AF37'),
+    _c('青铜色', 'Bronze', '#8C7853'),
+    _c('古铜色', 'Copper', '#6F4E37'),
+    _c('棕色', 'Brown', '#6B4423'),
+    _c('巧克力色', 'Chocolate', '#4A2C1A'),
+    _c('紫色', 'Purple', '#B131A5'),
+    _c('薰衣草紫', 'Lavender', '#B57EDC'),
+    _c('咖啡灰色', 'Coffee Gray', '#8B7D6B'),
+    _c('夜光绿', 'Glow Green', '#39FF14'),
+
+]
+
+
+# K5 ASA  (5 色)
+
+KEXCELLED_K5_ASA: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('蓝色', 'Blue', '#2239A7'),
+
+]
+
+
+# K8 TPU 95A  (24 色，官方色表)
+
+KEXCELLED_K8_TPU95A: list[dict] = [
+    _c('黄色', 'Yellow', '#FEEC03'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('橙色', 'Orange', '#FC6A17'),
+    _c('粉色', 'Pink', '#FC737F'),
+    _c('橄榄绿', 'Olive', '#719764'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('红色', 'Red', '#D0070D'),
+    _c('湖蓝', 'Lake Blue', '#2DCDCC'),
+    _c('灰色', 'Gray', '#888888'),
+    _c('孔雀蓝', 'Peacock Blue', '#1B9AAA'),
+    _c('蓝色', 'Blue', '#2239A7'),
+    _c('绿色', 'Green', '#1E8436'),
+    _c('浅粉', 'Light Pink', '#F7C6D0'),
+    _c('浅蓝', 'Light Blue', '#7FB2E5'),
+    _c('透明白', 'Transparent White', '#E8F4F8'),
+    _c('透明红', 'Transparent Red', '#F2C4C4'),
+    _c('透明蓝', 'Transparent Blue', '#C4D8F2'),
+    _c('透明绿', 'Transparent Green', '#C8E6C9'),
+    _c('透明', 'Transparent', '#D8E4E4'),
+    _c('荧光黄', 'Fluorescent Yellow', '#E8FF3D'),
+    _c('品红', 'Magenta', '#E3127E'),
+    _c('银色', 'Silver', '#C0C0C0'),
+    _c('极致灰', 'Ultimate Gray', '#9A9A9A'),
+    _c('紫色', 'Purple', '#B131A5'),
+
+]
+
+
+# K8 PC  (3 色)
+
+KEXCELLED_K8_PC: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+
+]
+
+
+# K8 PA CF  (1 色，碳纤尼龙)
+
+KEXCELLED_K8_PA_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# K9 PPA CF15  (1 色)
+
+KEXCELLED_K9_PPA_CF15: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+
+# K6 PVA  (1 色，水溶性支撑)
+
+KEXCELLED_K6_PVA: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# K6 HIPS  (3 色，可溶性支撑，溶于柠檬烯)
+
+KEXCELLED_K6_HIPS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
+# K6 BVOH  (1 色，水溶性支撑)
+
+KEXCELLED_K6_BVOH: list[dict] = [
+    _c('本色', 'Natural', '#D8D4C8'),
+
+]
+
+
 # ---- 锐造（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 RUIZAO_PLA: list[dict] = [
@@ -5754,6 +5890,15 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "K5 PETG": KEXCELLED_K5_PETG,
         "K5 PETG 哑光": KEXCELLED_K5_PETG_MATTE,
         "K5 PETG Rapid": KEXCELLED_K5_PETG_RAPID,
+        "K5 ABS": KEXCELLED_K5_ABS,
+        "K5 ASA": KEXCELLED_K5_ASA,
+        "K8 TPU 95A": KEXCELLED_K8_TPU95A,
+        "K8 PC": KEXCELLED_K8_PC,
+        "K8 PA CF": KEXCELLED_K8_PA_CF,
+        "K9 PPA CF15": KEXCELLED_K9_PPA_CF15,
+        "K6 PVA": KEXCELLED_K6_PVA,
+        "K6 HIPS": KEXCELLED_K6_HIPS,
+        "K6 BVOH": KEXCELLED_K6_BVOH,
     },
     "拓竹": {
         "PLA Basic": BAMBU_PLA_BASIC,
@@ -6207,13 +6352,16 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PPA-GF25",
         "PPA 支撑",
         "PA 基础",
-        "PA6 GF30",],
+        "PA6 GF30",
+        "K8 PA CF",
+        "K9 PPA CF15",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
         "NexASA-CF20",
         "ASA-CF",
-        "ASA 闪光",],
+        "ASA 闪光",
+        "K5 ASA",],
     "ABS": ["ABS", "ABS-Pro"
         "ABS+",
         "ABS-CF",
@@ -6224,7 +6372,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "ABS Pro",
         "ABS Pro 闪光",
         "HS ABS",
-        "ABS 基础",],
+        "ABS 基础",
+        "K5 ABS",],
     "TPU": ["TPU 95A", "TPU", "TPU95A"
         "TPU90A",
         "TPU 95A HF",
@@ -6239,13 +6388,15 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "TPU 渐变",
         "TPU 透明",
         "TPU 夜光",
-        "TPU 温变",],
+        "TPU 温变",
+        "K8 TPU 95A",],
 
     "PVA": [
         "PVA",
     
         "S-Multi",
-        "PVA+",],
+        "PVA+",
+        "K6 PVA",],
 
     "PET": [
         "PET-CF",
@@ -6263,7 +6414,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PC/ABS",
     
         "PC 基础",
-        "PC GF30",],
+        "PC GF30",
+        "K8 PC",],
 
     "PPS": [
         "PPS-CF",
@@ -6283,9 +6435,14 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "HIPS": [
         "HIPS 基础",
-    ],
+    
+        "K6 HIPS",],
 
     "PMMA": [
         "PMMA 基础",
+    ],
+
+    "BVOH": [
+        "K6 BVOH",
     ],
 }
