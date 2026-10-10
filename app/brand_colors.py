@@ -5074,6 +5074,62 @@ ZHUOPU_TPU_85A: list[dict] = [
 ]
 
 
+# ---- CC3D 工业料系列（官网品类 + 工程塑料常规配色，近似值）----
+
+# ABS  (2 色，官方 SKU CC3DABS1BLACK10 黑 / ABS+ Pro 白)
+
+ZHUOPU_ABS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+
+]
+
+# ASA  (2 色)
+
+ZHUOPU_ASA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PC  (2 色)
+
+ZHUOPU_PC: list[dict] = [
+    _c('透明', 'Transparent', '#DCE6E8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA（尼龙）  (2 色)
+
+ZHUOPU_PA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# HIPS  (2 色)
+
+ZHUOPU_HIPS: list[dict] = [
+    _c('本色', 'Natural', '#F0EFE8'),
+    _c('白色', 'White', '#E5E5E5'),
+
+]
+
+# PP  (1 色)
+
+ZHUOPU_PP: list[dict] = [
+    _c('本色', 'Natural', '#EDEAE0'),
+
+]
+
+# PVB  (1 色，水溶性支撑，MATERIALS 无 PVB 键 -> 归「其他」)
+
+ZHUOPU_PVB: list[dict] = [
+    _c('本色', 'Natural', '#E6E2D5'),
+
+]
+
 # ---- 点维 Dowell（洛阳点维电子科技，官网 Color 规格，英文色名译中文 / HEX 近似）----
 
 # PLA  (14 色)
@@ -6370,6 +6426,13 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "TPU 72D": ZHUOPU_TPU_72D,
         "TPU 90A": ZHUOPU_TPU_90A,
         "TPU 85A": ZHUOPU_TPU_85A,
+        "ABS": ZHUOPU_ABS,
+        "ASA": ZHUOPU_ASA,
+        "PC": ZHUOPU_PC,
+        "PA": ZHUOPU_PA,
+        "HIPS": ZHUOPU_HIPS,
+        "PP": ZHUOPU_PP,
+        "PVB": ZHUOPU_PVB,
     },
     "点维": {
         "PLA": DOWELL_PLA,
@@ -6623,7 +6686,9 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PET-CF",
         "PET-GF",
     
-        "PP-CF",],
+        "PP-CF",
+        "PP",
+        "PVB",],
 
     "PBT": [
         "PBT 基础",
