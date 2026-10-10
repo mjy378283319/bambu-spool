@@ -5924,6 +5924,30 @@ BASF_RPET: list[dict] = [
 ]
 
 
+# PVA  (1 色，InnoSolve 水溶性支撑，官方 Natural)
+
+BASF_PVA: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+
+]
+
+
+# BVOH  (1 色，Ultrafuse BVOH 水溶性支撑，官方 Natural)
+
+BASF_BVOH: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+
+]
+
+
+# HIPS  (1 色，Ultrafuse HiPS 可溶性支撑，官方 Natural)
+
+BASF_HIPS: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -6318,6 +6342,9 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PP": BASF_PP,
         "TPU": BASF_TPU,
         "rPET": BASF_RPET,
+        "PVA": BASF_PVA,
+        "BVOH": BASF_BVOH,
+        "HIPS": BASF_HIPS,
     },
 }
 
