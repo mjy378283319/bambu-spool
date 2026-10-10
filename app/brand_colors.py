@@ -5242,6 +5242,259 @@ FULLJOY_PETG: list[dict] = [
 ]
 
 
+# ABS 基础  (7 色)
+
+YITAILONG_ABS_BASE: list[dict] = [
+    _c('米白色', '米白色', '#F0EAD8'),
+    _c('米色', '米色', '#E8DCC0'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('本色', '本色', '#D9D4C5'),
+    _c('前本色后黑色', '前本色后黑色', '#EDEAE0'),
+    _c('乳白色', '乳白色', '#F5EFE0'),
+    _c('白色', '白色', '#F5F5F5'),
+
+]
+
+
+# HIPS 基础  (1 色)
+
+YITAILONG_HIPS_BASE: list[dict] = [
+    _c('白色', '白色', '#F5F5F5'),
+
+]
+
+
+# PA 基础  (6 色)
+
+YITAILONG_PA_BASE: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('透明本色', '透明本色', '#DDE6EA'),
+    _c('前本色后白色', '前本色后白色', '#EDEAE0'),
+    _c('前白色后灰色', '前白色后灰色', '#D0D0D0'),
+    _c('本色', '本色', '#D9D4C5'),
+
+]
+
+
+# PBT 基础  (3 色)
+
+YITAILONG_PBT_BASE: list[dict] = [
+    _c('米白色', '米白色', '#F0EAD8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+
+]
+
+
+# PC 基础  (3 色)
+
+YITAILONG_PC_BASE: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('透明本色', '透明本色', '#DDE6EA'),
+
+]
+
+
+# PETG 基础  (20 色)
+
+YITAILONG_PETG_BASE: list[dict] = [
+    _c('白色', '白色', '#F5F5F5'),
+    _c('哑光黑色', '哑光黑色', '#2A2A2A'),
+    _c('透明本色', '透明本色', '#DDE6EA'),
+    _c('金色闪点', '金色闪点', '#C9A227'),
+    _c('透明金色闪点', '透明金色闪点', '#D4C28F'),
+    _c('透明', '透明', '#DDE6EA'),
+    _c('红色', '红色', '#C8102E'),
+    _c('黄色', '黄色', '#FBE313'),
+    _c('蓝色', '蓝色', '#2E5C9E'),
+    _c('绿色', '绿色', '#2E7D32'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('透明天蓝色', '透明天蓝色', '#BFE0F0'),
+    _c('透明绿', '透明绿', '#C8E8C8'),
+    _c('透明黄', '透明黄', '#F5EBA8'),
+    _c('橙色', '橙色', '#F59B23'),
+    _c('哑光黑', '哑光黑', '#2A2A2A'),
+    _c('钛金色', '钛金色', '#C9B98F'),
+    _c('红蓝渐变', '红蓝渐变', '#8A2B5A'),
+    _c('蓝绿过渡色', '蓝绿过渡色', '#3FA9A0'),
+    _c('苹果绿', '苹果绿', '#7CB342'),
+
+]
+
+
+# PETG 夜光  (3 色)
+
+YITAILONG_PETG_GLOW: list[dict] = [
+    _c('夜光荧火', '夜光荧火', '#8FE36B'),
+    _c('夜光绿', '夜光绿', '#8FE36B'),
+    _c('夜光蓝', '夜光蓝', '#5AB8F0'),
+
+]
+
+
+# PLA 丝绸  (11 色)
+
+YITAILONG_PLA_SILK: list[dict] = [
+    _c('丝绸亮金', '丝绸亮金', '#D4AF37'),
+    _c('丝绸金', '丝绸金', '#C9A227'),
+    _c('丝绸红', '丝绸红', '#C8102E'),
+    _c('丝绸红铜', '丝绸红铜', '#B87333'),
+    _c('丝绸青铜', '丝绸青铜', '#8C7853'),
+    _c('丝绸蓝', '丝绸蓝', '#4A7FC0'),
+    _c('丝绸白', '丝绸白', '#F5F0E6'),
+    _c('丝绸红黑', '丝绸红黑', '#6A1B1B'),
+    _c('丝绸金红', '丝绸金红', '#C0405A'),
+    _c('丝绸蓝红', '丝绸蓝红', '#7A4A6A'),
+    _c('丝绸深蓝绿', '丝绸深蓝绿', '#1E7A6A'),
+
+]
+
+
+# PLA 基础  (22 色)
+
+YITAILONG_PLA_BASE: list[dict] = [
+    _c('白色', '白色', '#F5F5F5'),
+    _c('红色', '红色', '#C8102E'),
+    _c('黄色', '黄色', '#FBE313'),
+    _c('绿色', '绿色', '#2E7D32'),
+    _c('蓝色', '蓝色', '#2E5C9E'),
+    _c('灰色', '灰色', '#9E9E9E'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('橙色', '橙色', '#F59B23'),
+    _c('银色', '银色', '#C9CDD2'),
+    _c('金色', '金色', '#D4AF37'),
+    _c('粉红色', '粉红色', '#F58FA3'),
+    _c('透明', '透明', '#DDE6EA'),
+    _c('本色', '本色', '#D9D4C5'),
+    _c('深灰色', '深灰色', '#5A5C5F'),
+    _c('湖蓝色', '湖蓝色', '#2E6FB0'),
+    _c('乳白色', '乳白色', '#F5EFE0'),
+    _c('珍珠白色', '珍珠白色', '#F7F4EC'),
+    _c('亮金色', '亮金色', '#E8D3A9'),
+    _c('木色', '木色', '#C9A876'),
+    _c('碳纤黑', '碳纤黑', '#2A2A2A'),
+    _c('彩虹粉', '彩虹粉', '#F0A0C0'),
+    _c('皮肤色', '皮肤色', '#E8C0A8'),
+
+]
+
+
+# PLA 夜光  (3 色)
+
+YITAILONG_PLA_GLOW: list[dict] = [
+    _c('夜光绿', '夜光绿', '#8FE36B'),
+    _c('夜光蓝', '夜光蓝', '#5AB8F0'),
+    _c('夜光紫', '夜光紫', '#B07CF0'),
+
+]
+
+
+# PMMA 基础  (2 色)
+
+YITAILONG_PMMA_BASE: list[dict] = [
+    _c('白色', '白色', '#F5F5F5'),
+    _c('透明色', '透明色', '#DDE6EA'),
+
+]
+
+
+# POM 基础  (2 色)
+
+YITAILONG_POM_BASE: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('本色', '本色', '#D9D4C5'),
+
+]
+
+
+# PP 基础  (5 色)
+
+YITAILONG_PP_BASE: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('本色', '本色', '#D9D4C5'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('本色透明', '本色透明', '#DDE6EA'),
+    _c('乳白色', '乳白色', '#F5EFE0'),
+
+]
+
+
+# TPU 基础  (18 色)
+
+YITAILONG_TPU_BASE: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('红色', '红色', '#C8102E'),
+    _c('黄色', '黄色', '#FBE313'),
+    _c('蓝色', '蓝色', '#2E5C9E'),
+    _c('本色', '本色', '#D9D4C5'),
+    _c('橙色', '橙色', '#F59B23'),
+    _c('绿色', '绿色', '#2E7D32'),
+    _c('浅绿色', '浅绿色', '#8BC34A'),
+    _c('粉红色', '粉红色', '#F58FA3'),
+    _c('天蓝色', '天蓝色', '#6FB7E8'),
+    _c('裸色', '裸色', '#E8D2C0'),
+    _c('哑光黄', '哑光黄', '#F0E313'),
+    _c('反光', '反光', '#C9CDD2'),
+    _c('乳白色', '乳白色', '#F5EFE0'),
+    _c('红黄', '红黄', '#E09030'),
+    _c('金色', '金色', '#D4AF37'),
+    _c('灰色', '灰色', '#9E9E9E'),
+
+]
+
+
+# TPU 夜光  (3 色)
+
+YITAILONG_TPU_GLOW: list[dict] = [
+    _c('夜光绿', '夜光绿', '#8FE36B'),
+    _c('夜光黄', '夜光黄', '#D8F04B'),
+    _c('夜光蓝', '夜光蓝', '#5AB8F0'),
+
+]
+
+
+# TPU 渐变  (7 色)
+
+YITAILONG_TPU_GRAD: list[dict] = [
+    _c('前白色后黑色', '前白色后黑色', '#C9C9C9'),
+    _c('前白后黑渐变', '前白后黑渐变', '#C9C9C9'),
+    _c('前绿后黑', '前绿后黑', '#3FA9A0'),
+    _c('前橙后黑渐变', '前橙后黑渐变', '#D08A30'),
+    _c('前红后黄渐变', '前红后黄渐变', '#E09030'),
+    _c('前绿色后蓝色', '前绿色后蓝色', '#3FA9A0'),
+    _c('前绿后蓝色', '前绿后蓝色', '#3FA9A0'),
+
+]
+
+
+# TPU 温变  (2 色)
+
+YITAILONG_TPU_THERMO: list[dict] = [
+    _c('温变色', '温变色', '#8C8C94'),
+    _c('光变色', '光变色', '#8C8C94'),
+
+]
+
+
+# TPU 透明  (9 色)
+
+YITAILONG_TPU_TRANS: list[dict] = [
+    _c('透明本色', '透明本色', '#DDE6EA'),
+    _c('透明浅蓝', '透明浅蓝', '#C8E8F5'),
+    _c('透明黄', '透明黄', '#F5EBA8'),
+    _c('透明粉红', '透明粉红', '#F5D0E0'),
+    _c('透明红色', '透明红色', '#F0C0C0'),
+    _c('透明玫瑰紫', '透明玫瑰紫', '#E0C0E8'),
+    _c('透明红', '透明红', '#F0C0C0'),
+    _c('透明天蓝色', '透明天蓝色', '#BFE0F0'),
+    _c('透明', '透明', '#DDE6EA'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -5576,6 +5829,26 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PLA 大理石": FULLJOY_PLA_MARBLE,
         "PETG": FULLJOY_PETG,
     },
+    "易泰龙": {
+        "ABS 基础": YITAILONG_ABS_BASE,
+        "HIPS 基础": YITAILONG_HIPS_BASE,
+        "PA 基础": YITAILONG_PA_BASE,
+        "PBT 基础": YITAILONG_PBT_BASE,
+        "PC 基础": YITAILONG_PC_BASE,
+        "PETG 基础": YITAILONG_PETG_BASE,
+        "PETG 夜光": YITAILONG_PETG_GLOW,
+        "PLA 丝绸": YITAILONG_PLA_SILK,
+        "PLA 基础": YITAILONG_PLA_BASE,
+        "PLA 夜光": YITAILONG_PLA_GLOW,
+        "PMMA 基础": YITAILONG_PMMA_BASE,
+        "POM 基础": YITAILONG_POM_BASE,
+        "PP 基础": YITAILONG_PP_BASE,
+        "TPU 基础": YITAILONG_TPU_BASE,
+        "TPU 夜光": YITAILONG_TPU_GLOW,
+        "TPU 渐变": YITAILONG_TPU_GRAD,
+        "TPU 温变": YITAILONG_TPU_THERMO,
+        "TPU 透明": YITAILONG_TPU_TRANS,
+    },
 }
 
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
@@ -5618,7 +5891,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PLA 水晶",
         "PLA 合金",
         "PLA+ 丝绸渐变",
-        "PLA+ 夜光",],
+        "PLA+ 夜光",
+        "PLA 基础",],
     "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光", "K5 PETG Rapid",
              "PETG Basic", "PETG HF", "PETG-CF", "PETG 夜光", "HS PETG 哑光", "PETG-Eco", "PETG GF", "PETG 闪粉", "PETG 金属", "PETG 星河", "PETG 大理石", "PETG Transparent", "HS PETG", "PETG Matte", "PETG Marble", "PETG Translucent",
         "PETG 2.0"
@@ -5634,7 +5908,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "HS PETG 多色",
         "PETG 燃烧钛",
         "PETG 透光",
-        "PETG-ESD",],
+        "PETG-ESD",
+        "PETG 基础",],
     "PA": ["PA6-GF"
         "PA-CF",
         "PA6/66",
@@ -5649,7 +5924,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PPA-CF25",
         "PPA-GF",
         "PPA-GF25",
-        "PPA 支撑",],
+        "PPA 支撑",
+        "PA 基础",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -5665,7 +5941,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "ABS Basic",
         "ABS Pro",
         "ABS Pro 闪光",
-        "HS ABS",],
+        "HS ABS",
+        "ABS 基础",],
     "TPU": ["TPU 95A", "TPU", "TPU95A"
         "TPU90A",
         "TPU 95A HF",
@@ -5675,7 +5952,12 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "TPU 64D",
         "TPU 78D",
         "TPU 72D",
-        "TPU 90A",],
+        "TPU 90A",
+        "TPU 基础",
+        "TPU 渐变",
+        "TPU 透明",
+        "TPU 夜光",
+        "TPU 温变",],
 
     "PVA": [
         "PVA",
@@ -5696,9 +5978,30 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "PC": [
         "PC/ABS",
-    ],
+    
+        "PC 基础",],
 
     "PPS": [
         "PPS-CF",
+    ],
+
+    "PBT": [
+        "PBT 基础",
+    ],
+
+    "PP": [
+        "PP 基础",
+    ],
+
+    "POM": [
+        "POM 基础",
+    ],
+
+    "HIPS": [
+        "HIPS 基础",
+    ],
+
+    "PMMA": [
+        "PMMA 基础",
     ],
 }
