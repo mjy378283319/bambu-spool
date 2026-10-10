@@ -2119,6 +2119,42 @@ R3D_PLA_SILK: list[dict] = [
 
 ]
 
+# ---- R3D 工程线（RuggedMaster / RevoFlex，官网品类 + 官方经销色号）----
+
+# ABS  (5 色，3DJake 官方经销页：Black / White / Pink / Latte / Coffee)
+
+R3D_ABS: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('白色', 'White', '#E5E5E5'),
+    _c('粉色', 'Pink', '#F5A9C0'),
+    _c('拿铁色', 'Latte', '#C9A88A'),
+    _c('咖啡色', 'Coffee', '#5A3A22'),
+
+]
+
+# TPU 95A  (2 色，官方色值 TPU Basic Black / TPU 95A White)
+
+R3D_TPU_95A: list[dict] = [
+    _c('黑色', 'Black', '#000000'),
+    _c('白色', 'White', '#FFFFFF'),
+
+]
+
+# PA（Nylon）  (2 色，官网 RuggedMaster 有 Nylon，无公开色表 -> 工程常规配色)
+
+R3D_PA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PEBA 90A  (1 色，RevoFlex™ 柔性线；MATERIALS 无 PEBA 键 -> 归「其他」)
+
+R3D_PEBA_90A: list[dict] = [
+    _c('本色', 'Natural', '#EDEAE0'),
+
+]
+
 # ---- 爱丽兹 Allizz（淘宝/天猫旗舰店色卡，商品图提色，近似值；部分沿用既有 hex）----
 
 
@@ -6229,6 +6265,10 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PLA Translucent": R3D_PLA_TRANSLUCENT,
         "PLA Pro": R3D_PLA_PRO,
         "PLA Silk": R3D_PLA_SILK,
+        "ABS": R3D_ABS,
+        "TPU 95A": R3D_TPU_95A,
+        "PA": R3D_PA,
+        "PEBA 90A": R3D_PEBA_90A,
     },
     "爱丽兹 Allizz": {
         "ASA": ALLIZZ_ASA,
@@ -6688,7 +6728,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     
         "PP-CF",
         "PP",
-        "PVB",],
+        "PVB",
+        "PEBA 90A",],
 
     "PBT": [
         "PBT 基础",
