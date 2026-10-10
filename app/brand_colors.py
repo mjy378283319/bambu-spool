@@ -2413,6 +2413,53 @@ ALLIZZ_PETG_TRANSPARENT: list[dict] = [
 ]
 
 
+# PPS  (2 色，本色为 PPS 树脂米黄，另有黑色)
+
+ALLIZZ_PPS: list[dict] = [
+    _c('本色', 'Natural', '#D8C6A0'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PPS-CF  (1 色，碳纤维增强，仅黑色)
+
+ALLIZZ_PPS_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
+# PPS-GF  (2 色，玻纤增强)
+
+ALLIZZ_PPS_GF: list[dict] = [
+    _c('本色', 'Natural', '#CFC3A6'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PET  (3 色)
+
+ALLIZZ_PET: list[dict] = [
+    _c('透明', 'Transparent', '#DCE6E8'),
+    _c('白色', 'White', '#F0F0F0'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PET-CF  (1 色，碳纤维增强，仅黑色)
+
+ALLIZZ_PET_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
+# PET-GF  (2 色，玻纤增强)
+
+ALLIZZ_PET_GF: list[dict] = [
+    _c('本色', 'Natural', '#C9C3B4'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
 # ---- 三绿 Sunlu（天猫/淘宝旗舰店色卡，商品图提色，近似值）----
 
 # PLA Basic  (20 色)
@@ -6116,6 +6163,12 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PA CF": ALLIZZ_PA_CF,
         "PETG Matte": ALLIZZ_PETG_MATTE,
         "PETG Transparent": ALLIZZ_PETG_TRANSPARENT,
+        "PPS": ALLIZZ_PPS,
+        "PPS-CF": ALLIZZ_PPS_CF,
+        "PPS-GF": ALLIZZ_PPS_GF,
+        "PET": ALLIZZ_PET,
+        "PET-CF": ALLIZZ_PET_CF,
+        "PET-GF": ALLIZZ_PET_GF,
     },
     "三绿 Sunlu": {
         "PLA Basic": SUNLU_PLA_BASIC,
@@ -6461,6 +6514,10 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "K8 PA CF",
         "K9 PPA CF15",
         "PA6-CF",],
+
+    "PA-CF": [
+        "PA CF",
+    ],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -6526,6 +6583,14 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "PPS": [
         "PPS-CF",
+    
+        "PPS",
+        "PPS-GF",],
+
+    "其他": [
+        "PET",
+        "PET-CF",
+        "PET-GF",
     ],
 
     "PBT": [
