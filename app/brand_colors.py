@@ -6837,7 +6837,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "PLA-CF": [
         "PLA碳纤维",
-    ],
+    
+        "碳纤维系列",],
 
     "PETG-CF": [
         "PETG玻纤/碳纤维",
@@ -6924,7 +6925,11 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PP",
         "PVB",
         "PEBA 90A",
-        "PP-CF",],
+        "PP-CF",
+        "PBT 基础",
+        "PMMA 基础",
+        "POM 基础",
+        "PEBA 95A",],
 
     "PBT": [
         "PBT 基础",
