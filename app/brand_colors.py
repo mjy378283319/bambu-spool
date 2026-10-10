@@ -1890,6 +1890,39 @@ IBOSS_PLA_木质: list[dict] = [
 
 ]
 
+# ---- iBOSS 工程料（官网出口站品类 + 企业简介，工程常规配色）----
+
+# ASA  (2 色；官方有 ASA 碳纤黑色款)
+
+IBOSS_ASA: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+    _c('本色', 'Natural', '#E8E4D8'),
+
+]
+
+# PC  (2 色；官方 PC Filament)
+
+IBOSS_PC: list[dict] = [
+    _c('透明', 'Transparent', '#DCE6E8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA  (2 色；PA6 / PA12 基料)
+
+IBOSS_PA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
+# PA-CF  (1 色；官方 PA6/PA12 Carbon Fiber 商品页 Color: Black)
+
+IBOSS_PA_CF: list[dict] = [
+    _c('黑色', 'Black', '#141414'),
+
+]
+
 # ---- R3D（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 R3D_PETG_GF: list[dict] = [
@@ -6298,6 +6331,10 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "丝绸 PLA": IBOSS_丝绸_PLA,
         "PLA 闪粉": IBOSS_PLA_闪粉,
         "PLA 木质": IBOSS_PLA_木质,
+        "ASA": IBOSS_ASA,
+        "PC": IBOSS_PC,
+        "PA": IBOSS_PA,
+        "PA-CF": IBOSS_PA_CF,
     },
     "R3D": {
         "PETG GF": R3D_PETG_GF,
