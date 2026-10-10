@@ -5495,6 +5495,138 @@ YITAILONG_TPU_TRANS: list[dict] = [
 ]
 
 
+# ABS  (4 色)
+
+BASF_ABS: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('红色', '红色', '#C8102E'),
+    _c('蓝色', '蓝色', '#2E5C9E'),
+    _c('自然白', '自然白', '#F0EDE6'),
+
+]
+
+
+# ASA  (2 色)
+
+BASF_ASA: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PA  (2 色)
+
+BASF_PA: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PA6 GF30  (1 色)
+
+BASF_PA6_GF30: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PC  (2 色)
+
+BASF_PC: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PC GF30  (1 色)
+
+BASF_PC_GF30: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PET  (6 色)
+
+BASF_PET: list[dict] = [
+    _c('透明', '透明', '#DDE6EA'),
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('红色', '红色', '#C8102E'),
+    _c('黄色', '黄色', '#FBE313'),
+
+]
+
+
+# PLA  (14 色)
+
+BASF_PLA: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+    _c('红色', '红色', '#C8102E'),
+    _c('蓝色', '蓝色', '#2E5C9E'),
+    _c('黄色', '黄色', '#FBE313'),
+    _c('绿色', '绿色', '#2E7D32'),
+    _c('橙色', '橙色', '#F59B23'),
+    _c('珍珠白', '珍珠白', '#F7F4EC'),
+    _c('银色', '银色', '#C9CDD2'),
+    _c('灰色', '灰色', '#9E9E9E'),
+    _c('青铜', '青铜', '#9E7B4F'),
+    _c('粉红', '粉红', '#F58FA3'),
+    _c('金色', '金色', '#D4AF37'),
+
+]
+
+
+# PLA PRO1  (3 色)
+
+BASF_PLA_PRO1: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('灰色', '灰色', '#9E9E9E'),
+    _c('自然白', '自然白', '#F0EDE6'),
+
+]
+
+
+# PLA Tough  (1 色)
+
+BASF_PLA_TOUGH: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
+# PP  (1 色)
+
+BASF_PP: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+
+]
+
+
+# TPU  (3 色)
+
+BASF_TPU: list[dict] = [
+    _c('自然色', '自然色', '#E8E4D8'),
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#F5F5F5'),
+
+]
+
+
+# rPET  (1 色)
+
+BASF_RPET: list[dict] = [
+    _c('自然蓝', '自然蓝', '#C5D8E8'),
+
+]
+
+
 BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
     "Kexcelled": {
         "K5 PLA": KEXCELLED_K5_PLA,
@@ -5849,6 +5981,21 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "TPU 温变": YITAILONG_TPU_THERMO,
         "TPU 透明": YITAILONG_TPU_TRANS,
     },
+    "巴斯夫": {
+        "ABS": BASF_ABS,
+        "ASA": BASF_ASA,
+        "PA": BASF_PA,
+        "PA6 GF30": BASF_PA6_GF30,
+        "PC": BASF_PC,
+        "PC GF30": BASF_PC_GF30,
+        "PET": BASF_PET,
+        "PLA": BASF_PLA,
+        "PLA PRO1": BASF_PLA_PRO1,
+        "PLA Tough": BASF_PLA_TOUGH,
+        "PP": BASF_PP,
+        "TPU": BASF_TPU,
+        "rPET": BASF_RPET,
+    },
 }
 
 MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
@@ -5892,7 +6039,9 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PLA 合金",
         "PLA+ 丝绸渐变",
         "PLA+ 夜光",
-        "PLA 基础",],
+        "PLA 基础",
+        "PLA PRO1",
+        "PLA Tough",],
     "PETG": ["PETG", "PETG 哑光", "K5 PETG", "K5 PETG 哑光", "K5 PETG Rapid",
              "PETG Basic", "PETG HF", "PETG-CF", "PETG 夜光", "HS PETG 哑光", "PETG-Eco", "PETG GF", "PETG 闪粉", "PETG 金属", "PETG 星河", "PETG 大理石", "PETG Transparent", "HS PETG", "PETG Matte", "PETG Marble", "PETG Translucent",
         "PETG 2.0"
@@ -5925,7 +6074,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PPA-GF",
         "PPA-GF25",
         "PPA 支撑",
-        "PA 基础",],
+        "PA 基础",
+        "PA6 GF30",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -5970,7 +6120,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PET-GF",
     
         "HS PET-CF",
-        "PET 支撑",],
+        "PET 支撑",
+        "rPET",],
 
     "PEBA": [
         "PEBA 95A",
@@ -5979,7 +6130,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     "PC": [
         "PC/ABS",
     
-        "PC 基础",],
+        "PC 基础",
+        "PC GF30",],
 
     "PPS": [
         "PPS-CF",
