@@ -180,8 +180,9 @@ def test_http_finish_and_brands() -> None:
     brands = r.json().get("brands", [])
     check("自定义品牌进了候选", "自家作坊" in brands, str(brands))
     check("候选末尾是「其他」", brands[-1] == "其他", str(brands))
+    # eSUN易生 / 三绿 Sunlu 已于 2026-10 回归预设（补齐色卡重新上架），不再列入
     check("已删除的品牌不在候选里",
-          not any(b in brands for b in ("eSUN 易生", "三绿 Sunlu", "Overture", "Prusament")), str(brands))
+          not any(b in brands for b in ("Overture", "Prusament")), str(brands))
 
     r = client.delete("/api/brands/自家作坊")
     check("删除自定义品牌", r.status_code == 200 and "自家作坊" not in r.json().get("custom_brands", []), r.text)
