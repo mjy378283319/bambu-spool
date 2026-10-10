@@ -1773,6 +1773,32 @@ TINMORRY_PLA_夜光: list[dict] = [
 
 ]
 
+TINMORRY_PC_GF: list[dict] = [
+    _c('磨砂黑', 'Frosted Black', '#2B2B2B'),
+
+]
+
+# PAHT-CF  (1 色，碳纤增强高温尼龙，官网 SKU PAHT-CF-Black)
+
+TINMORRY_PAHT_CF: list[dict] = [
+    _c('雾面黑', 'Matte Black', '#1F1F1F'),
+
+]
+
+# PA  (1 色，尼龙本体，官方型号列表有 PA；尼龙本色)
+
+TINMORRY_PA: list[dict] = [
+    _c('本色', 'Natural', '#E8E4D8'),
+
+]
+
+# PP-CF  (1 色，碳纤增强聚丙烯，官方型号列表有 PP-CF)
+
+TINMORRY_PP_CF: list[dict] = [
+    _c('黑色', 'Black', '#1C1C1C'),
+
+]
+
 # ---- iBOSS（官方商品页 SKU 色名 + 商品图取主色，近似值）----
 
 IBOSS_ABS: list[dict] = [
@@ -6111,6 +6137,10 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "ASA": TINMORRY_ASA,
         "PLA 金属": TINMORRY_PLA_金属,
         "PLA 夜光": TINMORRY_PLA_夜光,
+        "PC-GF": TINMORRY_PC_GF,
+        "PAHT-CF": TINMORRY_PAHT_CF,
+        "PA": TINMORRY_PA,
+        "PP-CF": TINMORRY_PP_CF,
     },
     "iBOSS": {
         "ABS": IBOSS_ABS,
@@ -6517,7 +6547,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
 
     "PA-CF": [
         "PA CF",
-    ],
+    
+        "PAHT-CF",],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
@@ -6591,7 +6622,8 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
         "PET",
         "PET-CF",
         "PET-GF",
-    ],
+    
+        "PP-CF",],
 
     "PBT": [
         "PBT 基础",

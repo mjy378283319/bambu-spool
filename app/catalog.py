@@ -745,7 +745,11 @@ def color_series_for(brand: str, material: str) -> list[dict]:
             continue
         for name in names:
             colors = series.get(name)
-            if colors:
+            # 同一系列名可能同时登记在多个材料键下（例："PAHT-CF" 既在 PA 也在
+            # PA-CF —— 前缀兜底对 PAHT-CF 命中不了 PA-CF，只能显式登记）。
+            # 而 mat="PA-CF" 时 "PA".startswith 的键也会被遍历到，不去重就会
+            # 把同一组色卡推两次，界面上出现两份一模一样的分组。
+            if colors and name not in matched:
                 matched.add(name)
                 groups.append({"series": name, "colors": colors})
     mat_norm = mat.replace(" ", "")

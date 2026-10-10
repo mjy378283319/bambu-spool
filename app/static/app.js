@@ -1810,6 +1810,9 @@ function presetGroupsFor(brand, material) {
   Object.keys(map).forEach((key) => {
     if (!mat.startsWith(key)) return;
     (map[key] || []).forEach((name) => {
+      // 与后端 color_series_for 同口径：同一系列名可能同时登记在多个材料键下
+      // （例 "PAHT-CF" 既在 PA 也在 PA-CF），不去重会渲染出两份相同分组。
+      if (matched[name]) return;
       const colors = seriesMap[name];
       if (colors && colors.length) { matched[name] = 1; groups.push({ series: name, colors }); }
     });
