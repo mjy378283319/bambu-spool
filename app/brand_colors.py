@@ -6751,6 +6751,15 @@ MATERIAL_COLOR_SERIES_EXTRA: dict[str, list[str]] = {
     
         "PAHT-CF",
         "PA-CF",],
+
+    "PLA-CF": [
+        "PLA碳纤维",
+    ],
+
+    "PETG-CF": [
+        "PETG玻纤/碳纤维",
+        "PETG CF",
+    ],
     "ASA": ["ASA", "ASA 大理石"
         "ASA+",
         "ASA-Aero LT",
