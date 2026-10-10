@@ -3016,6 +3016,37 @@ ESUN_PA_CF: list[dict] = [
 ]
 
 
+# HIPS  (14 色，官方色名；可溶性支撑，溶于柠檬烯)
+
+ESUN_HIPS: list[dict] = [
+    _c('黑色', '黑色', '#1C1C1C'),
+    _c('白色', '白色', '#E5E5E5'),
+    _c('本色', '本色', '#D8D4C8'),
+    _c('浅蓝', '浅蓝', '#7FB2E5'),
+    _c('蓝色', '蓝色', '#2239A7'),
+    _c('绿色', '绿色', '#1E8436'),
+    _c('嫩绿', '嫩绿', '#8FD14F'),
+    _c('灰色', '灰色', '#888888'),
+    _c('银色', '银色', '#C0C0C0'),
+    _c('紫色', '紫色', '#B131A5'),
+    _c('橙色', '橙色', '#FC6A17'),
+    _c('粉色', '粉色', '#FC737F'),
+    _c('红色', '红色', '#D0070D'),
+    _c('黄色', '黄色', '#FEEC03'),
+
+]
+
+
+# PC  (3 色)
+
+ESUN_PC: list[dict] = [
+    _c('本色', '本色', '#D8D4C8'),
+    _c('白色', '白色', '#E5E5E5'),
+    _c('黑色', '黑色', '#1C1C1C'),
+
+]
+
+
 # ---- Inslogic（天猫/淘宝商品页 SKU 提色，近似值）----
 
 # PLA Pro  (14 色)
@@ -5795,6 +5826,8 @@ BRAND_COLOR_SERIES_EXTRA: dict[str, dict[str, list[dict]]] = {
         "PVA": ESUN_PVA,
         "PA": ESUN_PA,
         "PA-CF": ESUN_PA_CF,
+        "HIPS": ESUN_HIPS,
+        "PC": ESUN_PC,
     },
     "Inslogic": {
         "PLA Pro": INSLOGIC_PLA_PRO,
