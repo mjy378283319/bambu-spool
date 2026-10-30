@@ -1775,7 +1775,7 @@ async function main() {
     comboPick.afterBlur === comboPick.picked, JSON.stringify(comboPick));
 
   /* ── 选品牌自动带出实测皮重（2026-09-18 用户报的一批上秤值） ──
-     实测：大简 239 / Polymaker 150 / 拓竹 239 / 魔创 220 / 兰博 160 /
+     实测：大简 254 / Polymaker 150 / 拓竹 239 / 魔创 220 / 兰博 160 /
      Kexcelled 239 / 爱酷乐 239。选完品牌还要自己记数字太没必要；
      但**绝不能把用户手填的皮重冲掉**，所以这里两个方向都要验。 */
   const tare = await cdp.evaluate(sessionId, `(() => {
@@ -1800,7 +1800,7 @@ async function main() {
     return out;
   })()`);
   console.log("选品牌带皮重：", JSON.stringify(tare));
-  const wantTare = { "大简": 239, Polymaker: 150, "拓竹": 239, "魔创": 220,
+  const wantTare = { "大简": 254, Polymaker: 150, "拓竹": 239, "魔创": 220,
                      "兰博": 160, Kexcelled: 239, "爱酷乐": 239 };
   const badTare = Object.entries(wantTare).filter(([b, v]) => Number(tare[b]) !== v);
   check("选品牌自动带出实测皮重（七个都对）",

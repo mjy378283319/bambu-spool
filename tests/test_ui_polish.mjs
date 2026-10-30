@@ -1862,7 +1862,7 @@ state.catalog = {
   spool_weights: {
     "拓竹": [239, 190],
     "Polymaker": [150, 220],
-    "大简": [239, 150],
+    "大简": [254, 150],
     "魔创": [220, 200],
     "兰博": [160, 200],
     "Kexcelled": [239, 240],
@@ -1875,8 +1875,8 @@ const tareEl = () => sandbox.document.getElementById("f_spool_weight");
 tareEl().value = String(sandbox.TARE_DEFAULT);
 tareEl().dataset = {};
 sandbox.applyBrandTare("大简");
-check("皮重还是默认值时，选「大简」带出实测 239",
-  Number(tareEl().value) === 239, String(tareEl().value));
+check("皮重还是默认值时，选「大简」带出实测 254",
+  Number(tareEl().value) === 254, String(tareEl().value));
 
 // ② 换品牌：上一次是自动带的 → 应该换成新品牌的
 tareEl().value = "239";
@@ -1898,7 +1898,7 @@ check("没收录的品牌不改动皮重框（不会清空）",
   Number(tareEl().value) === 123, String(tareEl().value));
 
 // ⑤ 每个实测品牌的首选值都要能带对
-const wantTares = { "拓竹": 239, "Polymaker": 150, "大简": 239, "魔创": 220,
+const wantTares = { "拓竹": 239, "Polymaker": 150, "大简": 254, "魔创": 220,
                     "兰博": 160, "Kexcelled": 239, "爱酷乐": 239 };
 const tareHits = [];
 for (const [brand, want] of Object.entries(wantTares)) {
