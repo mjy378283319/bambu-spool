@@ -1,0 +1,27 @@
+{
+  "name": "拓竹耗材管家",
+  "short_name": "耗材管家",
+  "description": "拓竹耗材库存、用量与官方色卡管理",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#f5f7fa",
+  "theme_color": "#0f766e",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

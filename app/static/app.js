@@ -27,6 +27,8 @@ const S = {
   // 那个弹窗现在是「输入框过滤 + 列表点选」，选中值不能放在 input.value 里
   // （input 装的是人打的搜索词），所以单独存一份。
   moveTargetId: null,
+  // 设置页「数据备份」卡片的状态（GET /api/backup 原样存下来，渲染时只读）
+  backup: null,
 };
 
 /* ── 图标（内联 SVG，随文字颜色走） ───────────────────── */
@@ -386,7 +388,7 @@ function switchView(name) {
   if (name === "spools") loadSpools();
   if (name === "jobs") loadJobs();
   if (name === "summary") loadSummary();
-  if (name === "settings") { loadStatus(); }
+  if (name === "settings") { loadStatus(); loadBackup(); }
 }
 
 document.querySelectorAll(".nav button").forEach((button) => {
@@ -3925,6 +3927,213 @@ async function removeBrand(index) {
   } catch (err) { toast(err.message, "err"); }
 }
 
+/* ── 数据备份 ──────────────────────────────────────────── */
+/** 文件大小。备份是「KB~MB」量级，别用小数字骗人（0.0 MB 会让人以为备份是空的）。 */
+function fmtSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+}
+
+/** 备份时间。服务端给的是文件 mtime（epoch 秒），这里按浏览器本地时区显示。
+ *
+ *  ⚠️ 不能复用 fmtTime：那个函数把没有时区的字符串当 UTC 处理，而备份目录里的
+ *  文件名用的是服务器本地时钟。两者混用会让「文件名上的时间」和「界面上的时间」
+ *  差一个时区，用户对着找不着文件。 */
+function fmtStamp(ts) {
+  const n = Number(ts);
+  if (!n) return "—";
+  const d = new Date(n * 1000);
+  if (isNaN(d)) return "—";
+  const pad = (v) => String(v).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+    + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function backupReasonLabel(reason) {
+  if (reason === "auto") return "自动";
+  if (reason === "pre-restore") return "恢复前";
+  if (reason === "manual") return "手动";
+  return reason || "其他";
+}
+
+function backupReasonTag(reason) {
+  if (reason === "auto") return "teal";
+  if (reason === "pre-restore") return "amber";
+  return "blue";
+}
+
+async function loadBackup() {
+  try {
+    S.backup = await api("/api/backup");
+  } catch (err) {
+    const host = document.getElementById("backupBox");
+    if (host) host.innerHTML = `<p class="hint">备份信息读取失败：${esc(err.message)}</p>`;
+    return;
+  }
+  renderBackupBox();
+}
+
+function renderBackupBox() {
+  const host = document.getElementById("backupBox");
+  if (!host) return;
+  const data = S.backup;
+  if (!data) {
+    host.innerHTML = '<p class="hint">读取中…</p>';
+    return;
+  }
+
+  const cfg = data.config || {};
+  const counts = data.counts || {};
+  const items = data.backups || [];
+  const last = data.last || {};
+
+  let lastLine = '<p class="hint">还没有备份记录。</p>';
+  if (last.at) {
+    const flag = last.ok === false
+      ? '<span class="tag red">失败</span>'
+      : '<span class="tag green">成功</span>';
+    lastLine = `<p class="hint">最近一次 ${esc(last.at)} ${flag} ${esc(last.message || "")}</p>`;
+  }
+
+  const rows = items.map((b) => `
+    <tr>
+      <td class="cell-main" data-label="时间">${esc(fmtStamp(b.created_at))}</td>
+      <td class="small" data-label="大小">${esc(fmtSize(b.size))}</td>
+      <td data-label="来源"><span class="tag ${backupReasonTag(b.reason)}">
+        ${esc(backupReasonLabel(b.reason))}</span></td>
+      <td class="cell-actions" data-label="操作">
+        <button class="sm ghost" onclick="downloadBackup('${b.name}')">下载</button>
+        <button class="sm ghost" onclick="restoreBackup('${b.name}')">恢复</button>
+        <button class="sm danger" onclick="deleteBackup('${b.name}')">删除</button>
+      </td>
+    </tr>`).join("");
+
+  host.innerHTML = `
+    <p class="hint">备份内容：料盘 <b>${counts.spool || 0}</b> 盘 ·
+      使用记录 <b>${counts.usage_record || 0}</b> 条 ·
+      打印记录 <b>${counts.print_job || 0}</b> 条 ·
+      槽位绑定 <b>${counts.slot_binding || 0}</b> 条，
+      外加自定义品牌与各项设置、登录账号、拓竹账号（密码一并加密备份）。
+      打印封面图不备份，恢复后重新拉取即可。</p>
+
+    <div class="row" style="margin:14px 0 12px;gap:16px">
+      <label class="field check" style="margin:0">
+        <input type="checkbox" id="bkAuto" ${cfg.auto ? "checked" : ""} />
+        <span>自动备份</span>
+      </label>
+      <label class="field" style="margin:0">
+        <span>间隔（小时）</span>
+        <input id="bkInterval" type="number" min="1" max="720" value="${cfg.interval_hours || 24}"
+               style="width:110px" />
+      </label>
+      <label class="field" style="margin:0">
+        <span>保留份数</span>
+        <input id="bkKeep" type="number" min="1" max="200" value="${cfg.keep || 14}"
+               style="width:110px" />
+      </label>
+    </div>
+    <div class="row">
+      <button class="sm primary" onclick="backupNow()">立即备份</button>
+      <button class="sm" onclick="saveBackupConfig()">保存设置</button>
+      <button class="sm ghost" onclick="loadBackup()">刷新</button>
+    </div>
+
+    ${lastLine}
+    <p class="hint">文件存在 <b>${esc(data.dir)}</b>（容器内路径，对应宿主机数据卷的
+      <code>backups/</code> 目录）。⚠️ 它和数据库在同一块 NAS 上，<b>挡不住 NAS 整体故障</b>——
+      请定期点「下载」存到电脑或网盘，那才是真正能救命的异地副本。</p>
+    <p class="hint">${data.webhook
+      ? "已配置通知推送，备份失败会推到你的 webhook。"
+      : "未配置 NOTIFY_WEBHOOK：失败信息写在日志里（docker logs bambu-spool）和上面这行提示里。"}</p>
+
+    ${items.length
+      ? `<table><thead><tr><th>时间</th><th>大小</th><th>来源</th><th></th></tr></thead>
+          <tbody>${rows}</tbody></table>
+         <p class="hint">「恢复」会用备份里的数据覆盖当前数据，执行前会自动先备份一份当前数据，
+           所以恢复了不想要的版本也能退回来。恢复后登录态可能失效，需要重新登录一次。</p>`
+      : '<div class="empty-state">还没有备份。点「立即备份」生成第一份。</div>'}`;
+}
+
+async function backupNow() {
+  try {
+    const res = await api("/api/backup", { method: "POST" });
+    toast(`已生成备份 ${res.backup.name}`, "ok");
+    if (S.backup) {
+      S.backup.backups = res.backups;
+      S.backup.last = res.last;
+      renderBackupBox();
+    }
+    loadBackup();
+  } catch (err) {
+    toast(err.message, "err");
+    loadBackup();
+  }
+}
+
+async function saveBackupConfig() {
+  const autoBox = document.getElementById("bkAuto");
+  const intervalBox = document.getElementById("bkInterval");
+  const keepBox = document.getElementById("bkKeep");
+  if (!autoBox || !intervalBox || !keepBox) return;
+  try {
+    const res = await api("/api/backup/config", {
+      method: "POST",
+      body: JSON.stringify({
+        auto: autoBox.checked,
+        interval_hours: Number(intervalBox.value) || 0,
+        keep: Number(keepBox.value) || 0,
+      }),
+    });
+    if (S.backup) S.backup.config = res.config;
+    renderBackupBox();
+    toast("备份设置已保存", "ok");
+  } catch (err) {
+    toast(err.message, "err");
+  }
+}
+
+function downloadBackup(name) {
+  // 走 attachment 响应，浏览器直接存盘、页面不动
+  window.location.href = "/api/backup/download/" + encodeURIComponent(name);
+}
+
+async function restoreBackup(name) {
+  const ok = window.confirm(
+    `从「${name}」恢复？\n\n`
+    + "当前所有数据会被备份里的数据覆盖（执行前会自动把当前数据另存一份）。\n"
+    + "恢复后可能需要重新登录。",
+  );
+  if (!ok) return;
+  try {
+    const res = await api("/api/backup/restore", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    toast(res.message || "已恢复", "ok");
+    setTimeout(() => window.location.reload(), 1600);
+  } catch (err) {
+    toast(err.message, "err");
+    loadBackup();
+  }
+}
+
+async function deleteBackup(name) {
+  if (!window.confirm(`删除备份「${name}」？\n删掉之后就找不回来了。`)) return;
+  try {
+    const res = await api("/api/backup/" + encodeURIComponent(name), { method: "DELETE" });
+    if (S.backup) {
+      S.backup.backups = res.backups;
+      renderBackupBox();
+    }
+    toast("已删除备份", "ok");
+  } catch (err) {
+    toast(err.message, "err");
+  }
+}
+
 /* ── 设置 ──────────────────────────────────────────────── */
 /** 区域标签。只认两个已知值，其余原样显示。
  *
@@ -3956,6 +4165,9 @@ async function switchRegion() {
 
 function renderSettings() {
   renderBrandBox();
+  renderBackupBox();
+  // 只在没数据时拉一次；进设置页会另外刷新（见 switchView）
+  if (!S.backup) loadBackup();
   if (!S.status) return;
   const account = S.status.account || {};
   const box = document.getElementById("accountBox");

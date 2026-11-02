@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>拓竹耗材管家</title>
 <meta name="theme-color" content="#0f766e" />
+<!-- PWA：可安装为独立 App。添加到主屏幕后全屏运行，没有浏览器地址栏。 -->
+<link rel="manifest" href="/static/manifest.json" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="耗材管家" />
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml" />
 <link rel="alternate icon" href="/favicon.ico" sizes="any" />
 <!-- iOS 加到主屏用 PNG 比 SVG 稳（Safari 对 SVG apple-touch-icon 支持不一致） -->
@@ -361,6 +367,10 @@
       <div id="brandBox"></div>
     </div>
     <div class="card">
+      <div class="card-head"><h2>数据备份</h2></div>
+      <div id="backupBox"></div>
+    </div>
+    <div class="card">
       <div class="card-head"><h2>使用说明</h2></div>
       <div class="small muted" style="line-height:1.9">
         <p style="margin:0 0 8px">自动扣重的完整链路：拓竹云订阅打印机实时状态 → 识别打印任务起止 → 打印结束后从云端任务历史取到每个槽位的实际克重 → 扣减该槽位绑定的料盘。</p>
@@ -384,5 +394,14 @@
 <script src="/static/scan.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/label.js"></script>
+<script>
+// PWA：注册 Service Worker。它只做网络直通、不缓存资源，避免「镜像已更新、
+// 页面还是旧 JS」的老问题；保留 fetch 监听仅为满足浏览器的「可安装」判定。
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

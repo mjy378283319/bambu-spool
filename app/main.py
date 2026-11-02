@@ -1,6 +1,7 @@
 """应用入口：生命周期、访问控制中间件、安全响应头。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth
+from . import auth, backup
 from .api.routes import router
 from .auth import is_https
 from .config import settings
@@ -26,7 +27,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # 无需登录即可访问的路径。前端外壳（HTML/CSS/JS）必须开放，
 # 否则用户连登录页都加载不出来；壳里不含任何数据。
-OPEN_EXACT = {"/", "/index.html", "/favicon.ico", "/health"}
+OPEN_EXACT = {"/", "/index.html", "/favicon.ico", "/health", "/sw.js"}
 OPEN_PREFIX = ("/static/", "/api/auth/")
 
 
@@ -46,16 +47,24 @@ async def lifespan(app: FastAPI):
         logger.info("TRUST_PROXY 已关闭，反向代理传来的 X-Forwarded-* 将被忽略")
 
     await hub.start()
+    # 定时备份：默认开启（24 小时一份，留最近 14 份）。放在 lifespan 里而不是 hub，
+    # 是为了让备份逻辑与打印机连接完全解耦——拓竹云连不上也不该拖累本地备份。
+    backup_task = asyncio.create_task(backup.scheduler_loop(), name="backup-loop")
     logger.info("服务已就绪：http://%s:%s", settings.host, settings.port)
     try:
         yield
     finally:
+        backup_task.cancel()
+        try:
+            await backup_task
+        except asyncio.CancelledError:
+            pass
         await hub.stop()
 
 
 app = FastAPI(
     title="拓竹耗材管家",
-    version="1.0.33",
+    version="1.0.35",
     lifespan=lifespan,
     # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
     docs_url=None,
@@ -137,7 +146,7 @@ def _harden(response, path: str = ""):
     #   版本，页面里的 JS 还是旧的」——面板上少控件、少按钮，看着像功能根本没做。
     #   2026-09-21 真实踩坑：0.12.25 新增的两个时间旋钮在面板上找不到，白排查一轮。
     #   局域网自用，多一次 304 的开销可以忽略，所以直接 no-cache。
-    if path.startswith("/static/") or path in ("/", "/index.html"):
+    if path.startswith("/static/") or path in ("/", "/index.html", "/sw.js"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
@@ -161,6 +170,13 @@ async def favicon():
         # 兜底：没生成 ico 就退 SVG（浏览器认 type）
         return FileResponse(STATIC_DIR / "icon.svg", media_type="image/svg+xml")
     return FileResponse(ico, media_type="image/x-icon")
+
+
+# PWA Service Worker。必须挂在根路径：注册在 /static/ 下的 SW 作用域只有 /static/，
+# 控制不到首页，浏览器也就不会把整站判定为「可安装」。
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker():
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
 
 
 @app.get("/health", include_in_schema=False)

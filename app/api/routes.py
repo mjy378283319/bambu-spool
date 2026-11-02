@@ -4,10 +4,14 @@
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
+import logging
 import qrcode
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -17,6 +21,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from .. import auth as auth_mod
+from .. import backup as backup_mod
+from ..notify import notify
 from ..auth import (
     client_ip,
     is_https,
@@ -58,6 +64,7 @@ from ..db import get_session
 from ..models import PrintJob, Printer, SlotBinding, Spool, UsageRecord, utcnow
 
 router = APIRouter()
+logger = logging.getLogger("bambu-spool.api")
 
 
 # ══ 鉴权 ═══════════════════════════════════════════════════
@@ -216,7 +223,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "1.0.33",
+        "version": "1.0.35",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -351,6 +358,67 @@ def auth_logout_all(request: Request = None, response: Response = None) -> dict:
     count = auth_mod.revoke_user_sessions(int(user.id or 0))
     auth_mod.clear_session_cookie(response)
     return {"ok": True, "revoked": count}
+
+
+@router.post("/api/auth/wechat")
+def auth_wechat(payload: dict = Body(...), request: Request = None) -> dict:  # type: ignore[assignment]
+    """微信小程序登录：用 wx.login 的 code 换 openid，自动建号并签发会话。
+
+    设计要点：
+    - 料盘数据是全局共享的（Spool 无 user_id），任何已登录用户都能访问；
+      因此微信用户直接复用现有账号体系，不另建数据源。
+    - 微信用户以 `wx_<openid>` 作为账号名自动建号（零数据库结构改动），
+      口令随机填充（登录只走 openid，不靠口令）。
+    - 令牌通过 JSON 返回，前端用 `Authorization: Bearer <token>` 头携带。
+    """
+    if not settings.wechat_appid or not settings.wechat_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="服务端未配置微信小程序凭证（WECHAT_APPID / WECHAT_SECRET）",
+        )
+    code = str(payload.get("code", "")).strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="缺少 wx.login 返回的 code")
+
+    try:
+        url = "https://api.weixin.qq.com/sns/jscode2session?" + urllib.parse.urlencode(
+            {
+                "appid": settings.wechat_appid,
+                "secret": settings.wechat_secret,
+                "js_code": code,
+                "grant_type": "authorization_code",
+            }
+        )
+        with urllib.request.urlopen(url, timeout=8) as resp:
+            wx_data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("微信 code2Session 调用失败: %s", exc)
+        raise HTTPException(status_code=502, detail="微信接口调用失败，请稍后重试") from exc
+
+    if wx_data.get("errcode"):
+        raise HTTPException(status_code=400, detail=f"微信登录失败: {wx_data.get('errmsg')}")
+    openid = wx_data.get("openid")
+    if not openid:
+        raise HTTPException(status_code=400, detail="未能获取 openid")
+
+    username = "wx_" + openid
+    user = auth_mod.find_user(username)
+    if user is None:
+        import secrets
+
+        try:
+            user = auth_mod.create_user(
+                username, secrets.token_urlsafe(16), display_name="微信用户", is_admin=True
+            )
+        except ValueError:
+            user = auth_mod.find_user(username)
+    if user is None:
+        raise HTTPException(status_code=500, detail="微信账号创建失败")
+
+    token, _ = auth_mod.create_session(
+        user, request, days=auth_mod.settings.session_ttl_days  # type: ignore[arg-type]
+    )
+    return {"ok": True, "token": token, "user": auth_mod.user_dict(user)}
 
 
 # ══ 账号 ═══════════════════════════════════════════════════
@@ -1597,6 +1665,100 @@ def label_sheet(request: Request, ids: str = "", session: Session = Depends(get_
   <p class="noprint">共 {len(cards)} 张标签。直接按 Ctrl+P 打印，建议缩放 100%。</p>
   <div class="grid">{"".join(cards)}</div>
 </body></html>"""
+
+
+# ══ 数据备份 ═══════════════════════════════════════════════
+# 备份的是「整个数据库 + secret.key」：料盘、使用记录、打印记录、槽位绑定、
+# 自定义品牌与各项设置、登录账号、拓竹账号（加密密码）全在里面。
+# 恢复走「从列表里挑一份」，不提供上传——上传等于给了个任意写库的入口，
+# 自用场景没必要开这个口子；要恢复别的机器上下的包，放进 data/backups 即可。
+@router.get("/api/backup")
+def backup_status() -> dict:
+    cfg = backup_mod.get_config()
+    items = backup_mod.list_backups()
+    try:
+        db_size = settings.db_path.stat().st_size
+    except OSError:
+        db_size = 0
+    return {
+        "ok": True,
+        "config": cfg,
+        "dir": str(backup_mod.backup_dir()),
+        "backups": items,
+        "total_size": sum(i["size"] for i in items),
+        "counts": backup_mod.db_counts(),
+        "db_size": db_size,
+        "last": backup_mod.last_result(),
+        "webhook": bool(settings.notify_webhook),
+    }
+
+
+@router.post("/api/backup")
+async def backup_now() -> dict:
+    """立刻做一份备份。"""
+    try:
+        info = await asyncio.to_thread(backup_mod.create_backup, "manual")
+    except Exception as exc:
+        logger.error("手动备份失败：%s", exc, exc_info=True)
+        await notify("耗材管家 · 备份失败", str(exc))
+        raise HTTPException(status_code=500, detail=f"备份失败：{exc}")
+    return {
+        "ok": True,
+        "backup": info,
+        "backups": backup_mod.list_backups(),
+        "last": backup_mod.last_result(),
+    }
+
+
+@router.post("/api/backup/config")
+def backup_config(payload: dict = Body(...)) -> dict:
+    """调整自动备份开关、间隔与保留份数。"""
+    try:
+        cfg = backup_mod.save_config(
+            auto=payload.get("auto") if "auto" in payload else None,
+            interval_hours=payload.get("interval_hours") if "interval_hours" in payload else None,
+            keep=payload.get("keep") if "keep" in payload else None,
+        )
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="参数不合法：间隔与保留份数需要是数字")
+    return {"ok": True, "config": cfg}
+
+
+@router.get("/api/backup/download/{name}")
+def backup_download(name: str):
+    path = backup_mod.backup_dir() / name
+    if not backup_mod.NAME_RE.match(name) or not path.is_file():
+        raise HTTPException(status_code=404, detail="备份不存在")
+    # attachment：浏览器直接存盘，不在页面里打开
+    return FileResponse(path, media_type="application/zip", filename=name)
+
+
+@router.post("/api/backup/restore")
+async def backup_restore(payload: dict = Body(...)) -> dict:
+    """从已有备份恢复。恢复前会自动把当前数据再备一份。"""
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="请指定要恢复的备份文件")
+    try:
+        result = await asyncio.to_thread(backup_mod.restore_from, name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("恢复失败：%s", exc, exc_info=True)
+        await notify("耗材管家 · 恢复失败", str(exc))
+        raise HTTPException(status_code=500, detail=f"恢复失败：{exc}")
+    # 库被整体替换，登录会话表也跟着换掉了：当前这个令牌多半已经失效。
+    result["relogin_required"] = True
+    return result
+
+
+@router.delete("/api/backup/{name}")
+def backup_delete(name: str) -> dict:
+    try:
+        backup_mod.delete_backup(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "backups": backup_mod.list_backups()}
 
 
 # ══ 事件流 ═════════════════════════════════════════════════

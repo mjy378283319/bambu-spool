@@ -164,6 +164,11 @@ App 已开着时靠 `hashchange` 就地跳转。
 抓图**失败不影响扣重**：`app/core/covers.py` 吞掉所有异常并记日志，非 200 / 非图片 content-type /
 不足 512 字节一律跳过，任务照常结算、料照常扣。校准类任务本来就没有成果图，这种情况列表显示「—」。
 
+### 数据备份
+
+设置页可手动 / 定时备份（默认 24 小时、留 14 份），整库 + 密钥打成 zip，存 `DATA_DIR/backups`。
+**同盘备份挡不住 NAS 故障，请定期下载到别处。**
+
 ### 界面
 
 顶部图标导航、卡片式统计；料盘页是状态标签 + 筛选栏 + 表格 + 分页；仪表盘带「最近使用 / 最近添加 /
@@ -325,7 +330,6 @@ docker compose pull && docker compose up -d
 | 非实时 | 打印结束后要等一个轮询周期才扣重 | 调小 `TASK_POLL_INTERVAL` |
 | 扣重依赖槽位绑定正确 | 没绑定的槽位只记流水、不动任何料盘 | 在仪表盘把槽位绑好；绑错了可在详情页转移 |
 | AMS `remain` 只有整数百分比 | 1 kg 料盘 1% ≈ 10 g | 余量以本系统的克重台账为准 |
-| 蓝牙标签打印需要 Chrome/Edge + HTTPS | iOS Safari 用不了 | iPhone 用「导出标签图」；局域网访问挂 HTTPS 反代 |
 | 标签二维码接口需要登录 | 拿标签图得带会话 | 属预期行为；需要外发就先下载 PNG |
 
 ## 本地开发
@@ -338,6 +342,7 @@ pip install -r requirements.txt
 BAMBU_MOCK=1 python -m uvicorn app.main:app --reload --port 8971
 
 python tests/test_flow.py              # 端到端扣重链路
+python tests/test_backup.py            # 备份与恢复
 python tests/test_auth.py              # 登录与访问控制（会真起一个 uvicorn 子进程）
 python tests/test_color.py             # 图片识色与 CIEDE2000 配色匹配
 python tests/test_price.py             # 每盘价格 / 耗材总价值 / 每次打印耗材费
@@ -405,7 +410,6 @@ scripts/seed_demo_job.py         给模拟模式灌一条演示打印任务（�
 **待做**
 
 - [ ] 打印机侧中继（同局域网时走 FTPS 读切片文件，拿到实测实时扣重）
-- [ ] 标签打印真机验证与协议微调（T260LR 实测）
 - [ ] 摄像头画面（局域网模式下取真实最后一帧）
 
 **已完成**：耗材成本与报价、耗材汇总页与本周三张卡（按浏览器时区切日）、料盘删除与归档、

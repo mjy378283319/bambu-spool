@@ -54,6 +54,12 @@ class Settings:
         self.login_lockout_minutes = max(1, _int("LOGIN_LOCKOUT_MINUTES", 15))
         # 强制走 HTTPS：检测到外部是 http 时重定向到 https（需配合反代）
         self.require_https = _bool("REQUIRE_HTTPS", False)
+
+        # ── 微信小程序登录（复用现有后端，不另建数据源）─────────
+        # 小程序 AppID 与 AppSecret，用于 wx.login 的 code 换 openid。
+        # 放环境变量，不下库、不进镜像默认。
+        self.wechat_appid = os.getenv("WECHAT_APPID", "").strip()
+        self.wechat_secret = os.getenv("WECHAT_SECRET", "").strip()
         # 允许从公网完成「首次创建管理员」。默认只允许内网直连，
         # 避免服务刚挂上公网就被人抢先注册账号。
         self.allow_public_setup = _bool("ALLOW_PUBLIC_SETUP", False)
