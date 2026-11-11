@@ -500,6 +500,42 @@ def test_dual_nozzle() -> None:
     check("X2D 双头模式判定为真", hub.state_dict(x2d, 1).get("dual_nozzle") is True)
 
 
+# ── 2e. 风扇原始值：界面对不上拓竹 App 时的对账依据 ──────────────
+def test_fan_raw() -> None:
+    print("\n== 风扇原始值（面板「原始值」折叠区） ==")
+    # 复现用户 2026-11-11 的场景：外排套件作为「多出来的部件」(id 200) 上报，
+    # 拓竹界面写 100%、这边写 90% —— 原始值能看出 90 是部件 state 还是 big_fan2 档位。
+    st = parse_report({"print": {
+        "cooling_fan_speed": "0",
+        "big_fan1_speed": "0",
+        "big_fan2_speed": "14",
+        "heatbreak_fan_speed": "15",
+        "device": {"airduct": {"parts": [
+            {"func": 0, "id": 16, "state": 0, "range": 6553600},
+            {"func": 6, "id": 32, "state": 0},
+            {"func": 0, "id": 160, "state": 0},
+            {"func": 0, "id": 200, "state": 90, "range": 5898240},
+        ]}},
+    }})
+    raw = st.fan_raw or {}
+    check("档位原始值原样保留（不做换算）",
+          raw.get("big_fan1") == "0" and raw.get("big_fan2") == "14", str(raw))
+    check("airduct 每个部件都留了 id/func/state/range",
+          len(raw.get("airduct") or []) == 4, str(raw.get("airduct")))
+    check("部件 200 的 range 也记下来了（判断分母口径要用）",
+          (raw.get("airduct") or [{}])[-1].get("range") == 5898240, str(raw.get("airduct")))
+    check("外排优先取「多出来的部件」的 state（90）",
+          st.exhaust_fan_pct == 90, str(st.exhaust_fan_pct))
+    check("快照里下发 fans_raw",
+          (hub.state_dict(st, 1).get("fans_raw") or {}).get("big_fan2") == "14")
+
+    # 没有 airduct 的老机型：外排退回 big_fan2，原始值仍要能对账
+    old = parse_report({"print": {"big_fan2_speed": "12"}})
+    check("老机型没有 airduct 时 parts 为空列表",
+          (old.fan_raw or {}).get("airduct") == [], str(old.fan_raw))
+    check("老机型外排按 big_fan2 档位换算", old.exhaust_fan_pct == 80, str(old.exhaust_fan_pct))
+
+
 if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
@@ -509,6 +545,7 @@ if __name__ == "__main__":
     test_chamber_temp()
     test_real_p2s_report()
     test_dual_nozzle()
+    test_fan_raw()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

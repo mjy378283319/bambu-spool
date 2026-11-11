@@ -139,7 +139,7 @@ if (!dbg) {
   console.error("app.js 没有导出 window.panelDebug，无法自测（是不是被改掉了？）");
   process.exit(1);
 }
-const { fanChannels, filFill, MIN_FILL_PCT } = dbg;
+const { fanChannels, filFill, MIN_FILL_PCT, renderFanCard } = dbg;
 
 // ── 1. 风扇四行命名 ─────────────────────────────────────────────
 console.log("== 风扇通道命名（P2S / X2 对齐拓竹 App「空调系统」页） ==");
@@ -184,6 +184,30 @@ check("X1 等无自适应风道组件的机型仍用「腔体风扇」那套命�
   x1.join("/") === "部件冷却风扇/辅助部件冷却风扇/腔体风扇/热端风扇", x1.join("/"));
 check("非 P2S/X2 不出现「外排」这一行", !x1.includes("外排"));
 check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanChannels(null)));
+
+// ── 1b. 风扇原始值：界面百分比对不上拓竹 App 时的对账依据 ──────────
+// 用户 2026-11-11：P2S 外排拓竹界面 100%，这边 90%。外排有两条取值路径
+// （airduct 多出来的部件 / big_fan2 档位），原始值能直接看出走的哪条。
+{
+  const html = renderFanCard({
+    fans: { cooling: 0, aux: 0, secondary: 0, exhaust: 90 },
+    fans_installed: { secondary: true },
+    fans_raw: {
+      cooling: "0", big_fan1: "0", big_fan2: "14", heatbreak: "15", aux_part_fan: false,
+      airduct: [
+        { id: 16, func: 0, state: 0, range: 6553600 },
+        { id: 200, func: 0, state: 90, range: 5898240 },
+      ],
+    },
+  }, { model: "P2S" });
+
+  check("风扇卡带「风扇原始值」折叠区", html.includes("风扇原始值"), html.slice(0, 200));
+  check("折叠区列出了各档位原始值",
+    html.includes("big_fan2_speed") && html.includes(">14<"), html.slice(0, 600));
+  check("折叠区列出了 airduct 每个部件",
+    html.includes("id16/func0:0") && html.includes("id200/func0:90"), html.slice(0, 800));
+  check("外排仍按部件 state 显示 90%", html.includes(">90%<"), html.slice(0, 900));
+}
 
 // ── 2. 料条高度 = 余重 ÷ 满盘容量 ───────────────────────────────
 console.log("== 料条高度（按剩余克重，不再一律满格） ==");

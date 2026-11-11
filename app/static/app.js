@@ -1248,6 +1248,31 @@ function renderTempCard(state) {
  *
  *  这张卡排在右列最后，并且会撑满剩余高度（.pcard.grow）：右列（AMS）通常比
  *  左列（照片 + 打印状态 + 温度）矮，不撑满的话右下角会空出一大块。 */
+/** 风扇原始值：面板上显示的百分比是换算结果，跟拓竹 App 对不上时用它对账。
+ *
+ *  典型场景（2026-11-11 用户反馈）：P2S 外排拓竹界面写 100%，这边写 90%。
+ *  外排有两条取值路径 —— airduct 里多出来的部件（state 本身就是百分比），
+ *  或者退回 big_fan2_speed（0-15 档位换算），原始值能直接看出走的是哪条。
+ *  默认收起，不占正文（用户要求面板正文不许铺长文）。 */
+function renderFanRaw(state) {
+  const raw = (state && state.fans_raw) || {};
+  const parts = Array.isArray(raw.airduct) ? raw.airduct : [];
+  const val = (v) => esc(v === null || v === undefined || v === "" ? "—" : String(v));
+  const items = [
+    `<li>cooling_fan_speed = <code>${val(raw.cooling)}</code></li>`,
+    `<li>big_fan1_speed = <code>${val(raw.big_fan1)}</code></li>`,
+    `<li>big_fan2_speed = <code>${val(raw.big_fan2)}</code></li>`,
+    `<li>heatbreak_fan_speed = <code>${val(raw.heatbreak)}</code></li>`,
+    `<li>aux_part_fan = <code>${val(raw.aux_part_fan)}</code></li>`,
+    parts.length
+      ? `<li>airduct.parts = ${parts.map((p) =>
+          `<code>id${val(p.id)}/func${val(p.func)}:${val(p.state)}</code>`).join(" ")}</li>`
+      : "<li>airduct.parts = <code>—</code></li>",
+  ].join("");
+  return `<details class="label-diag fan-raw"><summary>风扇原始值（对不上拓竹 App 时看这里）</summary>
+    <ul>${items}</ul></details>`;
+}
+
 function renderFanCard(state, printer) {
   const fans = state.fans || {};
   const installed = state.fans_installed || {};
@@ -1272,6 +1297,7 @@ function renderFanCard(state, printer) {
         <span class="fan-val">${value}%</span>
       </div>`;
     }).join("")}</div>
+    ${renderFanRaw(state)}
   </div>`;
 }
 
@@ -5295,7 +5321,7 @@ setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {})
 window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
-  renderFanCard,
+  renderFanCard, renderFanRaw,
   // 双喷嘴（X2D/H2D/H2C/H2D Pro）：副喷嘴与副部件风扇只在双头模式出现，
   // 判定只看后端下发的 nozzle_count，别拿机型名当开关
   isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips,

@@ -468,6 +468,11 @@ class PrinterState:
     secondary_aux_installed: bool = False
     # 「外排」——外排风扇套件；没装 / 没上报时退回 big_fan2 档位，再没有才是 None
     exhaust_fan_pct: Optional[int] = None
+    # 风扇**原始上报值**，只给面板上的「原始值」折叠区看（诊断用）。
+    # 界面上的百分比是换算结果，跟拓竹 App 对不上时先看这里：
+    # 外排既可能来自 airduct 里多出来的部件（state，本身就是百分比），
+    # 也可能退回 big_fan2_speed（0-15 档位）——两者的原始值完全不同。
+    fan_raw: dict = field(default_factory=dict)
 
     wifi_signal: str = ""
     lights: list[str] = field(default_factory=list)
@@ -635,6 +640,24 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
         state.exhaust_fan_pct = extra
     elif block.get("big_fan2_speed") is not None:
         state.exhaust_fan_pct = state.chamber_fan_pct
+
+    # 原始值留档：界面口径与拓竹 App 不一致时，靠这几个数一眼看出用的是哪条路
+    state.fan_raw = {
+        "cooling": block.get("cooling_fan_speed"),
+        "big_fan1": block.get("big_fan1_speed"),
+        "big_fan2": block.get("big_fan2_speed"),
+        "heatbreak": block.get("heatbreak_fan_speed"),
+        "aux_part_fan": block.get("aux_part_fan"),
+        "airduct": [
+            {
+                "id": _as_int(part.get("id"), -1),
+                "func": _as_int(part.get("func"), -1),
+                "state": _as_int(part.get("state")),
+                "range": _as_int(part.get("range"), -1),
+            }
+            for part in _airduct_parts(block)
+        ],
+    }
 
     state.wifi_signal = _as_str(block.get("wifi_signal"))
 

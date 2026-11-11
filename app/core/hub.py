@@ -906,6 +906,9 @@ class PrinterHub:
                 "secondary": state.secondary_aux_fan_pct,
                 "exhaust": state.exhaust_fan_pct,
             },
+            # 风扇原始上报值（面板「原始值」折叠区用）：界面百分比与拓竹 App
+            # 对不上时，先看这里判断外排走的是 airduct 部件还是 big_fan2 档位
+            "fans_raw": state.fan_raw,
             # 选配件「装没装」：转速为 null 时用它区分「未安装」与「已装·未转」
             "fans_installed": {
                 "secondary": bool(state.secondary_aux_installed),
