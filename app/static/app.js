@@ -4178,8 +4178,35 @@ async function switchRegion() {
  * 表单字段一边输一边存进 S.loginForm：设置页会因状态刷新反复重画，
  * 没有这一份的话，切「改用验证码登录」或者赶上定时刷新，输入就白打了。
  * 密码只放内存，退出登录 / 登录成功都会立刻清掉。 */
+const LOGIN_ACCOUNT_KEY = "bambu.loginAccount";
+
 function loginDraft(key, value) {
-  if (S.loginForm && key in S.loginForm) S.loginForm[key] = value;
+  if (!S.loginForm || !(key in S.loginForm)) return;
+  S.loginForm[key] = value;
+  // 只把**账号**留在本地：刷新页面 / 重开浏览器还能自动填上。密码绝不落地。
+  if (key === "account") {
+    try { localStorage.setItem(LOGIN_ACCOUNT_KEY, value); } catch (e) { /* 隐私模式，忽略 */ }
+  }
+}
+
+/** 提交前把输入框的现值抓进草稿。
+ *
+ *  两件事：① 浏览器自动填充账号密码时不一定触发 input 事件，光靠 oninput 会漏；
+ *  ② 万一以后又有人给这块加了重建，这里也能把值兜住。
+ */
+function rememberLoginFields() {
+  const grab = (id, key, prop = "value") => {
+    const el = document.getElementById(id);
+    if (el && el[prop] !== undefined) S.loginForm[key] = el[prop];
+  };
+  grab("loginAccount", "account");
+  grab("loginPassword", "password");
+  grab("loginRegion", "region");
+  grab("loginCode", "code");
+  grab("loginRemember", "remember", "checked");
+  try {
+    localStorage.setItem(LOGIN_ACCOUNT_KEY, S.loginForm.account || "");
+  } catch (e) { /* 忽略 */ }
 }
 
 function syncLoginCodeBox(account) {
@@ -4215,6 +4242,10 @@ function renderLoginForm(account) {
   const box = document.getElementById("accountBox");
   if (!box) return;
   if (!document.getElementById("loginAccount")) {
+    // 账号存在本地（不是密码）：刷新过页面也能自动填回来
+    if (!S.loginForm.account) {
+      try { S.loginForm.account = localStorage.getItem(LOGIN_ACCOUNT_KEY) || ""; } catch (e) { /* 忽略 */ }
+    }
     const lf = S.loginForm;
     box.innerHTML = `
       <label class="field"><span>账号（邮箱或手机号）</span>
@@ -4330,6 +4361,7 @@ function renderSettings() {
 }
 
 async function doLogin() {
+  rememberLoginFields();   // 自动填充不一定触发 input，提交前抓一次
   const payload = {
     account: document.getElementById("loginAccount").value.trim(),
     password: document.getElementById("loginPassword").value,
@@ -4355,6 +4387,7 @@ async function doLogin() {
 }
 
 async function sendCode() {
+  rememberLoginFields();
   const account = document.getElementById("loginAccount").value.trim();
   const region = document.getElementById("loginRegion").value;
   if (!account) { toast("请先填写邮箱或手机号", "err"); return; }
@@ -4368,6 +4401,7 @@ async function sendCode() {
 }
 
 async function doCodeLogin() {
+  rememberLoginFields();
   const account = document.getElementById("loginAccount").value.trim();
   const code = document.getElementById("loginCode").value.trim();
   const region = document.getElementById("loginRegion").value;

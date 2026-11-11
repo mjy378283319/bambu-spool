@@ -2539,7 +2539,7 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     if (i < 0 || j < 0) throw new Error("切片失败：" + a);
     return appSrc.slice(i, j);
   };
-  const loginSrc = cutSrc("function loginDraft(", "function syncLoginCodeBox(")
+  const loginSrc = cutSrc('const LOGIN_ACCOUNT_KEY = "bambu.loginAccount";', "function syncLoginCodeBox(")
     + cutSrc("function syncLoginCodeBox(", "function renderLoginForm(")
     + cutSrc("function renderLoginForm(", "function renderSettings(");
 
@@ -2557,7 +2557,14 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     }
     get innerHTML() { return this._html; }
   }
+  const loginStore = new Map();
+  const loginLS = {
+    getItem: (k) => (loginStore.has(k) ? loginStore.get(k) : null),
+    setItem: (k, v) => loginStore.set(k, String(v)),
+    removeItem: (k) => loginStore.delete(k),
+  };
   const ctx = vm.createContext({
+    localStorage: loginLS,
     document: { getElementById: (id) => (els.has(id) ? els.get(id) : null) },
     esc: (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
@@ -2594,6 +2601,30 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
 
   ctx.renderLoginForm({ status: "ok" });
   check("不需要验证码时验证码区收起", !ctx.document.getElementById("loginCode"));
+
+  // 浏览器自动填充：DOM 里有值但不一定触发过 input 事件
+  ctx.document.getElementById("loginAccount").value = "autofill@example.com";
+  ctx.document.getElementById("loginPassword").value = "auto-pw";
+  ctx.rememberLoginFields();
+  check("提交前能从 DOM 抓到自动填充的账号",
+    ctx.S.loginForm.account === "autofill@example.com", ctx.S.loginForm.account);
+  check("提交前能从 DOM 抓到自动填充的密码",
+    ctx.S.loginForm.password === "auto-pw");
+  check("账号写进了本地存储（密码不落地）",
+    loginStore.get("bambu.loginAccount") === "autofill@example.com" && !loginStore.has("password"),
+    JSON.stringify([...loginStore.keys()]));
+
+  // 刷新页面 = 内存清空，账号应能自动填回来
+  els.clear();
+  els.set("accountBox", new FakeEl("accountBox"));
+  // 真刷新时内存全丢：账号靠本地存储回来，密码必须没有
+  ctx.S.loginForm.account = "";
+  ctx.S.loginForm.password = "";
+  ctx.renderLoginForm({});
+  check("刷新后账号从本地存储自动回填",
+    box().innerHTML.includes('value="autofill@example.com"'), box().innerHTML.slice(0, 160));
+  check("刷新后密码不会回填（密码不落本地）",
+    !box().innerHTML.includes('value="auto-pw"'), box().innerHTML.slice(0, 200));
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────
