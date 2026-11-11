@@ -37,6 +37,7 @@ def _migrate_columns() -> None:
         ],
         "print_job": [
             ("cover_file", "TEXT NOT NULL DEFAULT ''"),
+            ("skipped_count", "INTEGER NOT NULL DEFAULT 0"),
         ],
     }
     with engine.begin() as conn:

@@ -3081,7 +3081,7 @@ function renderJobs() {
         <td data-label="成果">${jobThumbHtml(job)}</td>
         <td class="small muted" data-label="任务 ID">${esc(job.task_id || job.cloud_task_id || job.id)}</td>
         <td class="cell-main"><div>${esc(job.title)}</div>
-            <div class="tiny muted">${esc(fmtDuration(job.duration_seconds))} · 结束于 ${esc(job.progress_at_end)}%</div></td>
+            <div class="tiny muted">${esc(fmtDuration(job.duration_seconds))} · 结束于 ${esc(job.progress_at_end)}%${job.skipped_count ? " · 跳过 " + job.skipped_count + " 个零件" : ""}</div></td>
         <td class="small" data-label="打印机">${esc(job.printer_name || "")}</td>
         <td class="small muted" data-label="时间">${esc(fmtTime(job.started_at))}</td>
         <td class="num" data-label="耗材">${job.total_weight_g ? job.total_weight_g.toFixed(2) + " g" : "—"}</td>
@@ -3186,6 +3186,8 @@ async function openJobDetail(jobId) {
         <span>${esc(fmtTime(job.started_at))} 起</span>
         <span>${esc(fmtDuration(job.duration_seconds))}</span>
         ${jobStatusTag(job.status, job.pending)}
+        ${job.skipped_count ? `<span class="tag amber"
+          title="跳过零件的 Gcode 不打印，但换色、擦嘴、擦料塔照常消耗，所以实际用料不等于「整份减去零件重量」">跳过 ${job.skipped_count} 个零件</span>` : ""}
       </div>
       ${job.note ? `<p class="hint">${esc(job.note)}</p>` : ""}
       <div class="row small" style="margin-bottom:12px">

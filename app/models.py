@@ -178,6 +178,9 @@ class PrintJob(SQLModel, table=True):
     finished_at: Optional[datetime] = None
     duration_seconds: int = 0
     progress_at_end: float = 0.0
+    # 本次任务用「跳过对象」跳掉了几个零件。跳过不影响任务最终状态（照样 FINISH），
+    # 但实际耗材会少于切片预估，所以单独记一笔供界面提示。
+    skipped_count: int = 0
 
     # 每槽位用量，JSON 数组：
     # [{index, filament_id, material, color, weight_g, ams_id, tray_id,

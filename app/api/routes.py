@@ -132,6 +132,8 @@ def job_dict(job: PrintJob, session: Session, with_filaments: bool = True) -> di
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
         "duration_seconds": job.duration_seconds,
         "progress_at_end": job.progress_at_end,
+        # 本次跳过了几个零件（跳过不影响任务完成状态，但实际用料会少一些）
+        "skipped_count": job.skipped_count,
         "total_weight_g": job.total_weight_g,
         "source": job.source,
         # 云端给的原始 URL（OSS 预签名，过期后取不到），只用于排查
@@ -223,7 +225,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "1.0.39",
+        "version": "1.0.40",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {

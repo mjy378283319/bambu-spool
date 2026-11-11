@@ -55,6 +55,27 @@ def _as_str(value: Any, default: str = "") -> str:
     return str(value)
 
 
+def _as_id_list(value: Any) -> list[str]:
+    """对象编号列表（`print.s_obj`：被「跳过对象」跳掉的零件）。
+
+    固件可能给 ["2","5"]、[2,5] 或 "2,5"，统一成字符串列表；
+    空 / 缺省都返回 []，不能返回 None（调用方要直接算长度）。
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = value.replace(";", ",").split(",")
+        return [p.strip() for p in parts if p.strip()]
+    if isinstance(value, (list, tuple, set)):
+        out = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                out.append(text)
+        return out
+    return []
+
+
 def _bit_set(bits_hex: str, index: int) -> Optional[bool]:
     """读取十六进制位串的第 index 位。无法解析时返回 None。"""
     if not bits_hex:
@@ -322,6 +343,10 @@ class PrinterState:
     subtask_name: str = ""
     gcode_file: str = ""
     print_type: str = ""
+    # 本次任务里被「跳过对象」跳掉的零件编号（print.s_obj）。
+    # 跳过只是不打印该零件的 Gcode，换色 / 擦嘴 / 擦料塔照常消耗，
+    # 所以它不能直接当成「省了多少克」，只用于提示扣重可能偏高。
+    skipped_objects: list[str] = field(default_factory=list)
 
     nozzle_temper: float = 0.0
     nozzle_target: float = 0.0
@@ -432,6 +457,8 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     state.subtask_name = _as_str(block.get("subtask_name"))
     state.gcode_file = _as_str(block.get("gcode_file"))
     state.print_type = _as_str(block.get("print_type"))
+    if "s_obj" in block:
+        state.skipped_objects = _as_id_list(block.get("s_obj"))
 
     state.nozzle_temper = _as_float(block.get("nozzle_temper"))
     state.nozzle_target = _as_float(block.get("nozzle_target_temper"))

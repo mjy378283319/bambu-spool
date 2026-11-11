@@ -1,7 +1,10 @@
-"""中途中断任务的扣重规则自测。
+"""中断与「跳过零件」这类特殊情形的扣重规则自测。
 
 覆盖 1.0.37 起的行为：打印机按「停止」/掉线时只回 IDLE、不报 FAILED，
 这类任务以前判成 cancelled 后一分不扣，料白吃了账面不动。现在按结束进度折算。
+
+另外覆盖跳过零件：跳过后任务照样 FINISH、进度到 100%，走不到进度折算，
+而云端克重是整份切片值，所以要记下跳过数量并在扣重记录里提示可能偏高。
 
 运行： python tests/test_settle_cancel.py
 """
@@ -243,6 +246,57 @@ async def main() -> int:
         check("料盘克重未变", abs(spool_remaining(spool_a) - a_before3) < 0.01)
     finally:
         settings.deduct_on_cancel = True
+
+    print("\n6. 跳过零件后照常完成：不折算，但要记下跳过数并提示")
+    a_before4 = spool_remaining(spool_a)
+    started4 = datetime.utcnow()
+    await hub._apply_payload(SERIAL, {"print": base_block(
+        "RUNNING", subtask_name="跳过零件.stl", task_id="55550004",
+        mc_percent=20, s_obj=[])})
+    # 中途跳过 1 个零件：固件把被跳过的对象编号放进 print.s_obj
+    await hub._apply_payload(SERIAL, {"print": base_block(
+        "RUNNING", subtask_name="跳过零件.stl", task_id="55550004",
+        mc_percent=55, s_obj=["2"])})
+    await hub._apply_payload(SERIAL, {"print": base_block(
+        "RUNNING", subtask_name="跳过零件.stl", task_id="55550004",
+        mc_percent=100, s_obj=["2"])})
+    await hub._apply_payload(SERIAL, {"print": base_block(
+        "FINISH", subtask_name="跳过零件.stl", task_id="55550004",
+        mc_percent=100, s_obj=["2"])})
+
+    with session_scope() as session:
+        job4 = session.exec(
+            select(PrintJob).where(PrintJob.task_id == "55550004")
+        ).first()
+    check("任务状态是已完成", job4 is not None and job4.status == "finished",
+          job4.status if job4 else "-")
+    check("记下了跳过 1 个零件", job4 is not None and job4.skipped_count == 1,
+          str(job4.skipped_count if job4 else "-"))
+    check("跳过也算完成，进入待结算", job4 is not None and job4.id in hub.pending_jobs())
+
+    task4 = cloud_task(55550004, "跳过零件.stl", started4)
+
+    async def fake_tasks4():
+        return [task4]
+
+    hub.fetch_cloud_tasks = fake_tasks4  # type: ignore[assignment]
+    await hub.settle_pending()
+
+    with session_scope() as session:
+        job4 = session.get(PrintJob, job4.id)
+        a4 = session.get(Spool, spool_a)
+    check("完成的任务不折算，按整份扣 12.58 g",
+          abs(job4.total_weight_g - 12.58) < 0.02, str(job4.total_weight_g))
+    check("A 盘扣掉 9.42 g", abs(a4.remaining_weight - (a_before4 - 9.42)) < 0.02,
+          str(a4.remaining_weight))
+    check("扣重记录里提示跳过可能偏高", "跳过了 1 个零件" in (job4.note or ""), job4.note)
+
+    print("\n7. s_obj 各种写法都要能解析")
+    from app.core.status import _as_id_list
+    check("字符串逗号分隔", _as_id_list("2,5") == ["2", "5"], str(_as_id_list("2,5")))
+    check("整数数组", _as_id_list([2, 5]) == ["2", "5"], str(_as_id_list([2, 5])))
+    check("空数组", _as_id_list([]) == [], str(_as_id_list([])))
+    check("缺省/None", _as_id_list(None) == [], str(_as_id_list(None)))
 
     print("\n" + "─" * 52)
     print(f"通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")

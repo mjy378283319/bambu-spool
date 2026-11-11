@@ -586,6 +586,8 @@ class PrinterHub:
                         f"{t.ams_id}:{t.tray_id}": t.remain for t in new.loaded_trays
                     },
                     "last_progress": new.progress,
+                    # 任务开始时已经存在的跳过项（固件没清空时不至于把旧值算进来）
+                    "skip_start": len(new.skipped_objects),
                 }
                 self._emit("开始打印", f"{new.subtask_name or '任务'}", level="info")
             else:
@@ -623,6 +625,8 @@ class PrinterHub:
         started = job.get("started_at") or utcnow()
         finished = utcnow()
         duration = int((finished - started).total_seconds())
+        # 本次任务跳过了几个零件（和任务开始时的数量比，避免固件没清空导致误算）
+        skipped = max(0, len(state.skipped_objects) - int(job.get("skip_start") or 0))
 
         if status == "cancelled" and progress < settings.min_progress_to_record:
             self._emit("忽略误触任务", f"进度仅 {progress}%", level="info")
@@ -639,6 +643,7 @@ class PrinterHub:
                 finished_at=finished,
                 duration_seconds=duration,
                 progress_at_end=progress,
+                skipped_count=skipped,
                 source="none",
                 note="",
             )
@@ -795,6 +800,16 @@ class PrinterHub:
                         usage.match_strategy += f"（{kind}任务按 {int(factor * 100)}% 计）"
 
                 total = apply_deduction(session, job, usages)
+                # 跳过零件不影响任务状态（照样 FINISH），所以走不到按进度折算；
+                # 而云端克重是整份切片值，含被跳过的零件 → 可能偏高。标注出来，
+                # 不擅自改数值（余量差精度只有 1%，拿它覆盖反而可能更不准）。
+                if job.skipped_count > 0:
+                    tip = (
+                        f"本次跳过了 {job.skipped_count} 个零件，云端克重是整份切片值，"
+                        "实际用量可能更少；需要精确请用「手动录入用量」修正。"
+                    )
+                    job.note = f"{job.note} {tip}".strip() if job.note else tip
+                    session.add(job)
                 job.cloud_task_id = str(task.get("id") or "")
                 job.source = "cloud_task"
                 cover = str(task.get("cover") or "")
@@ -862,6 +877,7 @@ class PrinterHub:
             "total_layer_num": state.total_layer_num,
             "subtask_name": state.subtask_name,
             "task_id": state.task_id,
+            "skipped_count": len(state.skipped_objects),
             "nozzle_temper": state.nozzle_temper,
             "nozzle_target": state.nozzle_target,
             "bed_temper": state.bed_temper,
