@@ -15,11 +15,21 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PHOTO_DIR = STATIC_DIR / "printer"
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def photo_key(name: str) -> str:
+    """机型名归一：去掉空格、连字符等非字母数字，只比字母数字。
+
+    拓竹的展示名里有 "A1 mini" 这种带空格的，文件名不可能好用，
+    所以 a1mini.jpg / "A1 mini".upper() 都归到 A1MINI。
+    """
+    return re.sub(r"[^A-Z0-9]", "", name.upper())
 
 
 def printer_image_map() -> dict[str, str]:
@@ -36,6 +46,9 @@ def printer_image_map() -> dict[str, str]:
     for path in entries:
         if not path.is_file() or path.suffix.lower() not in PHOTO_EXTS:
             continue
+        key = photo_key(path.stem)
+        if not key:
+            continue
         # 同名不同后缀时按后缀顺序取最后一个，避免出现两张图随机命中
-        out[path.stem.upper()] = f"/static/printer/{path.name}"
+        out[key] = f"/static/printer/{path.name}"
     return out

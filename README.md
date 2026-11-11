@@ -343,6 +343,7 @@ BAMBU_MOCK=1 python -m uvicorn app.main:app --reload --port 8971
 
 python tests/test_flow.py  # 端到端扣重链路
 python tests/test_settle_cancel.py  # 中途取消/失败按进度折算扣重
+python tests/test_printer_art.py  # 机型图尺寸、型号匹配与文件规范
 python tests/test_backup.py  # 备份与恢复
 python tests/test_auth.py  # 登录与访问控制（会真起一个 uvicorn 子进程）
 python tests/test_color.py  # 图片识色与 CIEDE2000 配色匹配

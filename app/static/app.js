@@ -1050,7 +1050,9 @@ function trayFlag(occupied, bound, active) {
  */
 function printerPhoto(model, map) {
   const table = map || (S.status && S.status.printer_images) || {};
-  const key = String(model || "").trim().toUpperCase();
+  // 与后端 app/printer_art.py::photo_key 同一套归一：只比字母数字，
+  // 这样 "A1 mini" 能匹配 a1mini.jpg，也不怕文件名里带空格/连字符。
+  const key = String(model || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   return table[key] || "";
 }
 
