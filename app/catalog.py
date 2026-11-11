@@ -207,6 +207,9 @@ def infer_finish(color_name: str) -> str:
 # 「拓竹」这类中英双份——那会让新建料盘的品牌下拉框出现重复项。
 # 历史数据里的英文写法由下面的 BRAND_ALIASES 统一归并。
 BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
+    "阿米阿米": [200.0],                # 官方未公布空盘重量，估算值，建议称重校准
+    "GEEK极客": [200.0],                # 同上
+    "没毛病": [200.0],                  # 同上
     "拓竹": [239.0, 190.0],            # 实测 239g；另一档 190g 可重复使用盘
     "Polymaker": [150.0, 220.0],      # 实测 150g（纸盘）；旧塑料盘 220g
     "大简": [254.0, 150.0],            # 实测 254g（2026-10-30 上秤）；纸盘约 150g
@@ -248,6 +251,16 @@ BRAND_SPOOL_WEIGHTS: dict[str, list[float]] = {
 # BRAND_SPOOL_WEIGHTS 里的规范名（或用户自定义的写法）。
 # 常用于：老数据里存的英文名、第三方导入的简写、用户在输入框里手打的变体。
 BRAND_ALIASES: dict[str, str] = {
+    "rmereme": "阿米阿米",
+    "rmer": "阿米阿米",
+    "armyarmy": "阿米阿米",
+    "阿米": "阿米阿米",
+    "geek": "GEEK极客",
+    "geek极客": "GEEK极客",
+    "极客": "GEEK极客",
+    "byehassle": "没毛病",
+    "buyhassle": "没毛病",
+    "没毛病耗材": "没毛病",
     "bambulab": "拓竹",
     "bambulab拓竹": "拓竹",
     "拓竹科技": "拓竹",
