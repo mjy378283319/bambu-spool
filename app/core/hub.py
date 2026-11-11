@@ -649,8 +649,12 @@ class PrinterHub:
         label = {"finished": "已完成", "failed": "已失败", "cancelled": "已取消"}.get(status, status)
         self._emit(f"打印{label}", f"{job.get('title')} · 用了 {duration // 60} 分钟", level="info")
 
+        # 只要料真的被吃掉了就该记账：完成、失败、以及中途取消/停机/掉线。
+        # 打印机按「停止」或掉线时只回 IDLE、不报 FAILED，以前这类任务一分不扣。
         should_settle = settings.auto_deduct and (
-            status == "finished" or (status == "failed" and settings.deduct_on_failure)
+            status == "finished"
+            or (status == "failed" and settings.deduct_on_failure)
+            or (status == "cancelled" and settings.deduct_on_cancel)
         )
         if should_settle and job_id:
             job["remain_end"] = {f"{t.ams_id}:{t.tray_id}": t.remain for t in state.loaded_trays}
@@ -746,6 +750,16 @@ class PrinterHub:
                     self._pending.pop(job_id, None)
                     continue
 
+                # 未完成任务靠结束进度折算，没记进度就折不出来。
+                # 这时别扣个 0 g 又把 deduction_applied 置上——那样用户连手动补录都做不了。
+                if job.status in ("failed", "cancelled") and (job.progress_at_end or 0) <= 0:
+                    job.note = "该任务没有记录结束进度，无法按比例折算，请用「手动录入用量」补齐。"
+                    session.add(job)
+                    self._pending.pop(job_id, None)
+                    failed += 1
+                    await notify("耗材未自动扣减", f"{job.title}：缺少结束进度，请手动录入用量")
+                    continue
+
                 task = self.match_task(job, tasks, self._used_cloud_tasks)
                 if task is None:
                     attempts = self._pending.get(job_id, 0) + 1
@@ -771,11 +785,14 @@ class PrinterHub:
                         )
                 resolve_spools(session, job.printer_id, usages)
 
-                if job.status == "failed":
+                # 云端 weight 是「整个模型」的用量，未打完就结束的任务要按实际进度折算，
+                # 否则打一半失败会把整份克重扣掉。cancelled（中途停止/掉线）同理。
+                if job.status in ("failed", "cancelled"):
                     factor = max(0.0, min(1.0, (job.progress_at_end or 0) / 100.0))
+                    kind = "失败" if job.status == "failed" else "未完成"
                     for usage in usages:
                         usage.weight_g = round(usage.weight_g * factor, 3)
-                        usage.match_strategy += f"（失败任务按 {int(factor * 100)}% 计）"
+                        usage.match_strategy += f"（{kind}任务按 {int(factor * 100)}% 计）"
 
                 total = apply_deduction(session, job, usages)
                 job.cloud_task_id = str(task.get("id") or "")

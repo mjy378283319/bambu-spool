@@ -283,13 +283,13 @@ docker run --rm -p 8971:8971 -e BAMBU_MOCK=1 ghcr.io/mjy378283319/bambu-spool:la
 | `BAMBU_REGION` | `china` | `china` / `global` |
 | `BAMBU_MOCK` | `0` | `1` 启用模拟打印机 |
 | `TASK_POLL_INTERVAL` | `60` | 云端任务轮询间隔（秒），也是扣重的最大延迟 |
-| `TASK_MATCH_WINDOW_MINUTES` | `20` | 任务结束后回查云端记录的时间窗 |
-| `DEDUCT_ON_FAILURE` | `true` | 失败任务是否按进度比例扣重 |
-| `MIN_PROGRESS_TO_RECORD` | `1.0` | 低于此进度视为误触，不记 |
+| `TASK_MATCH_WINDOW_MINUTES` | `20` | 结束后回查云端记录的时间窗 |
+| `DEDUCT_ON_FAILURE` / `DEDUCT_ON_CANCEL` | `true` | 失败、中途取消是否按进度扣重 |
+| `MIN_PROGRESS_TO_RECORD` | `1.0` | 低于此进度视为误触 |
 | `NOTIFY_WEBHOOK` | 空 | 通知地址，POST `{"title","message"}` |
 | `TOKEN_RENEW_BEFORE_HOURS` | `3` | 令牌剩余多久时自动续期 |
 
-完整列表见 [.env.example](.env.example)。
+变量见 `.env.example`。
 
 ### 挂到公网（Lucky / Nginx 反代）
 
@@ -341,22 +341,23 @@ pip install -r requirements.txt
 
 BAMBU_MOCK=1 python -m uvicorn app.main:app --reload --port 8971
 
-python tests/test_flow.py              # 端到端扣重链路
-python tests/test_backup.py            # 备份与恢复
-python tests/test_auth.py              # 登录与访问控制（会真起一个 uvicorn 子进程）
-python tests/test_color.py             # 图片识色与 CIEDE2000 配色匹配
-python tests/test_price.py             # 每盘价格 / 耗材总价值 / 每次打印耗材费
-python tests/test_admin.py             # 料盘删除保护、品牌归一与历史迁移、色卡覆盖
-python tests/test_ams.py               # AMS / AMS HT 编号归一、槽位克重折算
-python tests/test_fans_temps.py        # 风扇 0-15 档位换算、仓温两个来源、左(辅助) 装没装
-python tests/test_hub_merge.py         # 增量报文递归合并、左(辅助) 记忆（仓温丢失的根因）
-python tests/test_finish_summary.py    # 外观字段归一与回填、耗材汇总与时区切日
-python tests/test_cloud_endpoints.py   # 拓竹云接口地址与验证码登录状态流转（离线）
-python tests/test_labels.py            # 标签二维码取整、?box / ?dots 与响应头
-python tests/test_slot_label.py        # 槽位展示名：AMS A-D / HT A-D / 外挂料盘
-python tests/test_cover.py             # 打印成果图：云端 cover 抓取、本地缓存、取图接口
-python tests/test_brand_icon.py        # 应用图标文件、ICO 结构与三种引用
-python tests/test_readme.py            # README 的图片直链、色卡数字与文档引用是否过期
+python tests/test_flow.py  # 端到端扣重链路
+python tests/test_settle_cancel.py  # 中途取消/失败按进度折算扣重
+python tests/test_backup.py  # 备份与恢复
+python tests/test_auth.py  # 登录与访问控制（会真起一个 uvicorn 子进程）
+python tests/test_color.py  # 图片识色与 CIEDE2000 配色匹配
+python tests/test_price.py  # 每盘价格 / 耗材总价值 / 每次打印耗材费
+python tests/test_admin.py  # 料盘删除保护、品牌归一与历史迁移、色卡覆盖
+python tests/test_ams.py  # AMS / AMS HT 编号归一、槽位克重折算
+python tests/test_fans_temps.py  # 风扇 0-15 档位换算、仓温两个来源、左(辅助) 装没装
+python tests/test_hub_merge.py  # 增量报文递归合并、左(辅助) 记忆（仓温丢失的根因）
+python tests/test_finish_summary.py  # 外观字段归一与回填、耗材汇总与时区切日
+python tests/test_cloud_endpoints.py  # 拓竹云接口地址与验证码登录状态流转（离线）
+python tests/test_labels.py  # 标签二维码取整、?box / ?dots 与响应头
+python tests/test_slot_label.py  # 槽位展示名：AMS A-D / HT A-D / 外挂料盘
+python tests/test_cover.py  # 打印成果图：云端 cover 抓取、本地缓存、取图接口
+python tests/test_brand_icon.py  # 应用图标文件、ICO 结构与三种引用
+python tests/test_readme.py  # README 的图片直链、色卡数字与文档引用是否过期
 
 node tests/test_label_raster.mjs       # 1 位光栅打包、ESC/POS 报文与标签渲染尺寸
 node tests/test_panel_fill.mjs         # 风扇命名与料条高度口径

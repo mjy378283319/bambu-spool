@@ -29,6 +29,9 @@ services:
 
       # 打印失败的任务是否也按进度比例扣重
       DEDUCT_ON_FAILURE: "true"
+
+      # 中途取消 / 按停止 / 掉线（打印机只回 IDLE 不报 FAILED）的任务是否也按进度扣重
+      DEDUCT_ON_CANCEL: "true"
     volumes:
       # 数据库与加密密钥都放这里，务必持久化
       - ./data:/data

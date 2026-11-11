@@ -87,6 +87,9 @@ class Settings:
         # 自动扣重
         self.auto_deduct = _bool("AUTO_DEDUCT", True)
         self.deduct_on_failure = _bool("DEDUCT_ON_FAILURE", True)
+        # 中途取消/停机/掉线（打印机只回 IDLE，不报 FAILED）的任务是否也按进度扣重。
+        # 料确实被吃掉了，不记账会让库存长期虚高，所以默认开。
+        self.deduct_on_cancel = _bool("DEDUCT_ON_CANCEL", True)
         # 进度低于该百分比视为误报任务，不生成记录
         self.min_progress_to_record = _float("MIN_PROGRESS_TO_RECORD", 1.0)
 
