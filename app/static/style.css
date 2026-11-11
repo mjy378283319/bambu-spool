@@ -5,6 +5,11 @@
    ══════════════════════════════════════════════════════════ */
 
 :root {
+  /* 本页是浅色主题。显式声明 color-scheme: light，否则手机开深色模式时
+     浏览器会把 <select> 弹层的文字改成白色，而弹层背景取的是我们设的白底
+     → 白字白底，除选中项外全部「看不见」（2026-11-11 鸿蒙手机实测反馈）。 */
+  color-scheme: light;
+
   /* 底色与层级 */
   --bg: #eef1f6;
   --grid-line: rgba(15, 23, 42, 0.045);
@@ -255,6 +260,10 @@ input, select, textarea {
   transition: border-color .13s, box-shadow .13s;
 }
 input::placeholder { color: var(--text-3); }
+/* 下拉弹层由浏览器绘制，颜色不一定继承页面——显式钉死浅色，
+   防止深色模式下变成「白字白底」（选项看不见）。 */
+select { color-scheme: light; }
+select option, select optgroup { color: var(--text); background-color: var(--surface); }
 input:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, .13);
