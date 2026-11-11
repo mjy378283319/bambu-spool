@@ -2528,6 +2528,74 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
   sandbox.comboClose();
 }
 
+// ── 拓竹账号登录表单：状态刷新不许把已输入的账号密码清掉 ──────
+// 用户反馈：点「改用验证码登录」账号被清空；登录要验证码时密码也没了。
+// 根因是 renderSettings 无条件重建 accountBox。现在「表单已在就不重建」+ 草稿兜底。
+// 这段单独跑一个最小上下文：主沙箱的 getElementById 对未知 id 会自动造桩，
+// 表达不了「元素不存在」，而「不存在才渲染」正是这里要验的前提。
+{
+  const cutSrc = (a, b) => {
+    const i = appSrc.indexOf(a), j = appSrc.indexOf(b, i);
+    if (i < 0 || j < 0) throw new Error("切片失败：" + a);
+    return appSrc.slice(i, j);
+  };
+  const loginSrc = cutSrc("function loginDraft(", "function syncLoginCodeBox(")
+    + cutSrc("function syncLoginCodeBox(", "function renderLoginForm(")
+    + cutSrc("function renderLoginForm(", "function renderSettings(");
+
+  const els = new Map();
+  class FakeEl {
+    constructor(id) { this.id = id; this._html = ""; this._ids = new Set(); this.value = ""; this.checked = false; }
+    set innerHTML(v) {
+      for (const i of this._ids) els.delete(i);
+      this._ids = new Set();
+      this._html = String(v);
+      for (const m of this._html.matchAll(/id="([A-Za-z0-9_-]+)"/g)) {
+        this._ids.add(m[1]);
+        if (!els.has(m[1])) els.set(m[1], new FakeEl(m[1]));
+      }
+    }
+    get innerHTML() { return this._html; }
+  }
+  const ctx = vm.createContext({
+    document: { getElementById: (id) => (els.has(id) ? els.get(id) : null) },
+    esc: (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
+    S: { loginForm: { account: "", password: "", region: "china", remember: true, code: "" } },
+  });
+  // 真实页面里 accountBox 是 HTML 里就有的容器，这里先注册一个
+  els.set("accountBox", new FakeEl("accountBox"));
+  vm.runInContext(loginSrc, ctx);
+
+  const box = () => ctx.document.getElementById("accountBox");
+  ctx.renderLoginForm({});
+  const firstHTML = box().innerHTML;
+  check("登录表单渲染出账号与密码框",
+    firstHTML.includes('id="loginAccount"') && firstHTML.includes('id="loginPassword"'),
+    firstHTML.slice(0, 120));
+  check("默认不显示验证码框", !firstHTML.includes('id="loginCode"'));
+
+  ctx.loginDraft("account", "me@example.com");
+  ctx.loginDraft("password", "pw-123");
+  ctx.renderLoginForm({});
+  check("状态刷新不重建表单（已输入的账号密码不会被清空）", box().innerHTML === firstHTML);
+
+  ctx.renderLoginForm({ status: "verifyCode" });
+  check("需要验证码时冒出验证码框", !!ctx.document.getElementById("loginCode"));
+  check("冒验证码时账号框仍在", !!ctx.document.getElementById("loginAccount"));
+
+  // 切去别的页再回来 = DOM 整体重建，靠草稿回填
+  els.clear();
+  els.set("accountBox", new FakeEl("accountBox"));
+  ctx.renderLoginForm({});
+  const rebuilt = box().innerHTML;
+  check("重建后账号从草稿回填", rebuilt.includes('value="me@example.com"'), rebuilt.slice(0, 160));
+  check("重建后密码从草稿回填", rebuilt.includes('value="pw-123"'));
+
+  ctx.renderLoginForm({ status: "ok" });
+  check("不需要验证码时验证码区收起", !ctx.document.getElementById("loginCode"));
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");
 if (FAILED.length) {

@@ -29,6 +29,12 @@ const S = {
   moveTargetId: null,
   // 设置页「数据备份」卡片的状态（GET /api/backup 原样存下来，渲染时只读）
   backup: null,
+  // 拓竹账号登录表单的草稿。
+  // 为什么需要：设置页每次刷新状态都会重画 accountBox，输入框里的内容会没。
+  // 以前切「改用验证码登录」、或者 45 秒一次的定时刷新，都会把刚填的账号密码清掉。
+  // 现在「表单已在就不重建」+ 这份草稿兜住跨视图/跨刷新。
+  // 密码只存在内存里，退出登录或登录成功会立刻清掉。
+  loginForm: { account: "", password: "", region: "china", remember: true, code: "" },
 };
 
 /* ── 图标（内联 SVG，随文字颜色走） ───────────────────── */
@@ -4167,6 +4173,75 @@ async function switchRegion() {
   } catch (err) { toast(err.message, "err"); }
 }
 
+/* 拓竹账号登录表单的草稿与「验证码区」同步。
+ *
+ * 表单字段一边输一边存进 S.loginForm：设置页会因状态刷新反复重画，
+ * 没有这一份的话，切「改用验证码登录」或者赶上定时刷新，输入就白打了。
+ * 密码只放内存，退出登录 / 登录成功都会立刻清掉。 */
+function loginDraft(key, value) {
+  if (S.loginForm && key in S.loginForm) S.loginForm[key] = value;
+}
+
+function syncLoginCodeBox(account) {
+  const box = document.getElementById("loginCodeBox");
+  if (!box) return;
+  const need = !!account && (account.status === "verifyCode" || account.status === "tfa");
+  const has = !!document.getElementById("loginCode");
+  if (need && !has) {
+    box.innerHTML = `
+      <label class="field"><span>验证码</span>
+        <input id="loginCode" inputmode="numeric" autocomplete="one-time-code"
+          value="${esc(S.loginForm.code)}" oninput="loginDraft('code', this.value)" /></label>
+      <div class="row">
+        <button class="primary" onclick="doCodeLogin()">提交验证码</button>
+        <button onclick="sendCode()">重新发送</button>
+      </div>
+      <p class="hint">验证码已发送到该账号的邮箱或手机。账号和密码不用重新填。</p>`;
+  } else if (!need) {
+    // 状态回到「未开始验证」时把验证码区收掉，免得留一个点不动的输入框；
+    // 验证码短时效，顺手把草稿清掉，下次别拿旧的去提交
+    if (has) box.innerHTML = "";
+    if (S.loginForm.code) S.loginForm.code = "";
+  }
+}
+
+/** 未登录时的拓竹账号表单。
+ *
+ *  **表单已经在页面上就不重建**：以前这里无条件 innerHTML，导致切
+ *  「改用验证码登录」、登录失败重试、甚至 45 秒一次的定时状态刷新，
+ *  都会把刚填好的账号密码整片清空。
+ */
+function renderLoginForm(account) {
+  const box = document.getElementById("accountBox");
+  if (!box) return;
+  if (!document.getElementById("loginAccount")) {
+    const lf = S.loginForm;
+    box.innerHTML = `
+      <label class="field"><span>账号（邮箱或手机号）</span>
+        <input id="loginAccount" placeholder="you@example.com" autocomplete="username"
+          value="${esc(lf.account)}" oninput="loginDraft('account', this.value)" /></label>
+      <label class="field"><span>密码</span>
+        <input type="password" id="loginPassword" autocomplete="current-password"
+          value="${esc(lf.password)}" oninput="loginDraft('password', this.value)" /></label>
+      <label class="field"><span>区域</span>
+        <select id="loginRegion" onchange="loginDraft('region', this.value)">
+          <option value="china" ${lf.region === "china" ? "selected" : ""}>中国大陆</option>
+          <option value="global" ${lf.region === "global" ? "selected" : ""}>海外</option>
+        </select></label>
+      <label class="small muted" style="display:flex;gap:6px;align-items:center;margin-bottom:12px">
+        <input type="checkbox" id="loginRemember" ${lf.remember ? "checked" : ""}
+          style="width:auto" onchange="loginDraft('remember', this.checked)" />
+        保存密码以便令牌过期后自动续期（密码会加密存放在本地数据库里）
+      </label>
+      <div class="row">
+        <button class="primary" onclick="doLogin()">登录</button>
+        <button onclick="sendCode()">改用验证码登录</button>
+      </div>
+      <div id="loginCodeBox" style="margin-top:14px"></div>`;
+  }
+  syncLoginCodeBox(account);
+}
+
 function renderSettings() {
   renderBrandBox();
   renderBackupBox();
@@ -4212,28 +4287,7 @@ function renderSettings() {
         <button class="sm" onclick="switchRegion()">切换并重新同步</button>
       </div>`;
   } else {
-    box.innerHTML = `
-      <label class="field"><span>账号（邮箱或手机号）</span>
-        <input id="loginAccount" placeholder="you@example.com" /></label>
-      <label class="field"><span>密码</span><input type="password" id="loginPassword" /></label>
-      <label class="field"><span>区域</span>
-        <select id="loginRegion">
-          <option value="china">中国大陆</option>
-          <option value="global">海外</option>
-        </select></label>
-      <label class="small muted" style="display:flex;gap:6px;align-items:center;margin-bottom:12px">
-        <input type="checkbox" id="loginRemember" checked style="width:auto" />
-        保存密码以便令牌过期后自动续期（密码会加密存放在本地数据库里）
-      </label>
-      <div class="row">
-        <button class="primary" onclick="doLogin()">登录</button>
-        <button onclick="sendCode()">改用验证码登录</button>
-      </div>
-      ${account.status === "verifyCode" || account.status === "tfa" ? `
-        <div style="margin-top:14px">
-          <label class="field"><span>验证码</span><input id="loginCode" /></label>
-          <button class="primary" onclick="doCodeLogin()">提交验证码</button>
-        </div>` : ""}`;
+    renderLoginForm(account);
   }
 
   const system = S.status;
@@ -4285,6 +4339,9 @@ async function doLogin() {
   if (!payload.account || !payload.password) { toast("请填写账号和密码", "err"); return; }
   try {
     await api("/api/account/login", { method: "POST", body: JSON.stringify(payload) });
+    // 登录成功后立刻清掉内存里的密码草稿（后端若勾了保存，已加密入库）
+    S.loginForm.password = "";
+    S.loginForm.code = "";
     toast("登录成功，正在同步设备", "ok");
     await loadPrinters();
     await loadStatus();
@@ -4318,6 +4375,8 @@ async function doCodeLogin() {
     await api("/api/account/login-code", {
       method: "POST", body: JSON.stringify({ account, code, region }),
     });
+    S.loginForm.password = "";
+    S.loginForm.code = "";
     toast("登录成功", "ok");
     await loadPrinters();
     await loadStatus();
@@ -4337,6 +4396,9 @@ async function logoutAccount() {
   if (!confirm("确定退出登录？本地保存的令牌和密码会被清除。")) return;
   try {
     await api("/api/account/logout", { method: "POST" });
+    // 退出后表单是空的，别让下一个人看到上一个账号的密码草稿
+    S.loginForm.password = "";
+    S.loginForm.code = "";
     toast("已退出登录", "ok");
     await loadStatus();
   } catch (err) { toast(err.message, "err"); }
