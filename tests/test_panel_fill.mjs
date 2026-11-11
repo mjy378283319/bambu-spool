@@ -144,8 +144,10 @@ const { fanChannels, filFill, MIN_FILL_PCT } = dbg;
 // ── 1. 风扇四行命名 ─────────────────────────────────────────────
 console.log("== 风扇通道命名（P2S / X2 对齐拓竹 App「空调系统」页） ==");
 
-for (const model of ["P2S", "p2s", "X2", "X2C"]) {
-  const rows = fanChannels({ model });
+// P2S 是单喷嘴机型：同一个 airduct 部件（id 160）是**选配的左辅助风扇**，
+// 装了就得显示，不跟双头开关走。
+for (const model of ["P2S", "p2s"]) {
+  const rows = fanChannels({ model }, {});
   const names = rows.map((r) => r[1]);
   check(`${model} 四行命名与顺序：部件 / 右(辅助) / 左(辅助) / 外排`,
     names.join("/") === "部件/右(辅助)/左(辅助)/外排", names.join("/"));
@@ -154,6 +156,27 @@ for (const model of ["P2S", "p2s", "X2", "X2C"]) {
     rows.map((r) => r[0]).join(","));
   check(`${model} 四行都是必显（缺件由值是否为 null 决定，不靠隐藏行）`,
     rows.every((r) => r[2] === true));
+}
+
+// X2D 是双喷嘴机型（2026-11-11 起）：副部件风扇只在双头模式显示，
+// 单喷嘴模式下整行隐藏 —— 判据是固件自报的 state.nozzle_count，不是机型名。
+for (const model of ["X2", "X2C"]) {
+  const dual = fanChannels({ model }, { nozzle_count: 2 });
+  check(`${model} 双头模式：部件 / 右(辅助) / 副部件风扇 / 外排`,
+    dual.map((r) => r[1]).join("/") === "部件/右(辅助)/副部件风扇/外排",
+    dual.map((r) => r[1]).join("/"));
+  check(`${model} 双头模式键位 cooling,aux,secondary,exhaust`,
+    dual.map((r) => r[0]).join(",") === "cooling,aux,secondary,exhaust",
+    dual.map((r) => r[0]).join(","));
+  check(`${model} 双头模式四行都必显`, dual.every((r) => r[2] === true));
+
+  const single = fanChannels({ model }, { nozzle_count: 1 });
+  check(`${model} 单喷嘴模式：副部件风扇整行隐藏（只剩 部件/右(辅助)/外排）`,
+    single.map((r) => r[1]).join("/") === "部件/右(辅助)/外排",
+    single.map((r) => r[1]).join("/"));
+  check(`${model} 单喷嘴模式键位 cooling,aux,exhaust`,
+    single.map((r) => r[0]).join(",") === "cooling,aux,exhaust",
+    single.map((r) => r[0]).join(","));
 }
 
 const x1 = fanChannels({ model: "X1C" }).map((r) => r[1]);
