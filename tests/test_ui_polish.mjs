@@ -206,6 +206,8 @@ const {
   brandChoices,
   // Phase 8：风机「未安装 / 未转」、概览图可点、类型外观排序与外观芯片
   renderFanCard, jumpToSpoolsAll, sortHead, toggleSpoolSort, sortValue,
+  // 双喷嘴（X2D/H2D/H2C）：副喷嘴与副部件风扇的显隐只看 nozzle_count
+  isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips, fanChannels,
   finishTone, finishChipHtml, spoolRowHtml,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
@@ -228,6 +230,7 @@ for (const name of [
   "syncBrandDeleteHint", "removeBrandFromForm", "brandChoices",
   "applyBrandTare", "onTareInput",
   "renderFanCard", "jumpToSpoolsAll", "sortHead", "toggleSpoolSort", "sortValue",
+  "isDualNozzleState", "nozzleSideText", "renderTempCard", "renderArtChips",
   "finishTone", "finishChipHtml", "spoolRowHtml",
 ]) {
   if (typeof dbg[name] !== "function") {
@@ -2625,6 +2628,73 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     box().innerHTML.includes('value="autofill@example.com"'), box().innerHTML.slice(0, 160));
   check("刷新后密码不会回填（密码不落本地）",
     !box().innerHTML.includes('value="auto-pw"'), box().innerHTML.slice(0, 200));
+}
+
+// ── 双喷嘴（X2D）：副喷嘴 / 副部件风扇按「模式」显隐 ─────────────────
+// 用户要求：双头模式显示并启用，单喷嘴模式整行隐藏。
+// 判据只有一个 —— 后端下发的 state.nozzle_count（固件自报的当前喷嘴数）。
+// 千万别改用机型名当开关：X2D 只装一支喷嘴时也必须按单喷嘴处理。
+{
+  const x2d = { model: "X2D" };
+  const dualState = {
+    nozzle_count: 2, active_nozzle: 1,
+    nozzle_temper: 220, nozzle_target: 220,
+    nozzle2_temper: 88, nozzle2_target: 90,
+  };
+  const singleState = {
+    nozzle_count: 1, active_nozzle: 0,
+    nozzle_temper: 220, nozzle_target: 220, nozzle2_temper: null,
+  };
+
+  check("双头判定只看 nozzle_count",
+    isDualNozzleState(dualState) === true
+    && isDualNozzleState(singleState) === false
+    && isDualNozzleState(null) === false);
+  check("左右文案：0=右 1=左，换头瞬间(15)留空",
+    nozzleSideText(0) === "右" && nozzleSideText(1) === "左" && nozzleSideText(15) === "");
+
+  const dualFans = fanChannels(x2d, dualState).map(([k, label]) => `${k}:${label}`);
+  check("X2D 双头：风扇卡出现「副部件风扇」",
+    dualFans.includes("secondary:副部件风扇"), JSON.stringify(dualFans));
+  check("X2D 双头：四行顺序 部件/右(辅助)/副部件/外排",
+    dualFans.length === 4 && dualFans[0].startsWith("cooling")
+    && dualFans[3].startsWith("exhaust"), JSON.stringify(dualFans));
+
+  const singleFans = fanChannels(x2d, singleState).map(([k, label]) => `${k}:${label}`);
+  check("X2D 单喷嘴：不出现副部件风扇",
+    !singleFans.some((x) => x.includes("副部件")), JSON.stringify(singleFans));
+  check("X2D 单喷嘴：整行隐藏，只剩 3 行",
+    singleFans.length === 3, JSON.stringify(singleFans));
+
+  // P2S 是单喷嘴机型，同一个部件 id 是选配的左辅助风扇，不能被双头开关带走
+  const p2sFans = fanChannels({ model: "P2S" }, singleState).map(([k, label]) => `${k}:${label}`);
+  check("P2S 单喷嘴：左(辅助) 仍保留（选配件装了就得显示）",
+    p2sFans.includes("secondary:左(辅助)") && p2sFans.length === 4, JSON.stringify(p2sFans));
+
+  const dualCard = renderTempCard(dualState);
+  check("双头温度卡：主行标出「使用中」的一侧",
+    dualCard.includes("喷嘴（左·使用中）"), dualCard.slice(0, 300));
+  check("双头温度卡：副喷嘴取右喷嘴 88°C",
+    dualCard.includes("副喷嘴（右）") && dualCard.includes("88°C")
+    && dualCard.includes("90°C"), dualCard.slice(0, 400));
+
+  const singleCard = renderTempCard(singleState);
+  check("单喷嘴温度卡：没有副喷嘴行",
+    !singleCard.includes("副喷嘴"), singleCard.slice(0, 300));
+  check("单喷嘴温度卡：喷嘴行不带左右标注",
+    singleCard.includes(">喷嘴<"), singleCard.slice(0, 300));
+
+  const noData = renderTempCard({
+    nozzle_count: 2, active_nozzle: 0,
+    nozzle_temper: 200, nozzle_target: 200, nozzle2_temper: null,
+  });
+  check("副喷嘴没读数时显示「—」而不是 0°C",
+    noData.includes("副喷嘴（左）") && noData.includes("—"), noData.slice(0, 400));
+
+  check("双头示意图浮标多一个副喷嘴",
+    renderArtChips(dualState).includes("副喷嘴"), renderArtChips(dualState).slice(0, 300));
+  check("单喷嘴示意图浮标没有副喷嘴",
+    !renderArtChips(singleState).includes("副喷嘴"));
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────

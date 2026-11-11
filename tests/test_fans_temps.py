@@ -42,6 +42,9 @@ from app.core.status import (  # noqa: E402
     AIRDUCT_PART_FLAP,
     AIRDUCT_PART_LEFT_AUX,
     AIRDUCT_PART_RIGHT_AUX,
+    NOZZLE_LEFT,
+    NOZZLE_RIGHT,
+    active_nozzle_index,
     airduct_fan_percent,
     airduct_fans,
     airduct_declared_parts,
@@ -49,7 +52,10 @@ from app.core.status import (  # noqa: E402
     airduct_left_aux_percent,
     airduct_other_fan_percent,
     airduct_part_states,
+    extruder_block,
     fan_percent,
+    nozzle_count,
+    nozzle_readings,
     parse_report,
 )
 
@@ -399,6 +405,101 @@ def test_real_p2s_report() -> None:
           (fans.get("secondary") is None), str(fans.get("secondary")))
 
 
+# ── 2d. 双喷嘴（X2D / H2D / H2C / H2D Pro）：副喷嘴与副部件风扇 ──────
+def packed_temp(current: float, target: float) -> int:
+    """拓竹把「当前 / 目标」打进一个 32 位整数：低 16 位当前、高 16 位目标。"""
+    return (int(target) << 16) | int(current)
+
+
+def extruder_block_of(state_bits: int, nozzles) -> dict:
+    """按 (id, 当前, 目标) 生成 device.extruder；state_bits 是固件原始 state。"""
+    return {
+        "device": {
+            "extruder": {
+                "info": [
+                    {"id": nid, "temp": packed_temp(cur, tgt)} for (nid, cur, tgt) in nozzles
+                ],
+                "state": state_bits,
+            }
+        }
+    }
+
+
+def test_dual_nozzle() -> None:
+    print("\n== 双喷嘴：X2D 双头模式 vs 单喷嘴模式 ==")
+
+    # 打包值解码：ha-bambulab issue #1238 里的真机数字
+    #   14418140 = 220 << 16 | 220   → 当前 220 / 目标 220
+    #    5767327 =  88 << 16 | 159   → 当前 159 / 目标 88
+    readings = nozzle_readings({"device": {"extruder": {"info": [
+        {"id": 0, "temp": 14418140},
+        {"id": 1, "temp": 5767327},
+    ]}}})
+    check("低 16 位是当前温度、高 16 位是目标温度",
+          readings.get(NOZZLE_RIGHT) == (220.0, 220.0) and readings.get(NOZZLE_LEFT) == (159.0, 88.0),
+          str(readings))
+    check("id 不是 0/1 的条目忽略",
+          nozzle_readings({"device": {"extruder": {"info": [{"id": 2, "temp": 1}]}}}) == {})
+
+    # state 位域：低 4 位喷嘴数、次 4 位激活喷嘴
+    check("state=0x12 → 2 个喷嘴、左边在打",
+          nozzle_count({"device": {"extruder": {"state": 0x12}}}) == 2
+          and active_nozzle_index({"device": {"extruder": {"state": 0x12}}}) == NOZZLE_LEFT)
+    check("state=0x02 → 2 个喷嘴、右边在打",
+          active_nozzle_index({"device": {"extruder": {"state": 0x02}}}) == NOZZLE_RIGHT)
+    check("state=0x01 → 单喷嘴模式",
+          nozzle_count({"device": {"extruder": {"state": 0x01}}}) == 1)
+    check("换头瞬间 state 报 15 → 激活侧返回 None（沿用上次）",
+          active_nozzle_index({"device": {"extruder": {"state": 0xF2}}}) is None)
+    check("没有 device.extruder → 数量未知（None，调用方保留旧值而不是打回单喷嘴）",
+          nozzle_count({"big_fan1_speed": "5"}) is None
+          and extruder_block({"device": {}}) == {})
+
+    # 双头模式：主读数跟激活喷嘴走，另一支进副喷嘴
+    dual = parse_report({"print": extruder_block_of(0x12, [(0, 88, 90), (1, 220, 220)])})
+    check("双头模式：喷嘴数 2", dual.nozzle_count == 2, str(dual.nozzle_count))
+    check("双头模式：激活左喷嘴", dual.active_nozzle == NOZZLE_LEFT, str(dual.active_nozzle))
+    check("主读数跟激活的左喷嘴走（220）", round(dual.nozzle_temper) == 220, str(dual.nozzle_temper))
+    check("副喷嘴取右喷嘴（88）", dual.nozzle2_temper == 88, str(dual.nozzle2_temper))
+    check("副喷嘴目标温度（90）", dual.nozzle2_target == 90, str(dual.nozzle2_target))
+    snap = hub.state_dict(dual, 1)
+    check("快照里 dual_nozzle = true", snap.get("dual_nozzle") is True)
+    check("快照里带 nozzle_count / active_nozzle",
+          snap.get("nozzle_count") == 2 and snap.get("active_nozzle") == NOZZLE_LEFT)
+    check("快照里带副喷嘴读数",
+          snap.get("nozzle2_temper") == 88 and snap.get("nozzle2_target") == 90)
+
+    # 反过来：右喷嘴在打
+    right = parse_report({"print": extruder_block_of(0x02, [(0, 220, 220), (1, 30, 0)])})
+    check("右喷嘴在打时主读数 220、副喷嘴 30",
+          round(right.nozzle_temper) == 220 and right.nozzle2_temper == 30,
+          f"{right.nozzle_temper}/{right.nozzle2_temper}")
+
+    # 单喷嘴模式：副喷嘴必须清空，界面据此整行隐藏
+    single = parse_report({"print": extruder_block_of(0x01, [(0, 25, 0)])})
+    check("单喷嘴模式：喷嘴数 1", single.nozzle_count == 1)
+    check("单喷嘴模式：副喷嘴为 None", single.nozzle2_temper is None)
+    check("单喷嘴模式：快照 dual_nozzle = false",
+          hub.state_dict(single, 1).get("dual_nozzle") is False)
+
+    # X2D 双头 + 副部件风扇（airduct 部件 160 = secondary aux）
+    x2d = parse_report({"print": {
+        **extruder_block_of(0x12, [(0, 88, 90), (1, 220, 220)]),
+        "device": {
+            **extruder_block_of(0x12, [])["device"],
+            "airduct": {"parts": [
+                {"func": 0, "id": 16, "state": 80},
+                {"func": 6, "id": 32, "state": 0},
+                {"func": 0, "id": 160, "state": 35},
+            ]},
+        },
+    }})
+    fans = hub.state_dict(x2d, 1)["fans"]
+    check("X2D 副部件风扇（部件 160）取到 35%", fans.get("secondary") == 35, str(fans.get("secondary")))
+    check("X2D 右(辅助) 仍是 80%", fans.get("aux") == 80, str(fans.get("aux")))
+    check("X2D 双头模式判定为真", hub.state_dict(x2d, 1).get("dual_nozzle") is True)
+
+
 if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
@@ -407,6 +508,7 @@ if __name__ == "__main__":
     test_exhaust_fallback()
     test_chamber_temp()
     test_real_p2s_report()
+    test_dual_nozzle()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

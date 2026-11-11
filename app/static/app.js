@@ -930,20 +930,32 @@ function stateTag(state) {
  *  热端风扇官方不列在这一页（自动控制），所以这里不显示。
  *
  *  X1 / P1 / A1 / H2 等机型没有自适应风道组件，沿用「腔体风扇」那套命名。 */
-function fanChannels(printer) {
+function fanChannels(printer, state) {
   const model = String((printer && printer.model) || "").toUpperCase();
+  // state 是 entry.state（打印状态快照），不在 printer 对象里 —— 调用方要显式传
+  const snap = state || (printer && printer.state) || {};
   const airduct = model.startsWith("P2") || model.startsWith("X2");
   if (airduct) {
-    // 对齐拓竹官方 App / 打印机屏幕「空调系统」页的 4 行，顺序也照抄：
-    //   部件 → 右(辅助) → 左(辅助) → 外排
-    // 左(辅助) 与 外排 是选配件，没装时值为 null，界面显示「未安装」而不是 0%。
+    // 对齐拓竹官方 App / 打印机屏幕「空调系统」页的行序：
+    //   部件 → 右(辅助) → 副部件风扇 → 外排
+    // 外排是选配件，没装时值为 null，界面显示「未安装」而不是 0%。
     // 热端风扇官方不列在这一页（自动控制），所以这里不显示。
-    return [
+    //
+    // 第 3 行的身份随机型变，别混为一谈（同一个 airduct 部件 id=160）：
+    //   P2S —— 单喷嘴机型，160 是**选配的左侧辅助风扇**。装了就要显示，
+    //          不能跟着双头开关一起藏（否则用户会以为自己的风扇没被识别）。
+    //   X2D —— 双喷嘴机型，官方把 160 叫 secondary aux / 右辅助，
+    //          面板按用户口径写「副部件风扇」，且**只在双头模式显示**：
+    //          单喷嘴模式下没有第二支喷嘴要吹，整行隐藏。
+    const dual = isDualNozzleState(snap);
+    const x2 = model.startsWith("X2");
+    const rows = [
       ["cooling", "部件", true],
       ["aux", "右(辅助)", true],
-      ["secondary", "左(辅助)", true],
-      ["exhaust", "外排", true],
     ];
+    if (!x2 || dual) rows.push(["secondary", dual ? "副部件风扇" : "左(辅助)", true]);
+    rows.push(["exhaust", "外排", true]);
+    return rows;
   }
   return [
     ["cooling", "部件冷却风扇", true],
@@ -1124,14 +1136,37 @@ function fmtTemp(value, target) {
   return target ? `${current} / ${Number(target).toFixed(0)}°C` : current;
 }
 
+/** 双头模式判定（X2D / H2D / H2C / H2D Pro 这些双喷嘴机型）。
+ *
+ *  只看后端下发的 `nozzle_count` —— 它是**固件自报的当前喷嘴数**
+ *  （`device.extruder.state` 低 4 位），不是机型能力表：
+ *    - 2 → 双头模式：显示副喷嘴、副部件风扇；
+ *    - 1 → 单喷嘴模式：两行整行隐藏（用户明确要求，别留个 0% 的空行）；
+ *    - 缺字段（老接口 / X1/P1/A1 等没有 device.extruder 的机型）→ 按单喷嘴处理。
+ *  这样 X2D 只装一支喷嘴时不会凭空多出一行不存在的东西。 */
+function isDualNozzleState(state) {
+  return !!state && Number(state.nozzle_count) >= 2;
+}
+
+/** 喷嘴 0=右 1=左（拓竹双头机的编号约定）。 */
+function nozzleSideText(index) {
+  return Number(index) === 1 ? "左" : Number(index) === 0 ? "右" : "";
+}
+
 /** 机器示意图上的浮标温度（喷嘴 / 仓温 / 热床），排布对齐官方 App。
  *  读数为 0 的通道（没通电或没这个传感器）直接不画，免得挂一串 0°C。 */
 function renderArtChips(state) {
-  const rows = [
+  let rows = [
     ["nozzle", "喷嘴", Number(state.nozzle_temper) || 0, fmtTemp(state.nozzle_temper, state.nozzle_target)],
     ["chamber", "仓温", Number(state.chamber_temper) || 0, fmtTemp(state.chamber_temper, state.chamber_target)],
     ["bed", "热床", Number(state.bed_temper) || 0, fmtTemp(state.bed_temper, state.bed_target)],
-  ].filter(([, , value]) => value > 0);
+  ];
+  // 双头模式才画副喷嘴（单喷嘴模式下后端不会下发 nozzle2_temper）
+  if (isDualNozzleState(state)) {
+    rows.splice(1, 0, ["nozzle", "副喷嘴", Number(state.nozzle2_temper) || 0,
+      fmtTemp(state.nozzle2_temper, state.nozzle2_target)]);
+  }
+  rows = rows.filter(([, , value]) => value > 0);
   if (!rows.length) return "";
   return `<div class="art-chips">${rows.map(([cls, label, , text]) =>
     `<span class="art-chip ${cls}">${ICO.thermo}<b>${esc(text)}</b><i>${esc(label)}</i></span>`).join("")}</div>`;
@@ -1173,15 +1208,28 @@ function renderRunCard(state) {
   </div>`;
 }
 
-/** 温度属性：热床 / 仓温 / 喷嘴 / 信号。 */
+/** 温度属性：热床 / 仓温 / 喷嘴（双头机加副喷嘴）/ 信号。
+ *
+ *  双头机（X2D / H2D / H2C / H2D Pro）顶层读数只代表**当前激活的那一支**，
+ *  所以主行标注「使用中」的一侧，另一支单独一行显示；单喷嘴模式只有主行。 */
 function renderTempCard(state) {
   const chamber = Number(state.chamber_temper) || 0;
+  const dual = isDualNozzleState(state);
+  const activeSide = nozzleSideText(state.active_nozzle);
   const items = [
     ["热床", fmtTemp(state.bed_temper, state.bed_target)],
     ["仓温", chamber ? fmtTemp(chamber, state.chamber_target) : "—"],
-    ["喷嘴", fmtTemp(state.nozzle_temper, state.nozzle_target)],
-    ["信号", state.wifi_signal || "—"],
+    [dual && activeSide ? `喷嘴（${activeSide}·使用中）` : "喷嘴",
+      fmtTemp(state.nozzle_temper, state.nozzle_target)],
   ];
+  if (dual) {
+    const otherSide = Number(state.active_nozzle) === 1 ? "右" : "左";
+    items.push([
+      `副喷嘴（${otherSide}）`,
+      state.nozzle2_temper == null ? "—" : fmtTemp(state.nozzle2_temper, state.nozzle2_target),
+    ]);
+  }
+  items.push(["信号", state.wifi_signal || "—"]);
   return `<div class="pcard">
     <div class="pcard-head">${ICO.thermo}<span>温度属性</span></div>
     <div class="kv-grid">${items.map(([label, value]) => `
@@ -1203,7 +1251,7 @@ function renderTempCard(state) {
 function renderFanCard(state, printer) {
   const fans = state.fans || {};
   const installed = state.fans_installed || {};
-  const rows = fanChannels(printer).filter(([key, , required]) => required || fans[key] != null);
+  const rows = fanChannels(printer, state).filter(([key, , required]) => required || fans[key] != null);
   if (!rows.length) return "";
   return `<div class="pcard grow fan-card">
     <div class="pcard-head">${ICO.fan}<span>风扇状态</span></div>
@@ -5248,6 +5296,9 @@ window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
   renderFanCard,
+  // 双喷嘴（X2D/H2D/H2C/H2D Pro）：副喷嘴与副部件风扇只在双头模式出现，
+  // 判定只看后端下发的 nozzle_count，别拿机型名当开关
+  isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips,
   // 外观预填、区域文案、机型照片、扫码认码 —— 错了都是「界面看着正常但不对」
   inferFinish, finishFromSeries, finishChoices, regionLabel, printerPhoto, parseScanText,
   // 料盘状态口径 / 排序 / 价格分档 / 概览图：库存页与汇总页共用，必须一致

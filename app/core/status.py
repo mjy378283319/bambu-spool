@@ -269,6 +269,96 @@ def airduct_other_fan_percent(block: dict) -> Optional[int]:
     return None
 
 
+# ── 双喷嘴（X2D / H2D / H2C / H2D Pro）──────────────────────────────
+# 报文结构（X2D 与 H2D 同构，详见 ha-bambulab「H2D has two nozzles in the
+# extruder data block」注释）：
+#   "device": {"extruder": {
+#       "info": [{"id": 0, "temp": 14418140},     # id 0 = 右喷嘴
+#                {"id": 1, "temp": 5767327}],    # id 1 = 左喷嘴
+#       "state": 18     # 低 4 位 = 喷嘴数量；次 4 位 = 当前激活喷嘴
+#   }}
+# `temp` 是打包值：**低 16 位是当前温度，高 16 位是目标温度**。
+#
+# 为什么不能只用顶层的 nozzle_temper / nozzle_target_temper：
+#   双头机上这两个键只报「当前激活的那一个」，另一个喷嘴的读数根本不在里面。
+#   拿它去覆盖 0 号会让两个喷嘴的读数轮流被对方污染（ha-bambulab #2157 实测
+#   2 小时 368 次跳变），所以副喷嘴必须走逐喷嘴读数。
+DUAL_NOZZLE_MODELS = frozenset({"X2D", "H2D", "H2C", "H2DPRO", "H2D PRO"})
+NOZZLE_RIGHT = 0
+NOZZLE_LEFT = 1
+# 换头过程中 (state >> 4) & 0xF 会报 15，此时沿用上一次的有效值
+NOZZLE_SWITCHING = 15
+
+
+def extruder_block(block: dict) -> dict:
+    """取 device.extruder；没有就返回空字典（X1/P1/A1 等老机型没有这一块）。"""
+    device = block.get("device")
+    if not isinstance(device, dict):
+        return {}
+    ext = device.get("extruder")
+    return ext if isinstance(ext, dict) else {}
+
+
+def nozzle_count(block: dict) -> Optional[int]:
+    """固件自报的**当前喷嘴数量**（device.extruder.state 低 4 位）。
+
+    返回 None 表示这次报文没说 —— 调用方要**保留上一次的值**，不能当成 1：
+    双头机的心跳里有相当一部分是「半截报文」，只带温度不带 extruder，
+    每次缺字段就打回单喷嘴，界面上的副喷嘴行会一闪一闪。
+
+    1 = 单喷嘴模式（副喷嘴不显示）；2 = 双头模式。
+    这是**模式**判据，不是机型能力判据 —— X2D 手上只有一支喷嘴在用时固件就报 1。
+    """
+    ext = extruder_block(block)
+    if not ext:
+        return None
+    raw = ext.get("state")
+    if raw is None:
+        return None
+    count = _as_int(raw, -1) & 0x0F
+    return count if count in (1, 2) else None
+
+
+def active_nozzle_index(block: dict) -> Optional[int]:
+    """当前激活（正在打印）的喷嘴：0 = 右、1 = 左。
+
+    换头瞬间报 15 / 越界值，返回 None，调用方沿用上一次的有效值。
+    """
+    ext = extruder_block(block)
+    if not ext:
+        return None
+    raw = ext.get("state")
+    if raw is None:
+        return None
+    index = (_as_int(raw, -1) >> 4) & 0x0F
+    return index if index in (NOZZLE_RIGHT, NOZZLE_LEFT) else None
+
+
+def nozzle_readings(block: dict) -> dict[int, tuple[float, float]]:
+    """逐喷嘴读数 `{id: (当前温度, 目标温度)}`，来自 device.extruder.info。
+
+    X2D/H2D 的 `info` 是**列表**，每项 `id` 0=右 1=左；老单喷嘴机型的
+    `device.nozzle.info` 是字典（直径/材质），这里不读它 —— 它的温度本来就在顶层。
+    """
+    ext = extruder_block(block)
+    info = ext.get("info")
+    if not isinstance(info, list):
+        return {}
+    out: dict[int, tuple[float, float]] = {}
+    for entry in info:
+        if not isinstance(entry, dict):
+            continue
+        nozzle_id = _as_int(entry.get("id"), -1)
+        if nozzle_id not in (NOZZLE_RIGHT, NOZZLE_LEFT):
+            continue
+        packed = entry.get("temp")
+        if packed is None:
+            continue
+        value = _as_int(packed)
+        out[nozzle_id] = (float(value & 0xFFFF), float((value >> 16) & 0xFFFF))
+    return out
+
+
 @dataclass
 class TrayState:
     ams_id: int = 0
@@ -350,6 +440,15 @@ class PrinterState:
 
     nozzle_temper: float = 0.0
     nozzle_target: float = 0.0
+    # ── 双喷嘴（X2D / H2D / H2C / H2D Pro）──
+    # nozzle_count = 固件自报的**当前**喷嘴数（1 = 单喷嘴模式，2 = 双头模式），
+    # 不是机型能力：X2D 只装一支喷嘴时固件就报 1，界面据此隐藏副喷嘴。
+    nozzle_count: int = 1
+    # 当前激活（正在打印）的喷嘴：0 = 右、1 = 左
+    active_nozzle: int = NOZZLE_RIGHT
+    # 副喷嘴（没激活的那一支）读数；单喷嘴模式 / 没上报时保持 None
+    nozzle2_temper: Optional[float] = None
+    nozzle2_target: Optional[float] = None
     bed_temper: float = 0.0
     bed_target: float = 0.0
     chamber_temper: float = 0.0
@@ -485,6 +584,38 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
             chamber = float(value & 0xFFFF)
             state.chamber_target = float((value >> 16) & 0xFFFF)
     state.chamber_temper = chamber
+
+    # ── 双喷嘴（X2D / H2D / H2C / H2D Pro）──
+    # 三个判断各管一件事，别混：
+    #   nozzle_count     固件自报「这次是几喷嘴」→ 决定界面显不显示副喷嘴（模式判据）
+    #   active_nozzle    哪一支在打印               → 温度卡标「使用中」
+    #   nozzle_readings  逐喷嘴温度                 → 副喷嘴读数唯一可靠来源
+    # 只有在报文真的带 device.extruder 时才更新；半截报文不能把双头打回单头。
+    if extruder_block(block):
+        reported = nozzle_count(block)
+        readings = nozzle_readings(block)
+        if reported is not None:
+            state.nozzle_count = reported
+        elif readings:
+            # 没给 state 但给了两条逐喷嘴读数 → 也是双头
+            state.nozzle_count = 2 if len(readings) >= 2 else 1
+
+        index = active_nozzle_index(block)
+        if index is not None:
+            state.active_nozzle = index
+
+        if state.nozzle_count >= 2:
+            current = readings.get(state.active_nozzle)
+            other = readings.get(1 - state.active_nozzle)
+            if current is not None:
+                # 逐喷嘴读数比顶层键准（顶层只报激活的那一支）
+                state.nozzle_temper, state.nozzle_target = current
+            if other is not None:
+                state.nozzle2_temper, state.nozzle2_target = other
+        else:
+            # 单喷嘴模式：副喷嘴一律不留在快照里，界面据此整行隐藏
+            state.nozzle2_temper = None
+            state.nozzle2_target = None
 
     state.cooling_fan_pct = fan_percent(block.get("cooling_fan_speed"))
     state.aux_fan_pct = fan_percent(block.get("big_fan1_speed"))

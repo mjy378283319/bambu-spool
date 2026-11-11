@@ -880,6 +880,15 @@ class PrinterHub:
             "skipped_count": len(state.skipped_objects),
             "nozzle_temper": state.nozzle_temper,
             "nozzle_target": state.nozzle_target,
+            # 双喷嘴（X2D / H2D / H2C / H2D Pro）：
+            #   nozzle_count 是**固件自报的当前喷嘴数**，不是机型能力 ——
+            #   1 = 单喷嘴模式（前端隐藏副喷嘴 + 副部件风扇），2 = 双头模式。
+            #   active_nozzle 0=右 1=左，用来在温度卡标「使用中」。
+            "nozzle_count": state.nozzle_count,
+            "active_nozzle": state.active_nozzle,
+            "dual_nozzle": state.nozzle_count >= 2,
+            "nozzle2_temper": state.nozzle2_temper,
+            "nozzle2_target": state.nozzle2_target,
             "bed_temper": state.bed_temper,
             "bed_target": state.bed_target,
             "chamber_temper": state.chamber_temper,
