@@ -536,6 +536,51 @@ def test_fan_raw() -> None:
     check("老机型外排按 big_fan2 档位换算", old.exhaust_fan_pct == 80, str(old.exhaust_fan_pct))
 
 
+# ── 2f. 外排满速：部件被限幅时取请求档位（2026-11-12 用户实测） ────
+def test_exhaust_full_speed() -> None:
+    print("\n== 外排满速：部件限幅 90 → 取 big_fan2 的请求档位 ==")
+
+    def make(part_state: int, level: str):
+        """parts 里放一个「多出来的部件」(id 200) 当外排，big_fan2 给档位。"""
+        return parse_report({"print": {
+            "big_fan2_speed": level,
+            "device": {"airduct": {"parts": [
+                {"func": 0, "id": 16, "state": 0},
+                {"func": 6, "id": 32, "state": 0},
+                {"func": 0, "id": 160, "state": 0},
+                {"func": 0, "id": 200, "state": part_state},
+            ]}},
+        }})
+
+    # 用户逐档对比拓竹界面：80% 两边一致、90% 一致、100% 这边只有 90%
+    s80 = make(80, "12")
+    check("设 80%：部件 80、12 档 → 显示 80", s80.exhaust_fan_pct == 80, str(s80.exhaust_fan_pct))
+    check("设 80%：来源仍是 airduct", s80.exhaust_source == "airduct", str(s80.exhaust_source))
+
+    s90 = make(90, "13")
+    check("设 90%：部件 90、13 档 → 显示 90", s90.exhaust_fan_pct == 90, str(s90.exhaust_fan_pct))
+
+    s100 = make(90, "15")
+    check("设 100%：部件只报 90、档位 15 → 显示 100",
+          s100.exhaust_fan_pct == 100, str(s100.exhaust_fan_pct))
+    check("设 100%：来源标成 fan_gear（说明取了请求档位）",
+          s100.exhaust_source == "fan_gear", str(s100.exhaust_source))
+    check("快照下发 fans_source",
+          (hub.state_dict(s100, 1).get("fans_source") or {}).get("exhaust") == "fan_gear")
+
+    # 差得远 = 两路不同的东西（例如部件停了、腔体风扇在转），不能被档位带偏
+    off = make(0, "15")
+    check("部件 0 / 档位 100 相差太大 → 仍按部件 0",
+          off.exhaust_fan_pct == 0 and off.exhaust_source == "airduct",
+          f"{off.exhaust_fan_pct}/{off.exhaust_source}")
+
+    # 没有部件：退回档位换算，来源写 big_fan2
+    none = parse_report({"print": {"big_fan2_speed": "12"}})
+    check("没有 airduct 部件时退回 big_fan2（80%）",
+          none.exhaust_fan_pct == 80 and none.exhaust_source == "big_fan2",
+          f"{none.exhaust_fan_pct}/{none.exhaust_source}")
+
+
 if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
@@ -546,6 +591,7 @@ if __name__ == "__main__":
     test_real_p2s_report()
     test_dual_nozzle()
     test_fan_raw()
+    test_exhaust_full_speed()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

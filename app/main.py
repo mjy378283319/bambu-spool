@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="拓竹耗材管家",
-    version="1.0.46",
+    version="1.0.47",
     lifespan=lifespan,
     # 挂了鉴权就别把接口文档公开（会泄露接口结构，给扫描器省事）
     docs_url=None,

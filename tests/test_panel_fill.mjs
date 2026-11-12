@@ -192,6 +192,7 @@ check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanC
   const html = renderFanCard({
     fans: { cooling: 0, aux: 0, secondary: 0, exhaust: 90 },
     fans_installed: { secondary: true },
+    fans_source: { exhaust: "fan_gear" },
     fans_raw: {
       cooling: "0", big_fan1: "0", big_fan2: "14", heatbreak: "15", aux_part_fan: false,
       airduct: [
@@ -207,6 +208,8 @@ check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanC
   check("折叠区列出了 airduct 每个部件",
     html.includes("id16/func0:0") && html.includes("id200/func0:90"), html.slice(0, 800));
   check("外排仍按部件 state 显示 90%", html.includes(">90%<"), html.slice(0, 900));
+  check("折叠区标出外排来源（部件限幅时会写 fan_gear）",
+    html.includes("外排来源") && html.includes(">fan_gear<"), html.slice(0, 1200));
 }
 
 // ── 2. 料条高度 = 余重 ÷ 满盘容量 ───────────────────────────────

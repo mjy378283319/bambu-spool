@@ -468,6 +468,9 @@ class PrinterState:
     secondary_aux_installed: bool = False
     # 「外排」——外排风扇套件；没装 / 没上报时退回 big_fan2 档位，再没有才是 None
     exhaust_fan_pct: Optional[int] = None
+    # 外排这个数是从哪来的：airduct（部件实测）/ fan_gear（部件被限幅，取了请求档位）
+    # / big_fan2（没有部件，退回档位）。界面对不上拓竹 App 时先看这个。
+    exhaust_source: Optional[str] = None
     # 风扇**原始上报值**，只给面板上的「原始值」折叠区看（诊断用）。
     # 界面上的百分比是换算结果，跟拓竹 App 对不上时先看这里：
     # 外排既可能来自 airduct 里多出来的部件（state，本身就是百分比），
@@ -634,12 +637,27 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     state.secondary_aux_installed = airduct_left_aux_installed(block)
 
     # 外排：套件并入空调系统后会多报一个风扇部件，优先用它；
-    # 没有就退回 big_fan2（X 系列与 P2S 外排/腔体都走这一路档位）
+    # 没有就退回 big_fan2（X 系列与 P2S 外排/腔体都走这一路档位）。
+    #
+    # ★ 2026-11-12 实测（P2S + 外排套件，用户逐档对比拓竹界面）：
+    #   套件设 80% → 两边一致；设 90% → 一致；设 100% → 部件只报到 90，
+    #   而 big_fan2 才到 15 档（100%）。也就是说**部件报的是被限幅的实际转速，
+    #   big_fan2 报的是请求档位**，满速时两者差一档。
+    #   所以：两个数相差 ≤1 档（10 个百分点）时取较高的那个 —— 同一路风的两种表述；
+    #   差得远（例如部件 0 / big_fan2 100）说明是两路不同的东西（腔体风扇之类），
+    #   仍以部件实测为准，别被档位带偏。
     extra = airduct_other_fan_percent(block)
+    level_pct = state.chamber_fan_pct if block.get("big_fan2_speed") is not None else None
     if extra is not None:
-        state.exhaust_fan_pct = extra
-    elif block.get("big_fan2_speed") is not None:
-        state.exhaust_fan_pct = state.chamber_fan_pct
+        value, source = extra, "airduct"
+        # 严格大于才换来源：两个值相等时仍算部件实测（80% 那档就是这样）
+        if level_pct is not None and 0 < level_pct - extra <= 10:
+            value, source = level_pct, "fan_gear"
+        state.exhaust_fan_pct = value
+        state.exhaust_source = source
+    elif level_pct is not None:
+        state.exhaust_fan_pct = level_pct
+        state.exhaust_source = "big_fan2"
 
     # 原始值留档：界面口径与拓竹 App 不一致时，靠这几个数一眼看出用的是哪条路
     state.fan_raw = {
