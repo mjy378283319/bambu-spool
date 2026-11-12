@@ -568,6 +568,12 @@ def test_exhaust_full_speed() -> None:
     check("快照下发 fans_source",
           (hub.state_dict(s100, 1).get("fans_source") or {}).get("exhaust") == "fan_gear")
 
+    # 只在「请求满速」时才认限幅：普通档位差不算（避免 big_fan2 实为腔体风扇时带偏）
+    s88 = make(80, "14")
+    check("部件 80、档位 90 但没到满速 → 仍按部件 80",
+          s88.exhaust_fan_pct == 80 and s88.exhaust_source == "airduct",
+          f"{s88.exhaust_fan_pct}/{s88.exhaust_source}")
+
     # 差得远 = 两路不同的东西（例如部件停了、腔体风扇在转），不能被档位带偏
     off = make(0, "15")
     check("部件 0 / 档位 100 相差太大 → 仍按部件 0",

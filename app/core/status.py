@@ -643,15 +643,16 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     #   套件设 80% → 两边一致；设 90% → 一致；设 100% → 部件只报到 90，
     #   而 big_fan2 才到 15 档（100%）。也就是说**部件报的是被限幅的实际转速，
     #   big_fan2 报的是请求档位**，满速时两者差一档。
-    #   所以：两个数相差 ≤1 档（10 个百分点）时取较高的那个 —— 同一路风的两种表述；
-    #   差得远（例如部件 0 / big_fan2 100）说明是两路不同的东西（腔体风扇之类），
-    #   仍以部件实测为准，别被档位带偏。
+    #   所以：**只有请求档位到满速（100%）**、且部件读数差一档以内时，才按 100% 显示；
+    #   其余情况一律以部件实测为准。窗口卡这么死，是为了避免 big_fan2 其实是腔体风扇时
+    #   把外排带偏（部件 0 / 档位 100 这种一眼就是两路不同的东西）。
     extra = airduct_other_fan_percent(block)
     level_pct = state.chamber_fan_pct if block.get("big_fan2_speed") is not None else None
     if extra is not None:
         value, source = extra, "airduct"
-        # 严格大于才换来源：两个值相等时仍算部件实测（80% 那档就是这样）
-        if level_pct is not None and 0 < level_pct - extra <= 10:
+        # 严格大于才换来源：两个值相等时仍算部件实测（80% 那档就是这样）；
+        # 并且只认「请求满速」这一种情况（100%），别把普通档位差当限幅。
+        if level_pct == 100 and 0 < level_pct - extra <= 10:
             value, source = level_pct, "fan_gear"
         state.exhaust_fan_pct = value
         state.exhaust_source = source
