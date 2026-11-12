@@ -185,9 +185,8 @@ check("X1 等无自适应风道组件的机型仍用「腔体风扇」那套命�
 check("非 P2S/X2 不出现「外排」这一行", !x1.includes("外排"));
 check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanChannels(null)));
 
-// ── 1b. 风扇原始值：界面百分比对不上拓竹 App 时的对账依据 ──────────
-// 用户 2026-11-12 三张截图：P2S 外排 App 100/90/80%，这边 90/90/80%。
-// 真机报文里外排是 id48/func2，state 就是 App 的百分比；big_fan2 只有 14/13/12 档。
+// ── 1b. 风扇卡不铺原始值诊断区（2026-11-12 用户：「不好看」） ────────
+// fans_raw / fans_source 仍随 API 快照下发，方便以后排查；面板上一律不展示。
 {
   const html = renderFanCard({
     fans: { cooling: 0, aux: 0, secondary: 0, exhaust: 100 },
@@ -204,15 +203,17 @@ check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanC
     },
   }, { model: "P2S" });
 
-  check("风扇卡带「风扇原始值」折叠区", html.includes("风扇原始值"), html.slice(0, 200));
-  check("折叠区列出了各档位原始值",
-    html.includes("big_fan2_speed") && html.includes(">14<"), html.slice(0, 600));
-  check("折叠区列出了 airduct 每个部件（含 func==2 的外排）",
-    html.includes("id16/func0:0") && html.includes("id48/func2:100"), html.slice(0, 900));
-  check("外排按部件 state 显示 100%（不再把 14 档算成 90%）",
-    html.includes(">100%<"), html.slice(0, 900));
-  check("折叠区标出外排来源 airduct（额外部件实测）",
-    html.includes("外排来源") && html.includes(">airduct<"), html.slice(0, 1200));
+  check("风扇卡不再出现「风扇原始值」折叠区",
+    !html.includes("风扇原始值") && !html.includes("label-diag"), html.slice(0, 400));
+  check("原始值字段名也不再出现在卡里",
+    !html.includes("big_fan2_speed") && !html.includes("airduct.parts")
+      && !html.includes("外排来源") && !html.includes(">airduct<")
+      && !html.includes(">14<"), html.slice(0, 600));
+  check("卡片不残留 details / ul 结构",
+    !html.includes("<details") && !html.includes("<ul"), html.slice(0, 600));
+  check("四行风扇与 100% 读数照旧显示",
+    html.includes(">100%<") && html.includes("外排") && html.includes("风扇状态"),
+    html.slice(0, 600));
 }
 
 // ── 2. 料条高度 = 余重 ÷ 满盘容量 ───────────────────────────────

@@ -492,8 +492,8 @@ class PrinterState:
     # 外排这个数是从哪来的：airduct（额外部件实测，state 本身就是百分比）
     # / big_fan2（认不出部件，退回 0-15 档位换算）。界面对不上 App 时先看这个。
     exhaust_source: Optional[str] = None
-    # 风扇**原始上报值**，只给面板上的「原始值」折叠区看（诊断用）。
-    # 界面上的百分比是换算结果，跟拓竹 App 对不上时先看这里：
+    # 风扇**原始上报值**，留在 API 快照里供排查（面板折叠区 1.0.50 起已移除）。
+    # 界面上的百分比是换算结果，跟拓竹 App 对不上时看接口里的这几个数：
     # 外排既可能来自 airduct 里多出来的部件（state，本身就是百分比），
     # 也可能退回 big_fan2_speed（0-15 档位）——两者的原始值完全不同。
     fan_raw: dict = field(default_factory=dict)

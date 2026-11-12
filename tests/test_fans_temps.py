@@ -518,9 +518,9 @@ def test_dual_nozzle() -> None:
     check("X2D 双头模式判定为真", hub.state_dict(x2d, 1).get("dual_nozzle") is True)
 
 
-# ── 2e. 风扇原始值：界面对不上拓竹 App 时的对账依据 ──────────────
+# ── 2e. 风扇原始值：留在 API 快照里供排查，面板不再展示 ───────────
 def test_fan_raw() -> None:
-    print("\n== 风扇原始值（面板「原始值」折叠区） ==")
+    print("\n== 风扇原始值（API 快照；界面折叠区 1.0.50 起已移除） ==")
     # 老固件认法：外排套件作为「多出来的 func==0 部件」(id 200) 上报。
     # 原始值能看出 90 是部件 state 还是 big_fan2 档位换算出来的。
     st = parse_report({"print": {

@@ -906,8 +906,8 @@ class PrinterHub:
                 "secondary": state.secondary_aux_fan_pct,
                 "exhaust": state.exhaust_fan_pct,
             },
-            # 风扇原始上报值（面板「原始值」折叠区用）：界面百分比与拓竹 App
-            # 对不上时，先看这里判断外排走的是 airduct 部件还是 big_fan2 档位
+            # 风扇原始上报值：只留在 API 快照里供排查（面板折叠区 1.0.50 起已移除）；
+            # 界面百分比与拓竹 App 对不上时，靠它判断外排走的是部件还是 big_fan2 档位
             "fans_raw": state.fan_raw,
             # 外排这个数是从哪条路取的（airduct 额外部件实测 / big_fan2 档位兜底）
             "fans_source": {"exhaust": state.exhaust_source},
