@@ -96,10 +96,14 @@ def _bit_set(bits_hex: str, index: int) -> Optional[bool]:
 
 
 # ── 自适应风道切换组件（P2S / X2）里的部件 ──────────────────────
-# device.airduct.parts[] 是真机报文里的部件列表，靠 id 认身份、靠 func 区分品类：
+# device.airduct.parts[] 是真机报文里的部件列表，**靠 id 认身份**，不要拿 func 认：
 #   func == 0  → 风扇类部件，state 就是转速百分比
 #   func == 6 / 8 → 风门 / 风道切换机构（真机 P2S 是 {"func":6,"id":32}，
 #                  另一个固件版本报 func 8，所以只按 id 认、不靠 func 认）
+# ★ func 在不同固件/不同选配件之间会漂，2026-11-12 真机 P2S + 外排套件实测：
+#     id16/func0（右辅助）、id32/func6（风门）、id160/func5（左辅助）、id48/func2（外排）
+#   外排是 func==2、左辅助是 func==5，都不是 0 —— 旧版「只认 func==0 的多余部件」
+#   因此根本认不出外排，界面一直退回 big_fan2 档位（App 100% 只显示 90%）。
 #
 # 真机 P2S 样本（research/_MOCK-P2S.json）:
 #   parts   = [{"func":0,"id":16,"state":90}, {"func":6,"id":32,"state":0}]
@@ -122,8 +126,14 @@ AIRDUCT_PART_RIGHT_AUX = 16
 AIRDUCT_PART_FLAP = 32
 # 左侧选配辅助风扇 → 面板「左(辅助)」；ha-bambulab 用 id==160 认这台
 AIRDUCT_PART_LEFT_AUX = 160
+# 外排风扇套件并入空调系统后的部件（真机 P2S 报 func==2，state 直接是百分比）
+AIRDUCT_PART_EXHAUST = 48
 # 已知的非风扇部件，识别「剩余的风扇部件」时要排掉
 AIRDUCT_NON_FAN_IDS = frozenset({AIRDUCT_PART_FLAP})
+# 按 id 认身份的风扇部件（func 会漂，不能只看 func==0）
+AIRDUCT_FAN_IDS = frozenset({
+    AIRDUCT_PART_RIGHT_AUX, AIRDUCT_PART_LEFT_AUX, AIRDUCT_PART_EXHAUST,
+})
 
 
 def fan_percent(raw: Any) -> int:
@@ -181,7 +191,7 @@ def airduct_fans(block: dict) -> list[int]:
             continue
         is_fan = (
             _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC
-            or part_id in (AIRDUCT_PART_RIGHT_AUX, AIRDUCT_PART_LEFT_AUX)
+            or part_id in AIRDUCT_FAN_IDS
         )
         if is_fan:
             out.append(max(0, min(100, _as_int(part.get("state")))))
@@ -254,19 +264,30 @@ def airduct_left_aux_installed(block: dict) -> bool:
 
 
 def airduct_other_fan_percent(block: dict) -> Optional[int]:
-    """除右/左辅助、风门之外的**额外风扇部件**的转速。
+    """外排风扇套件（除右/左辅助、风门之外的额外部件）的转速百分比。
 
-    外排风扇套件自带控制板、并入空调系统后，很可能就以新增部件的形式出现。
-    认出来就优先用它当「外排」的读数，认不出来再退回 big_fan2。
+    ★ 2026-11-12 真机 P2S + 外排套件逐档实测（对照拓竹 App 100 / 90 / 80%）：
+        parts = id16/func0:0、id32/func6:0、id160/func5:0、id48/func2:100|90|80
+      只有 **id48/func2** 跟着外排走，state 直接就是 App 显示的百分比；
+      与此同时 big_fan2_speed = 14 / 13 / 12 档，按 /15 换算是 90 / 90 / 80，
+      满速差一档。旧版只认 func==0 的额外部件 → 认不出 func==2 的 id48
+      → 外排一直退回 big_fan2，于是 App 100% 时这边永远显示 90%。
+
+    优先按 id==48 精确认（不看 func，固件换 func 也照样认）；
+    没有 48 时，兼容「func==0 的额外部件」这种老认法（别的机型/固件）。
     """
     known = {AIRDUCT_PART_RIGHT_AUX, AIRDUCT_PART_LEFT_AUX} | set(AIRDUCT_NON_FAN_IDS)
+    fallback: Optional[int] = None
     for part in _airduct_parts(block):
         part_id = _as_int(part.get("id"), -1)
         if part_id in known or part_id < 0:
             continue
-        if _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC:
-            return max(0, min(100, _as_int(part.get("state"))))
-    return None
+        state = max(0, min(100, _as_int(part.get("state"))))
+        if part_id == AIRDUCT_PART_EXHAUST:
+            return state
+        if fallback is None and _as_int(part.get("func"), -1) == AIRDUCT_FAN_FUNC:
+            fallback = state
+    return fallback
 
 
 # ── 双喷嘴（X2D / H2D / H2C / H2D Pro）──────────────────────────────
@@ -468,8 +489,8 @@ class PrinterState:
     secondary_aux_installed: bool = False
     # 「外排」——外排风扇套件；没装 / 没上报时退回 big_fan2 档位，再没有才是 None
     exhaust_fan_pct: Optional[int] = None
-    # 外排这个数是从哪来的：airduct（部件实测）/ fan_gear（部件被限幅，取了请求档位）
-    # / big_fan2（没有部件，退回档位）。界面对不上拓竹 App 时先看这个。
+    # 外排这个数是从哪来的：airduct（额外部件实测，state 本身就是百分比）
+    # / big_fan2（认不出部件，退回 0-15 档位换算）。界面对不上 App 时先看这个。
     exhaust_source: Optional[str] = None
     # 风扇**原始上报值**，只给面板上的「原始值」折叠区看（诊断用）。
     # 界面上的百分比是换算结果，跟拓竹 App 对不上时先看这里：
@@ -636,26 +657,21 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
     state.secondary_aux_fan_pct = airduct_left_aux_percent(block)
     state.secondary_aux_installed = airduct_left_aux_installed(block)
 
-    # 外排：套件并入空调系统后会多报一个风扇部件，优先用它；
-    # 没有就退回 big_fan2（X 系列与 P2S 外排/腔体都走这一路档位）。
+    # 外排：套件并入空调系统后报成 airduct 的额外部件（P2S 真机是 id48/func2），
+    # **state 就是拓竹 App 显示的百分比**，原样透传；认不出部件的老机型才退回
+    # big_fan2 的 0-15 档位换算。
     #
-    # ★ 2026-11-12 实测（P2S + 外排套件，用户逐档对比拓竹界面）：
-    #   套件设 80% → 两边一致；设 90% → 一致；设 100% → 部件只报到 90，
-    #   而 big_fan2 才到 15 档（100%）。也就是说**部件报的是被限幅的实际转速，
-    #   big_fan2 报的是请求档位**，满速时两者差一档。
-    #   所以：**只有请求档位到满速（100%）**、且部件读数差一档以内时，才按 100% 显示；
-    #   其余情况一律以部件实测为准。窗口卡这么死，是为了避免 big_fan2 其实是腔体风扇时
-    #   把外排带偏（部件 0 / 档位 100 这种一眼就是两路不同的东西）。
+    # ★ 2026-11-12 逐档实测：App 100 / 90 / 80% 时 id48.state = 100 / 90 / 80，
+    #   而 big_fan2 = 14 / 13 / 12 档 → 90 / 90 / 80。档位比部件慢一档，
+    #   满速尤其明显：App 100% 时档位只有 14 档（90%）。
+    #   → 部件本身就是权威值，**绝不能拿 big_fan2 去「补正」部件**。
+    #   1.0.47 / 1.0.48 的 fan_gear 补正建立在「部件被限幅」这个误判上，
+    #   且真机上压根没走到（当时连 func==2 的 id48 都没认出来），已删除。
     extra = airduct_other_fan_percent(block)
     level_pct = state.chamber_fan_pct if block.get("big_fan2_speed") is not None else None
     if extra is not None:
-        value, source = extra, "airduct"
-        # 严格大于才换来源：两个值相等时仍算部件实测（80% 那档就是这样）；
-        # 并且只认「请求满速」这一种情况（100%），别把普通档位差当限幅。
-        if level_pct == 100 and 0 < level_pct - extra <= 10:
-            value, source = level_pct, "fan_gear"
-        state.exhaust_fan_pct = value
-        state.exhaust_source = source
+        state.exhaust_fan_pct = extra
+        state.exhaust_source = "airduct"
     elif level_pct is not None:
         state.exhaust_fan_pct = level_pct
         state.exhaust_source = "big_fan2"

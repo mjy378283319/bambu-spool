@@ -13,8 +13,11 @@
         16  → 右(辅助)，组件自带那台
         32  → 风门，不是风扇，界面不显示
         160 → 左(辅助)，选配
-        其余 func==0 的部件 → 当外排（外排套件并入空调系统后新增的部件）
+        48  → 外排（外排套件并入后新增；真机报 func==2，state 就是 App 百分比）
+        其余 func==0 的额外部件 → 也当外排（老固件兜底）
     `state` 本身就是百分比，**不能再除以 15**。
+    ★ 2026-11-12 真机：func 会漂（右辅助 0 / 风门 6 / 左辅助 5 / 外排 2），
+    只认 func==0 就认不出外排，会退回 big_fan2 档位把 App 100% 显示成 90%。
     ⚠️ 关键：P2S 真机上 big_fan1_speed / big_fan2_speed 恒为 0，
     它的辅助风扇只在 airduct 里报 —— 只看 big_fan1 会永远显示 0%。
   - 面板四行命名照抄拓竹官方 App / 打印机屏幕「空调系统」页：
@@ -39,6 +42,7 @@ os.environ["DATA_DIR"] = os.path.join(ROOT, "data", "testfans")
 
 from app.core.hub import hub  # noqa: E402
 from app.core.status import (  # noqa: E402
+    AIRDUCT_PART_EXHAUST,
     AIRDUCT_PART_FLAP,
     AIRDUCT_PART_LEFT_AUX,
     AIRDUCT_PART_RIGHT_AUX,
@@ -166,8 +170,22 @@ def test_panel_four_channels() -> None:
           airduct_other_fan_percent(parts((0, 16, 90), (0, 200, 60))) == 60)
     check("右/左(辅助) 与风门都排除在外",
           airduct_other_fan_percent(parts((0, 16, 90), (0, 160, 40), (6, 32, 0))) is None)
-    check("多出来的部件但 func 不是 0 → 不当外排",
+    check("多出来的部件既不是 id48、func 也不是 0 → 不当外排",
           airduct_other_fan_percent(parts((0, 16, 90), (6, 200, 60))) is None)
+
+    # ★ 2026-11-12 真机 P2S + 外排套件：func 全漂了，靠 id 认
+    real_exhaust = parts((0, 16, 0), (6, 32, 0), (5, 160, 0), (2, 48, 100))
+    check("真机外排部件 id48/func2 认出来（state 100 直接是百分比）",
+          airduct_other_fan_percent(real_exhaust) == 100,
+          str(airduct_other_fan_percent(real_exhaust)))
+    check("外排部件常量就是 48", AIRDUCT_PART_EXHAUST == 48)
+    check("id48 换成 func==0 也照样认（固件换 func 不影响）",
+          airduct_other_fan_percent(parts((0, 16, 0), (0, 48, 80))) == 80)
+    check("id48 排在别的额外部件后面也优先取它",
+          airduct_other_fan_percent(parts((0, 16, 0), (0, 200, 30), (2, 48, 90))) == 90,
+          str(airduct_other_fan_percent(parts((0, 16, 0), (0, 200, 30), (2, 48, 90)))))
+    check("airduct_fans 也按 id 认出 func==2 的外排部件",
+          airduct_fans(real_exhaust) == [0, 0, 100], str(airduct_fans(real_exhaust)))
 
 
 # ── 2c. 「左(辅助)」装没装：不转的时候不能写成「未安装」 ──────────
@@ -503,8 +521,8 @@ def test_dual_nozzle() -> None:
 # ── 2e. 风扇原始值：界面对不上拓竹 App 时的对账依据 ──────────────
 def test_fan_raw() -> None:
     print("\n== 风扇原始值（面板「原始值」折叠区） ==")
-    # 复现用户 2026-11-11 的场景：外排套件作为「多出来的部件」(id 200) 上报，
-    # 拓竹界面写 100%、这边写 90% —— 原始值能看出 90 是部件 state 还是 big_fan2 档位。
+    # 老固件认法：外排套件作为「多出来的 func==0 部件」(id 200) 上报。
+    # 原始值能看出 90 是部件 state 还是 big_fan2 档位换算出来的。
     st = parse_report({"print": {
         "cooling_fan_speed": "0",
         "big_fan1_speed": "0",
@@ -536,51 +554,69 @@ def test_fan_raw() -> None:
     check("老机型外排按 big_fan2 档位换算", old.exhaust_fan_pct == 80, str(old.exhaust_fan_pct))
 
 
-# ── 2f. 外排满速：部件被限幅时取请求档位（2026-11-12 用户实测） ────
-def test_exhaust_full_speed() -> None:
-    print("\n== 外排满速：部件限幅 90 → 取 big_fan2 的请求档位 ==")
+# ── 2f. 外排真机报文：id48/func2 的 state 就是 App 显示的百分比 ──────
+def test_exhaust_real_p2s() -> None:
+    """2026-11-12 用户逐档截图（App 100/90/80%，这边 90/90/80%）的回归用例。
 
-    def make(part_state: int, level: str):
-        """parts 里放一个「多出来的部件」(id 200) 当外排，big_fan2 给档位。"""
+    真因不是「部件被限幅」，而是外排部件 id48 报的是 func==2，旧版只认
+    func==0 的额外部件 → 一直退回 big_fan2 档位（14 档只剩 90%）。
+    """
+    print("\n== 外排真机 P2S：id48/func2 优先，big_fan2 只做兜底 ==")
+
+    def make(app_pct: int, gear: str):
+        """按用户截图逐字段复刻真机报文：只开外排，其余部件全 0。"""
         return parse_report({"print": {
-            "big_fan2_speed": level,
+            "cooling_fan_speed": "0",
+            "big_fan1_speed": "0",
+            "big_fan2_speed": gear,
+            "heatbreak_fan_speed": "0",
+            "aux_part_fan": False,
             "device": {"airduct": {"parts": [
                 {"func": 0, "id": 16, "state": 0},
                 {"func": 6, "id": 32, "state": 0},
-                {"func": 0, "id": 160, "state": 0},
-                {"func": 0, "id": 200, "state": part_state},
+                {"func": 5, "id": 160, "state": 0},
+                {"func": 2, "id": 48, "state": app_pct},
             ]}},
         }})
 
-    # 用户逐档对比拓竹界面：80% 两边一致、90% 一致、100% 这边只有 90%
-    s80 = make(80, "12")
-    check("设 80%：部件 80、12 档 → 显示 80", s80.exhaust_fan_pct == 80, str(s80.exhaust_fan_pct))
-    check("设 80%：来源仍是 airduct", s80.exhaust_source == "airduct", str(s80.exhaust_source))
+    # 用户三张截图：App 100% / 90% / 80% 对应 big_fan2 = 14 / 13 / 12 档
+    for app_pct, gear in ((100, "14"), (90, "13"), (80, "12")):
+        st = make(app_pct, gear)
+        check(f"App {app_pct}% / {gear} 档 → 外排显示 {app_pct}%",
+              st.exhaust_fan_pct == app_pct, str(st.exhaust_fan_pct))
+        check(f"App {app_pct}% 来源标 airduct（不再用档位换算）",
+              st.exhaust_source == "airduct", str(st.exhaust_source))
+        check(f"App {app_pct}% 快照下发 fans_source=airduct",
+              (hub.state_dict(st, 1).get("fans_source") or {}).get("exhaust") == "airduct")
+        check(f"App {app_pct}% 下发到面板的 fans.exhaust 也是 {app_pct}",
+              (hub.state_dict(st, 1).get("fans") or {}).get("exhaust") == app_pct)
 
-    s90 = make(90, "13")
-    check("设 90%：部件 90、13 档 → 显示 90", s90.exhaust_fan_pct == 90, str(s90.exhaust_fan_pct))
+    # 原始值留档：14 档 + id48:100 一眼看出该信谁
+    raw = make(100, "14").fan_raw or {}
+    check("原始值留了 big_fan2 = 14 档", raw.get("big_fan2") == "14", str(raw))
+    check("原始值留了 id48/func2:100",
+          any(p.get("id") == 48 and p.get("func") == 2 and p.get("state") == 100
+              for p in raw.get("airduct") or []), str(raw.get("airduct")))
 
-    s100 = make(90, "15")
-    check("设 100%：部件只报 90、档位 15 → 显示 100",
-          s100.exhaust_fan_pct == 100, str(s100.exhaust_fan_pct))
-    check("设 100%：来源标成 fan_gear（说明取了请求档位）",
-          s100.exhaust_source == "fan_gear", str(s100.exhaust_source))
-    check("快照下发 fans_source",
-          (hub.state_dict(s100, 1).get("fans_source") or {}).get("exhaust") == "fan_gear")
+    # 档位比部件慢一档，满速尤其明显：绝不能拿档位反过来「补正」部件
+    s80 = make(80, "15")
+    check("部件 80 / 档位满速 100 → 仍按部件 80（不做 fan_gear 补正）",
+          s80.exhaust_fan_pct == 80 and s80.exhaust_source == "airduct",
+          f"{s80.exhaust_fan_pct}/{s80.exhaust_source}")
 
-    # 只在「请求满速」时才认限幅：普通档位差不算（避免 big_fan2 实为腔体风扇时带偏）
-    s88 = make(80, "14")
-    check("部件 80、档位 90 但没到满速 → 仍按部件 80",
-          s88.exhaust_fan_pct == 80 and s88.exhaust_source == "airduct",
-          f"{s88.exhaust_fan_pct}/{s88.exhaust_source}")
+    # 老认法兼容：没有 id48 时，func==0 的额外部件仍当外排
+    old = parse_report({"print": {
+        "big_fan2_speed": "12",
+        "device": {"airduct": {"parts": [
+            {"func": 0, "id": 16, "state": 90},
+            {"func": 0, "id": 200, "state": 60},
+        ]}},
+    }})
+    check("没有 id48 时兼容 func==0 的额外部件（60）",
+          old.exhaust_fan_pct == 60 and old.exhaust_source == "airduct",
+          f"{old.exhaust_fan_pct}/{old.exhaust_source}")
 
-    # 差得远 = 两路不同的东西（例如部件停了、腔体风扇在转），不能被档位带偏
-    off = make(0, "15")
-    check("部件 0 / 档位 100 相差太大 → 仍按部件 0",
-          off.exhaust_fan_pct == 0 and off.exhaust_source == "airduct",
-          f"{off.exhaust_fan_pct}/{off.exhaust_source}")
-
-    # 没有部件：退回档位换算，来源写 big_fan2
+    # 完全没有额外部件：退回 big_fan2 档位换算
     none = parse_report({"print": {"big_fan2_speed": "12"}})
     check("没有 airduct 部件时退回 big_fan2（80%）",
           none.exhaust_fan_pct == 80 and none.exhaust_source == "big_fan2",
@@ -597,7 +633,7 @@ if __name__ == "__main__":
     test_real_p2s_report()
     test_dual_nozzle()
     test_fan_raw()
-    test_exhaust_full_speed()
+    test_exhaust_real_p2s()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

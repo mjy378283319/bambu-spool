@@ -909,7 +909,7 @@ class PrinterHub:
             # 风扇原始上报值（面板「原始值」折叠区用）：界面百分比与拓竹 App
             # 对不上时，先看这里判断外排走的是 airduct 部件还是 big_fan2 档位
             "fans_raw": state.fan_raw,
-            # 外排这个数是从哪条路取的（airduct 部件 / fan_gear 请求档位 / big_fan2 兜底）
+            # 外排这个数是从哪条路取的（airduct 额外部件实测 / big_fan2 档位兜底）
             "fans_source": {"exhaust": state.exhaust_source},
             # 选配件「装没装」：转速为 null 时用它区分「未安装」与「已装·未转」
             "fans_installed": {

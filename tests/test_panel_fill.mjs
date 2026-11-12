@@ -186,18 +186,20 @@ check("非 P2S/X2 不出现「外排」这一行", !x1.includes("外排"));
 check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanChannels(null)));
 
 // ── 1b. 风扇原始值：界面百分比对不上拓竹 App 时的对账依据 ──────────
-// 用户 2026-11-11：P2S 外排拓竹界面 100%，这边 90%。外排有两条取值路径
-// （airduct 多出来的部件 / big_fan2 档位），原始值能直接看出走的哪条。
+// 用户 2026-11-12 三张截图：P2S 外排 App 100/90/80%，这边 90/90/80%。
+// 真机报文里外排是 id48/func2，state 就是 App 的百分比；big_fan2 只有 14/13/12 档。
 {
   const html = renderFanCard({
-    fans: { cooling: 0, aux: 0, secondary: 0, exhaust: 90 },
+    fans: { cooling: 0, aux: 0, secondary: 0, exhaust: 100 },
     fans_installed: { secondary: true },
-    fans_source: { exhaust: "fan_gear" },
+    fans_source: { exhaust: "airduct" },
     fans_raw: {
-      cooling: "0", big_fan1: "0", big_fan2: "14", heatbreak: "15", aux_part_fan: false,
+      cooling: "0", big_fan1: "0", big_fan2: "14", heatbreak: "0", aux_part_fan: false,
       airduct: [
-        { id: 16, func: 0, state: 0, range: 6553600 },
-        { id: 200, func: 0, state: 90, range: 5898240 },
+        { id: 16, func: 0, state: 0 },
+        { id: 32, func: 6, state: 0 },
+        { id: 160, func: 5, state: 0 },
+        { id: 48, func: 2, state: 100 },
       ],
     },
   }, { model: "P2S" });
@@ -205,11 +207,12 @@ check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanC
   check("风扇卡带「风扇原始值」折叠区", html.includes("风扇原始值"), html.slice(0, 200));
   check("折叠区列出了各档位原始值",
     html.includes("big_fan2_speed") && html.includes(">14<"), html.slice(0, 600));
-  check("折叠区列出了 airduct 每个部件",
-    html.includes("id16/func0:0") && html.includes("id200/func0:90"), html.slice(0, 800));
-  check("外排仍按部件 state 显示 90%", html.includes(">90%<"), html.slice(0, 900));
-  check("折叠区标出外排来源（部件限幅时会写 fan_gear）",
-    html.includes("外排来源") && html.includes(">fan_gear<"), html.slice(0, 1200));
+  check("折叠区列出了 airduct 每个部件（含 func==2 的外排）",
+    html.includes("id16/func0:0") && html.includes("id48/func2:100"), html.slice(0, 900));
+  check("外排按部件 state 显示 100%（不再把 14 档算成 90%）",
+    html.includes(">100%<"), html.slice(0, 900));
+  check("折叠区标出外排来源 airduct（额外部件实测）",
+    html.includes("外排来源") && html.includes(">airduct<"), html.slice(0, 1200));
 }
 
 // ── 2. 料条高度 = 余重 ÷ 满盘容量 ───────────────────────────────

@@ -1268,8 +1268,8 @@ function renderFanRaw(state) {
       ? `<li>airduct.parts = ${parts.map((p) =>
           `<code>id${val(p.id)}/func${val(p.func)}:${val(p.state)}</code>`).join(" ")}</li>`
       : "<li>airduct.parts = <code>—</code></li>",
-    // 外排这个数从哪条路取的：airduct=部件实测 / fan_gear=部件被限幅取了请求档位 /
-    // big_fan2=没有部件，退回档位换算。跟拓竹界面对不上时先看这一行。
+    // 外排这个数从哪条路取的：airduct=额外部件实测（与拓竹 App 同步）/
+    // big_fan2=认不出部件，退回档位换算。跟拓竹界面对不上时先看这一行。
     `<li>外排来源 = <code>${val((state && state.fans_source && state.fans_source.exhaust) || "—")}</code></li>`,
   ].join("");
   return `<details class="label-diag fan-raw"><summary>风扇原始值（对不上拓竹 App 时看这里）</summary>
