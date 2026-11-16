@@ -2718,42 +2718,90 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     !renderArtChips(singleState).includes("副喷嘴"));
 }
 
-// ── 颜色覆盖统计：按品牌 / 材料分组、每色数量、缺色清单 ─────────
-console.log("== 颜色统计列表 ==");
+// ── 库存颜色统计：只列有库存、PLA 按外观拆行 ───────────────────
+console.log("== 库存颜色统计列表 ==");
 {
   const data = {
     totals: {
-      brand_count: 1, group_count: 1, catalog_count: 3, owned_count: 2,
-      missing_count: 1, coverage: 66.7, spool_count: 3, matched_spool_count: 3,
+      brand_count: 1, material_count: 1, series_count: 2,
+      color_count: 5, spool_count: 7, unmatched_spool_count: 1,
     },
     brands: [{
-      brand: "Polymaker", catalog_count: 3, owned_count: 2, missing_count: 1,
+      brand: "拓竹", material_count: 1, series_count: 2,
+      color_count: 5, spool_count: 7,
       materials: [{
-        material: "PLA", series: ["Panchroma PLA"], catalog_count: 3,
-        owned_count: 2, missing_count: 1, coverage: 66.7,
-        owned: [
-          { name: "黑色", hex: "#080A0D", count: 2 },
-          { name: "冷白", hex: "#D9DFE5", count: 1 },
+        material: "PLA", color_count: 5, spool_count: 7,
+        series: [
+          { series: "PLA Basic", finish: "普通", order: 10, color_count: 3, spool_count: 4,
+            colors: [
+              { name: "黑色", hex: "#000000", count: 2 },
+              { name: "白色", hex: "#FFFFFF", count: 1 },
+              { name: "冷白", hex: "#D9DFE5", count: 1 },
+            ] },
+          { series: "PLA Matte", finish: "哑光", order: 20, color_count: 2, spool_count: 3,
+            colors: [
+              { name: "黑色", hex: "#111111", count: 2 },
+              { name: "红色", hex: "#E72F1D", count: 1 },
+            ] },
         ],
-        missing: [{ name: "红色", hex: "#E72F1D", count: 0 }],
       }],
     }],
     unmatched: [{ brand: "杂牌", material: "PLA", color_name: "紫色", count: 1 }],
   };
   const html = dbg.renderColorStatsHtml(data);
-  check("按品牌分组展示", html.includes("Polymaker") && html.includes("1 种材料"), html.slice(0, 500));
-  check("应有 / 已有 / 缺少三个数都显示",
-    html.includes("应有色") && html.includes("已有色") && html.includes("缺少"), html.slice(0, 800));
-  check("每种颜色的具体数量（黑色 ×2）", html.includes("×2"), html.slice(0, 1500));
-  check("缺少颜色单独列成清单",
-    html.includes("红色") && html.includes("缺少颜色（1 种）"), html.slice(0, 1800));
-  check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(0, 2000));
+  check("按品牌分组展示", html.includes("拓竹") && html.includes("1 种材料"), html.slice(0, 500));
+  check("PLA 按外观拆成两行，Basic 与 Matte 不混在一起",
+    html.includes("PLA Basic") && html.includes("PLA Matte") && html.includes(">哑光<"),
+    html.slice(0, 1200));
+  check("表格有颜色数与盘数", html.includes("颜色数") && html.includes("盘数"), html.slice(0, 900));
+  check("每色显示具体盘数（黑色 ×2）", html.includes("×2"), html.slice(0, 1800));
+  check("不再显示应有 / 缺色等未购买的颜色",
+    !html.includes("应有色") && !html.includes("缺少颜色") && !html.includes("待补"),
+    html.slice(0, 1800));
+  check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(0, 2200));
   check("手机端每格带 data-label",
-    html.includes('data-label="应有色"') && html.includes('data-label="覆盖率"'));
+    html.includes('data-label="外观"') && html.includes('data-label="颜色数"'));
   check("色块 hex 走白名单（脏值不进 style）",
     !dbg.colorChipListHtml([{ name: "脏色", hex: "red;background:blue", count: 1 }], true)
       .includes("background:red;"));
-  check("空数据不炸", dbg.renderColorStatsHtml({}).includes("色卡数据为空"));
+  check("空数据提示去录料盘", dbg.renderColorStatsHtml({}).includes("还没有有库存的耗材"));
+}
+
+// ── 库存筛选：候选只来自当前 tab，不留「选了 0 条」的空选项 ─────
+console.log("== 库存筛选选项 ==");
+{
+  const liveSpool = {
+    id: 1, brand: "拓竹", material: "PLA", finish: "普通", archived: false,
+    remaining_weight: 500, initial_weight: 1000, used_weight: 500,
+  };
+  const archivedSpool = {
+    id: 2, brand: "兰博", material: "PETG", finish: "丝绸", archived: true,
+    remaining_weight: 800, initial_weight: 1000, used_weight: 200,
+  };
+  vm.runInContext(
+    `S.spools = ${JSON.stringify([liveSpool, archivedSpool])}; S.spoolTab = "all";`,
+    ctx,
+  );
+  const brandSel = sandbox.document.getElementById("spoolBrand");
+  const finishSel = sandbox.document.getElementById("spoolFinish");
+  brandSel.value = ""; finishSel.value = "";
+  dbg.syncFilterOptions();
+  check("「所有」tab 不列只在归档里出现的品牌",
+    !brandSel.innerHTML.includes("兰博"), brandSel.innerHTML);
+  check("「所有」tab 不列只在归档里出现的外观",
+    !finishSel.innerHTML.includes("丝绸"), finishSel.innerHTML);
+
+  vm.runInContext(`S.spoolTab = "archived";`, ctx);
+  brandSel.value = ""; finishSel.value = "";
+  dbg.syncFilterOptions();
+  check("「已归档」tab 只列归档盘的选项",
+    brandSel.innerHTML.includes("兰博") && !brandSel.innerHTML.includes("拓竹"),
+    brandSel.innerHTML);
+
+  // 复原，别把后续测试的全局状态带脏
+  vm.runInContext(`S.spools = []; S.spoolTab = "all";`, ctx);
+  brandSel.value = ""; finishSel.value = ""; finishSel.innerHTML = "";
+  dbg.syncFilterOptions();
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────

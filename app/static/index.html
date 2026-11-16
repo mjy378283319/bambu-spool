@@ -310,11 +310,11 @@
 
     <div class="card table-card">
       <div class="card-head">
-        <h2>颜色统计</h2>
+        <h2>库存颜色统计</h2>
         <span class="count" id="colorStatsCount"></span>
         <button class="btn sm ghost" onclick="loadColorStats(true)">刷新</button>
       </div>
-      <p class="sum-hint">按品牌 / 材料对照官方色卡：应有 = 色卡登记的颜色，已有 = 库存里入库的料盘颜色（已归档不算），缺少 = 还没入库的颜色。点每行展开明细。</p>
+      <p class="sum-hint">按品牌 / 材料 / 外观列出<b>当前有库存</b>的耗材与颜色（已用尽、已归档、没买过的不显示）；PLA 按 Basic / 哑光 / 丝绸等外观分开。点每行展开颜色与盘数。</p>
       <div id="colorStats"></div>
     </div>
   </section>

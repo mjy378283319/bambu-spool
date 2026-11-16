@@ -1363,6 +1363,9 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   background: var(--surface-2);
 }
 .cs-table .cs-group .tiny { font-weight: 400; margin-left: 8px; }
+.cs-table .cs-material td { border-top: 1px solid var(--border-strong); font-weight: 600; }
+.cs-table .cs-material .tiny { font-weight: 400; margin-left: 8px; }
+.cs-table .cs-series { padding-left: 26px; }
 .cs-table .cs-detail td { padding-top: 0; }
 .cs-block { margin: 8px 0 12px; }
 .cs-block h3 {

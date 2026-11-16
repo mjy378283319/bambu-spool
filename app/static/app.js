@@ -701,14 +701,40 @@ async function loadCatalog() {
  *     拿原始字段去重会把「未填写」和空串当成两个值，选中其中任何一个都筛不出东西。
  *  ② 空库时下拉里只剩「全部 X」那一项（而不是退回全量预设），否则又是满屏选了没结果的项。
  */
+/** 筛选下拉的候选只从**当前状态标签页**的料盘里取。
+ *
+ *  以前用 S.spools 全量（含归档、含其他 tab），于是一个只在「已归档」里出现的
+ *  外观也会留在「所有」页的下拉里，选中后 0 条结果 —— 用户说的「残留空选项」。
+ *  现在每个候选都保证在当前 tab 里至少有一条结果；切 tab 后旧值不在候选里，
+ *  refillSelect 会自动落回「全部」。
+ */
 function syncFilterOptions() {
+  const inTab = spoolsInTab(S.spoolTab || "all");
   const present = (field) => {
     const norm = SUMMARY_DRILL_FIELDS[field].norm;
-    return [...new Set(S.spools.map(norm))].sort((a, b) => String(a).localeCompare(String(b), "zh"));
+    return [...new Set(inTab.map(norm))].sort((a, b) => String(a).localeCompare(String(b), "zh"));
   };
   refillSelect("spoolBrand", present("brand"), "全部品牌");
   refillSelect("spoolMaterial", present("material"), "全部材料");
   refillSelect("spoolFinish", present("finish"), "全部外观");
+}
+
+/** 只按状态标签页过滤（不含关键词/品牌/材料/外观）。
+ *  筛选候选与列表本身共用它，两处口径不会分叉。 */
+function spoolsInTab(tab) {
+  return S.spools.filter((s) => {
+    if (tab === "archived") { if (!s.archived) return false; }
+    else if (s.archived) return false;
+
+    // 状态标签页一律走 spoolUseState —— 与耗材汇总页的「库存使用状态」同一个口径，
+    // 否则会出现「概览说消耗完 53 盘、点进来只剩 3 盘」这种两边对不上的现象。
+    const use = spoolUseState(s);
+    if (tab === "inuse" && use !== "in_use") return false;
+    if (tab === "idle" && use !== "unused") return false;
+    if (tab === "empty" && use !== "empty") return false;
+    if (tab === "low" && !s.is_low) return false;
+    return true;
+  });
 }
 
 /** 客户端时区（UTC 以东的分钟数）。后端按它切「今天 / 本周」的边界。 */
@@ -1638,18 +1664,7 @@ function filteredSpools() {
   const maxPrice = parseFloat(read("spoolPriceMax"));
   const tab = S.spoolTab || "all";
 
-  const list = S.spools.filter((s) => {
-    if (tab === "archived") { if (!s.archived) return false; }
-    else if (s.archived) return false;
-
-    // 状态标签页一律走 spoolUseState —— 与耗材汇总页的「库存使用状态」同一个口径，
-    // 否则会出现「概览说消耗完 53 盘、点进来只剩 3 盘」这种两边对不上的现象。
-    const use = spoolUseState(s);
-    if (tab === "inuse" && use !== "in_use") return false;
-    if (tab === "idle" && use !== "unused") return false;
-    if (tab === "empty" && use !== "empty") return false;
-    if (tab === "low" && !s.is_low) return false;
-
+  const list = spoolsInTab(tab).filter((s) => {
     // 分组口径统一走 SUMMARY_DRILL_FIELDS.norm：汇总页点名字钻过来时，
     // 「未填写 / 普通」这类空值归组也要能筛得到，否则跳过去是空列表。
     if (brand && SUMMARY_DRILL_FIELDS.brand.norm(s) !== brand) return false;
@@ -4011,58 +4026,63 @@ function toggleColorRest(btn) {
   btn.textContent = wasHidden ? "收起" : "展开其余 " + (btn.dataset.rest || "") + " 色";
 }
 
-/** 纯函数：给自测直接喂接口数据，不依赖 DOM。 */
+/** 纯函数：给自测直接喂接口数据，不依赖 DOM。
+ *
+ *  数据已由后端按「只保留有库存」筛过，并按 品牌 → 材料 → 外观 排好序；
+ *  这里只负责画，不再排序/过滤 —— 两套口径必然对不上。
+ */
 function renderColorStatsHtml(data) {
   const d = data || {};
   const t = d.totals || {};
   const brands = d.brands || [];
   const summary = `<div class="cs-summary">
-    <span><b>${t.catalog_count || 0}</b> 种应有色（去重）</span>
-    <span><b>${t.owned_count || 0}</b> 种已入库</span>
-    <span><b>${t.missing_count || 0}</b> 种待补</span>
-    <span>覆盖率 <b>${t.coverage || 0}%</b></span>
-    <span>${t.spool_count || 0} 盘在库 · ${t.matched_spool_count || 0} 盘匹配到色卡</span>
+    <span><b>${t.brand_count || 0}</b> 个品牌</span>
+    <span><b>${t.material_count || 0}</b> 种材料</span>
+    <span><b>${t.series_count || 0}</b> 个外观系列</span>
+    <span><b>${t.color_count || 0}</b> 种颜色</span>
+    <span><b>${t.spool_count || 0}</b> 盘有库存</span>
   </div>`;
-  if (!brands.length) return summary + `<div class="empty-state">色卡数据为空。</div>`;
+  if (!brands.length) {
+    return summary + `<div class="empty-state">还没有有库存的耗材。先到「料盘库存」录一盘，或检查是不是都已用完 / 已归档。</div>`;
+  }
 
   const rows = [];
   brands.forEach((b) => {
-    const mats = b.materials || [];
-    rows.push(`<tr class="cs-group"><th colspan="6">${esc(b.brand)}
-      <span class="tiny muted">${mats.length} 种材料 · 应有 ${b.catalog_count || 0} · 已有 ${b.owned_count || 0} · 缺 ${b.missing_count || 0}</span></th></tr>`);
-    mats.forEach((m) => {
-      const owned = m.owned_count || 0;
-      const total = m.catalog_count || 0;
-      const miss = m.missing_count || 0;
-      const pct = Math.max(0, Math.min(100, Number(m.coverage) || 0));
-      const ownedSpools = (m.owned || []).reduce((n, c) => n + (Number(c.count) || 0), 0);
-      rows.push(`<tr>
-        <td class="cell-main" data-label="材料">${esc(m.material)}</td>
-        <td data-label="耗材系列"><span class="tiny muted">${esc((m.series || []).join("、"))}</span></td>
-        <td class="num" data-label="应有色">${total}</td>
-        <td class="num" data-label="已有色">${owned}</td>
-        <td class="num" data-label="缺少">${miss}</td>
-        <td data-label="覆盖率"><div class="bar"><div style="width:${pct}%"></div></div>
-          <div class="tiny muted">${pct}%</div></td>
+    rows.push(`<tr class="cs-group"><th colspan="4">${esc(b.brand)}
+      <span class="tiny muted">${b.material_count || 0} 种材料 · ${b.series_count || 0} 个外观 · ${b.color_count || 0} 色 · ${b.spool_count || 0} 盘</span></th></tr>`);
+    (b.materials || []).forEach((m) => {
+      rows.push(`<tr class="cs-material">
+        <td class="cell-main" data-label="材料"><b>${esc(m.material)}</b>
+          <span class="tiny muted">${(m.series || []).length} 个外观</span></td>
+        <td></td>
+        <td class="num" data-label="颜色数">${m.color_count || 0}</td>
+        <td class="num" data-label="盘数">${m.spool_count || 0}</td>
       </tr>`);
-      rows.push(`<tr class="cs-detail"><td colspan="6">
-        <details class="label-diag"><summary>查看 ${esc(m.material)} 颜色明细（已有 ${owned} 种 / ${ownedSpools} 盘，缺 ${miss} 种）</summary>
-          <div class="cs-block"><h3>已有颜色（${owned} 种 · ${ownedSpools} 盘）</h3>${colorChipListHtml(m.owned, true)}</div>
-          <div class="cs-block"><h3>缺少颜色（${miss} 种）</h3>${colorChipListHtml(m.missing, false)}</div>
-        </details>
-      </td></tr>`);
+      (m.series || []).forEach((s) => {
+        rows.push(`<tr>
+          <td class="cs-series" data-label="外观"><span class="tag teal">${esc(s.finish)}</span></td>
+          <td data-label="系列">${esc(s.series)}</td>
+          <td class="num" data-label="颜色数">${s.color_count || 0}</td>
+          <td class="num" data-label="盘数">${s.spool_count || 0}</td>
+        </tr>`);
+        rows.push(`<tr class="cs-detail"><td colspan="4">
+          <details class="label-diag"><summary>查看 ${esc(s.series)} 的颜色（${s.color_count || 0} 种 · ${s.spool_count || 0} 盘）</summary>
+            <div class="cs-block">${colorChipListHtml(s.colors, true)}</div>
+          </details>
+        </td></tr>`);
+      });
     });
   });
 
   const unmatched = d.unmatched || [];
   const extra = unmatched.length
-    ? `<details class="label-diag cs-unmatched"><summary>${unmatched.length} 类料盘没有对应官方色卡（不计入统计）</summary>
+    ? `<details class="label-diag cs-unmatched"><summary>${unmatched.length} 类有库存的料盘没有对应官方色卡（不计入统计）</summary>
         <div class="cs-colors">${unmatched.map((u) =>
           `<span class="cs-color">${esc(u.brand)} · ${esc(u.material)} · ${esc(u.color_name)} ×${u.count}</span>`).join("")}</div></details>`
     : "";
   return `${summary}<div class="table-wrap"><table class="cs-table">
-    <thead><tr><th>品牌 / 材料</th><th>耗材系列</th><th style="text-align:right">应有色</th>
-      <th style="text-align:right">已有色</th><th style="text-align:right">缺少</th><th>覆盖率</th></tr></thead>
+    <thead><tr><th>外观</th><th>系列</th>
+      <th style="text-align:right">颜色数</th><th style="text-align:right">盘数</th></tr></thead>
     <tbody>${rows.join("")}</tbody></table></div>${extra}`;
 }
 
@@ -4074,7 +4094,7 @@ function renderColorStats() {
   const count = document.getElementById("colorStatsCount");
   if (count) {
     count.textContent = data && data.totals
-      ? `共 ${data.totals.brand_count || 0} 个品牌 · ${data.totals.group_count || 0} 组` : "";
+      ? `共 ${data.totals.brand_count || 0} 个品牌 · ${data.totals.series_count || 0} 个外观系列` : "";
   }
 }
 
