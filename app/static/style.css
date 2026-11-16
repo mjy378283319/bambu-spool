@@ -1350,3 +1350,34 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   border: 1px dashed var(--border-strong);
   color: var(--text-3); font-size: 13px; line-height: 1.6;
 }
+
+/* ── 颜色覆盖统计（汇总页最后一张卡） ───────────────────── */
+.cs-summary {
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  font-size: 13px; color: var(--text-2); margin: 0 0 10px;
+}
+.cs-summary b { color: var(--text); font-size: 14px; }
+.cs-table th, .cs-table td { vertical-align: top; }
+.cs-table .cs-group th {
+  text-align: left; padding-top: 12px; font-size: 14px;
+  background: var(--surface-2);
+}
+.cs-table .cs-group .tiny { font-weight: 400; margin-left: 8px; }
+.cs-table .cs-detail td { padding-top: 0; }
+.cs-block { margin: 8px 0 12px; }
+.cs-block h3 {
+  font-size: 13px; margin: 0 0 6px;
+  color: var(--text-2); font-weight: 600;
+}
+.cs-colors { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cs-color {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
+  background: var(--surface-2); color: var(--text-2);
+}
+.cs-color.owned { color: var(--green); }
+.cs-color.missing { color: var(--text-3); }
+.cs-color .swatch { width: 11px; height: 11px; }
+.cs-qty { font-variant-numeric: tabular-nums; opacity: .8; }
+.cs-rest:not(.hidden) { display: inline; }
+.cs-unmatched { margin-top: 12px; }

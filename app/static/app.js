@@ -393,7 +393,7 @@ function switchView(name) {
   syncHashView(name);
   if (name === "spools") loadSpools();
   if (name === "jobs") loadJobs();
-  if (name === "summary") loadSummary();
+  if (name === "summary") { loadSummary(); loadColorStats(); }
   if (name === "settings") { loadStatus(); loadBackup(); }
 }
 
@@ -3939,6 +3939,118 @@ function renderSummary() {
   renderPriceDist();
 }
 
+/* ── 颜色覆盖统计（汇总页最后一张卡） ─────────────────────── */
+const COLOR_STATS_PREVIEW = 24;
+
+function colorSafeHex(value) {
+  const hex = String(value || "").trim();
+  // 色卡数据是内置的，但仍校验一遍：hex 直接进 style，别给脏值留口子
+  return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : "#8A8A8A";
+}
+
+function colorChipHtml(c, owned) {
+  const n = Number(c.count) || 0;
+  const qty = owned && n > 1 ? `<span class="cs-qty">×${n}</span>` : "";
+  return `<span class="cs-color${owned ? " owned" : " missing"}" title="${esc(c.name)} ${esc(c.hex)}">
+    <span class="swatch" style="background:${colorSafeHex(c.hex)}"></span>${esc(c.name)}${qty}</span>`;
+}
+
+function colorChipListHtml(colors, owned) {
+  const list = colors || [];
+  if (!list.length) {
+    return `<p class="tiny muted">${owned ? "这一类还没有入库的颜色" : "没有缺色，色卡已全部入库"}</p>`;
+  }
+  const head = list.slice(0, COLOR_STATS_PREVIEW).map((c) => colorChipHtml(c, owned)).join("");
+  if (list.length <= COLOR_STATS_PREVIEW) return `<div class="cs-colors">${head}</div>`;
+  const rest = list.slice(COLOR_STATS_PREVIEW).map((c) => colorChipHtml(c, owned)).join("");
+  const hidden = list.length - COLOR_STATS_PREVIEW;
+  return `<div class="cs-colors">${head}<span class="cs-rest hidden">${rest}</span>
+    <button class="btn sm ghost" data-rest="${hidden}" onclick="toggleColorRest(this)">展开其余 ${hidden} 色</button></div>`;
+}
+
+function toggleColorRest(btn) {
+  if (!btn || !btn.previousElementSibling || !btn.previousElementSibling.classList) return;
+  const rest = btn.previousElementSibling;
+  const wasHidden = rest.classList.contains("hidden");
+  rest.classList.toggle("hidden", !wasHidden);
+  btn.textContent = wasHidden ? "收起" : "展开其余 " + (btn.dataset.rest || "") + " 色";
+}
+
+/** 纯函数：给自测直接喂接口数据，不依赖 DOM。 */
+function renderColorStatsHtml(data) {
+  const d = data || {};
+  const t = d.totals || {};
+  const brands = d.brands || [];
+  const summary = `<div class="cs-summary">
+    <span><b>${t.catalog_count || 0}</b> 种应有色（去重）</span>
+    <span><b>${t.owned_count || 0}</b> 种已入库</span>
+    <span><b>${t.missing_count || 0}</b> 种待补</span>
+    <span>覆盖率 <b>${t.coverage || 0}%</b></span>
+    <span>${t.spool_count || 0} 盘在库 · ${t.matched_spool_count || 0} 盘匹配到色卡</span>
+  </div>`;
+  if (!brands.length) return summary + `<div class="empty-state">色卡数据为空。</div>`;
+
+  const rows = [];
+  brands.forEach((b) => {
+    const mats = b.materials || [];
+    rows.push(`<tr class="cs-group"><th colspan="6">${esc(b.brand)}
+      <span class="tiny muted">${mats.length} 种材料 · 应有 ${b.catalog_count || 0} · 已有 ${b.owned_count || 0} · 缺 ${b.missing_count || 0}</span></th></tr>`);
+    mats.forEach((m) => {
+      const owned = m.owned_count || 0;
+      const total = m.catalog_count || 0;
+      const miss = m.missing_count || 0;
+      const pct = Math.max(0, Math.min(100, Number(m.coverage) || 0));
+      const ownedSpools = (m.owned || []).reduce((n, c) => n + (Number(c.count) || 0), 0);
+      rows.push(`<tr>
+        <td class="cell-main" data-label="材料">${esc(m.material)}</td>
+        <td data-label="耗材系列"><span class="tiny muted">${esc((m.series || []).join("、"))}</span></td>
+        <td class="num" data-label="应有色">${total}</td>
+        <td class="num" data-label="已有色">${owned}</td>
+        <td class="num" data-label="缺少">${miss}</td>
+        <td data-label="覆盖率"><div class="bar"><div style="width:${pct}%"></div></div>
+          <div class="tiny muted">${pct}%</div></td>
+      </tr>`);
+      rows.push(`<tr class="cs-detail"><td colspan="6">
+        <details class="label-diag"><summary>查看 ${esc(m.material)} 颜色明细（已有 ${owned} 种 / ${ownedSpools} 盘，缺 ${miss} 种）</summary>
+          <div class="cs-block"><h3>已有颜色（${owned} 种 · ${ownedSpools} 盘）</h3>${colorChipListHtml(m.owned, true)}</div>
+          <div class="cs-block"><h3>缺少颜色（${miss} 种）</h3>${colorChipListHtml(m.missing, false)}</div>
+        </details>
+      </td></tr>`);
+    });
+  });
+
+  const unmatched = d.unmatched || [];
+  const extra = unmatched.length
+    ? `<details class="label-diag cs-unmatched"><summary>${unmatched.length} 类料盘没有对应官方色卡（不计入统计）</summary>
+        <div class="cs-colors">${unmatched.map((u) =>
+          `<span class="cs-color">${esc(u.brand)} · ${esc(u.material)} · ${esc(u.color_name)} ×${u.count}</span>`).join("")}</div></details>`
+    : "";
+  return `${summary}<div class="table-wrap"><table class="cs-table">
+    <thead><tr><th>品牌 / 材料</th><th>耗材系列</th><th style="text-align:right">应有色</th>
+      <th style="text-align:right">已有色</th><th style="text-align:right">缺少</th><th>覆盖率</th></tr></thead>
+    <tbody>${rows.join("")}</tbody></table></div>${extra}`;
+}
+
+function renderColorStats() {
+  const host = document.getElementById("colorStats");
+  if (!host) return;
+  const data = S.colorStats || null;
+  host.innerHTML = renderColorStatsHtml(data);
+  const count = document.getElementById("colorStatsCount");
+  if (count) {
+    count.textContent = data && data.totals
+      ? `共 ${data.totals.brand_count || 0} 个品牌 · ${data.totals.group_count || 0} 组` : "";
+  }
+}
+
+async function loadColorStats(force) {
+  if (S.colorStats && !force) { renderColorStats(); return; }
+  try {
+    S.colorStats = await api("/api/color/stats");
+    renderColorStats();
+  } catch (err) { toast(err.message, "err"); }
+}
+
 /* ── 自定义品牌 ────────────────────────────────────────── */
 function renderBrandBox() {
   const host = document.getElementById("brandBox");
@@ -5298,6 +5410,8 @@ window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
   renderFanCard,
+  // 颜色覆盖统计：应有/已有/缺色与每色盘数，算错了用户会照着清单去采购
+  renderColorStatsHtml, colorChipListHtml,
   // 双喷嘴（X2D/H2D/H2C/H2D Pro）：副喷嘴与副部件风扇只在双头模式出现，
   // 判定只看后端下发的 nozzle_count，别拿机型名当开关
   isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips,

@@ -32,6 +32,7 @@ from ..auth import (
     token_from_request,
 )
 from ..brands import add_custom_brand, brand_choices, load_custom_brands, remove_custom_brand
+from ..color_stats import build_color_stats
 from ..printer_art import printer_image_map
 from ..catalog import (
     BRAND_COLOR_SERIES,
@@ -225,7 +226,7 @@ def system_status(request: Request, session: Session = Depends(get_session)) -> 
     spools = session.exec(select(Spool).where(Spool.archived == False)).all()  # noqa: E712
     jobs = session.exec(select(PrintJob).order_by(PrintJob.id.desc()).limit(20)).all()  # type: ignore[attr-defined]
     return {
-        "version": "1.0.50",
+        "version": "1.0.51",
         "mock": settings.mock_mode,
         "region": acc.region if acc else settings.region,
         "security": {
@@ -1425,6 +1426,16 @@ def delete_brand(name: str, session: Session = Depends(get_session)) -> dict:
     custom = remove_custom_brand(session, name)
     session.commit()
     return {"custom_brands": custom, "brands": brand_choices(session)}
+
+
+@router.get("/api/color/stats")
+def color_stats(session: Session = Depends(get_session)) -> dict:
+    """颜色覆盖统计：官方色卡有什么色、库存里入库了什么色、还缺什么色。
+
+    纯读接口，不写库；归档盘不计入「已有」。数据量大（4000+ 色），
+    前端按需展开明细，接口本身只给结构化数据。
+    """
+    return build_color_stats(session.exec(select(Spool)).all())
 
 
 # ══ 图片识色：配色匹配 ═══════════════════════════════════════

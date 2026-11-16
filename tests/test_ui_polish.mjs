@@ -230,6 +230,7 @@ for (const name of [
   "syncBrandDeleteHint", "removeBrandFromForm", "brandChoices",
   "applyBrandTare", "onTareInput",
   "renderFanCard", "jumpToSpoolsAll", "sortHead", "toggleSpoolSort", "sortValue",
+  "renderColorStatsHtml", "colorChipListHtml",
   "isDualNozzleState", "nozzleSideText", "renderTempCard", "renderArtChips",
   "finishTone", "finishChipHtml", "spoolRowHtml",
 ]) {
@@ -2695,6 +2696,44 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     renderArtChips(dualState).includes("副喷嘴"), renderArtChips(dualState).slice(0, 300));
   check("单喷嘴示意图浮标没有副喷嘴",
     !renderArtChips(singleState).includes("副喷嘴"));
+}
+
+// ── 颜色覆盖统计：按品牌 / 材料分组、每色数量、缺色清单 ─────────
+console.log("== 颜色统计列表 ==");
+{
+  const data = {
+    totals: {
+      brand_count: 1, group_count: 1, catalog_count: 3, owned_count: 2,
+      missing_count: 1, coverage: 66.7, spool_count: 3, matched_spool_count: 3,
+    },
+    brands: [{
+      brand: "Polymaker", catalog_count: 3, owned_count: 2, missing_count: 1,
+      materials: [{
+        material: "PLA", series: ["Panchroma PLA"], catalog_count: 3,
+        owned_count: 2, missing_count: 1, coverage: 66.7,
+        owned: [
+          { name: "黑色", hex: "#080A0D", count: 2 },
+          { name: "冷白", hex: "#D9DFE5", count: 1 },
+        ],
+        missing: [{ name: "红色", hex: "#E72F1D", count: 0 }],
+      }],
+    }],
+    unmatched: [{ brand: "杂牌", material: "PLA", color_name: "紫色", count: 1 }],
+  };
+  const html = dbg.renderColorStatsHtml(data);
+  check("按品牌分组展示", html.includes("Polymaker") && html.includes("1 种材料"), html.slice(0, 500));
+  check("应有 / 已有 / 缺少三个数都显示",
+    html.includes("应有色") && html.includes("已有色") && html.includes("缺少"), html.slice(0, 800));
+  check("每种颜色的具体数量（黑色 ×2）", html.includes("×2"), html.slice(0, 1500));
+  check("缺少颜色单独列成清单",
+    html.includes("红色") && html.includes("缺少颜色（1 种）"), html.slice(0, 1800));
+  check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(0, 2000));
+  check("手机端每格带 data-label",
+    html.includes('data-label="应有色"') && html.includes('data-label="覆盖率"'));
+  check("色块 hex 走白名单（脏值不进 style）",
+    !dbg.colorChipListHtml([{ name: "脏色", hex: "red;background:blue", count: 1 }], true)
+      .includes("background:red;"));
+  check("空数据不炸", dbg.renderColorStatsHtml({}).includes("色卡数据为空"));
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────

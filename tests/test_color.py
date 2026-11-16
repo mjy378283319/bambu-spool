@@ -430,6 +430,50 @@ check("纯字符串也能吃", resolve_colors(["#000000"])[0]["weight"] == 1.0)
 
 
 # ══ 8. HTTP 端到端 ═════════════════════════════════════════════
+section("7b. 颜色覆盖统计（应有 / 已有 / 缺色 / 每色盘数）")
+
+from app.color_stats import build_color_stats  # noqa: E402
+from app.models import Spool  # noqa: E402
+
+
+def _stat_spool(brand, material, color_name, color_hex, archived=False):
+    return Spool(brand=brand, material=material, color_name=color_name,
+                 color_hex=color_hex, archived=archived)
+
+
+stat_data = build_color_stats([
+    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D"),
+    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D"),
+    _stat_spool("Polymaker", "PLA", "冷白", "#D9DFE5"),
+    _stat_spool("Bambu Lab", "PLA", "黑色", "#000000"),       # 别名归一到拓竹
+    _stat_spool("杂牌", "PLA", "紫色", "#800080"),             # 没有官方色卡
+    _stat_spool("Polymaker", "PLA", "红色", "#E72F1D", archived=True),  # 归档不算已有
+])
+tot = stat_data["totals"]
+check("只统计在库盘（归档盘不计）", tot["spool_count"] == 5, str(tot))
+check("有品牌与材料分组", tot["brand_count"] > 0 and tot["group_count"] > 0, str(tot))
+pm = next(b for b in stat_data["brands"] if b["brand"] == "Polymaker")
+pl = next(m for m in pm["materials"] if m["material"] == "PLA")
+owned = {c["name"]: c["count"] for c in pl["owned"]}
+missing = {c["name"] for c in pl["missing"]}
+check("应有色来自官方色卡（多系列合并）", pl["catalog_count"] >= 28, str(pl["catalog_count"]))
+check("同名 2 盘 → 每色数量 2，但已有色只算 1 种",
+      owned.get("黑色") == 2 and pl["owned_count"] >= 2, str(owned))
+check("色名匹配（冷白）", owned.get("冷白") == 1, str(owned))
+check("归档的红色仍列在缺色里", "红色" in missing, str(sorted(missing)[:8]))
+check("已有色 + 缺色 = 应有色",
+      pl["owned_count"] + pl["missing_count"] == pl["catalog_count"])
+check("每组都有系列来源", len(pl["series"]) > 0, str(pl["series"][:3]))
+bambu = next(b for b in stat_data["brands"] if b["brand"] == "拓竹")
+bambu_pl = next(m for m in bambu["materials"] if m["material"] == "PLA")
+check("品牌别名 Bambu Lab 归到拓竹",
+      any(c["name"] == "黑色" for c in bambu_pl["owned"]))
+check("没有色卡可比的盘单列，不凑进其他",
+      any(u["brand"] == "杂牌" for u in stat_data["unmatched"]), str(stat_data["unmatched"]))
+check("匹配盘数正确", tot["matched_spool_count"] == 4, str(tot))
+check("未匹配盘数正确", tot["unmatched_spool_count"] == 1, str(tot))
+check("空库存不炸", build_color_stats([])["totals"]["spool_count"] == 0)
+
 section("8. 接口端到端（真实 uvicorn）")
 
 DATA_DIR = ROOT / "data" / "testcolor"
@@ -509,6 +553,17 @@ else:
         ):
             r = client.post("/api/spools", json=payload)
             check(f"建料盘 {payload['brand']}", r.status_code == 200, f"HTTP {r.status_code}")
+
+        # 颜色覆盖统计接口（登录后、真实 DB）
+        r = client.get("/api/color/stats")
+        check("颜色统计接口 200", r.status_code == 200, f"HTTP {r.status_code}")
+        if r.status_code == 200:
+            cs = r.json()
+            check("颜色统计返回 totals/brands/unmatched",
+                  all(k in cs for k in ("totals", "brands", "unmatched")))
+            check("颜色统计统计到刚建的 2 盘",
+                  (cs.get("totals") or {}).get("spool_count") == 2,
+                  str((cs.get("totals") or {}).get("spool_count")))
 
         # 正常匹配
         r = client.post("/api/color/match", json={
