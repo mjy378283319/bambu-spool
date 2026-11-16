@@ -1,10 +1,11 @@
-"""库存颜色统计：按 品牌 → 材料 → 外观系列，只列**当前有库存**的颜色。
+"""库存颜色统计：按 品牌 → 材料 → 外观系列，列出**当前有库存**的颜色与缺色。
 
-口径（2026-11-16 第二版，用户改口后定案，别改回去）：
+口径（2026-11-16 第三版，用户改口后定案，别改回去）：
   - 只统计 `archived=False` 且 `remaining_weight > 0` 的料盘 —— 已归档、已用尽的
     都不算「有库存」，否则统计里会冒出一堆「买了但用完了」的色，和用户直觉不符。
-  - **只展示已有颜色**：色卡里有、但没有任何在库料盘的色不列出来（用户原话
-    「未购买或库存为零的耗材不显示」）。第一版把 93 个缺色全铺出来，太长且没用。
+  - **没买过的外观整体不显示**（用户原话「未购买或库存为零的耗材不显示」）；
+    但只要这个外观买过至少一个色，就把**该外观色卡里还没入库的颜色**列出来，
+    并给出 总数 / 已有 / 缺失 三个数（用户 2026-11-16 第二次要求）。
   - **PLA 必须按外观拆分**：`PLA Basic / PLA Matte / PLA Silk / PLA Wood …`
     各自一行，不能把所有 PLA 系列合并成一行。分组键就是色卡系列名。
   - 每个系列**只归一个材料**：显式 MATERIAL_COLOR_SERIES 优先（长材料键先认，
@@ -13,6 +14,11 @@
     一盘只算一个色、且只归一个系列（按外观顺序先命中先得），数量 = 料盘数。
   - 品牌用 `normalize_brand()` 归一（Bambu Lab → 拓竹）；料盘材料按最长前缀
     归到该品牌实际有的材料组（PLA+ / PETG-HF 归到 PLA / PETG）。
+
+★ 总数 / 已有 / 缺失 的层级口径：
+  外观系列层 = 该系列自己的色卡（去重后）；
+  材料层 / 品牌层 = **已显示外观的色卡并集去重**（「黑色」同时在 Basic 和 Matte
+  里只算一次），否则合计会虚高，用户会以为自己缺了一倍的色。
 
 展示顺序（前端照这个顺序渲染，别在 JS 里另排一套）：
   品牌：按有库存的颜色种数降序，再按名称；
@@ -130,6 +136,7 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
 
     brands_out: list[dict] = []
     seen_colors: set[tuple[str, str]] = set()
+    all_catalog: set[tuple[str, str]] = set()
     matched_ids: set[int] = set()
 
     for brand, series_map in BRAND_COLOR_SERIES.items():
@@ -150,6 +157,8 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
             bucket.sort(key=lambda item: (item[0], item[1]))
 
         materials_out: list[dict] = []
+        brand_catalog: set[str] = set()
+        brand_owned: set[str] = set()
         for material in sorted(buckets, key=lambda m: (MATERIAL_ORDER.get(m, 999), m)):
             # 每个系列单独建颜色索引：只统计这个系列自己的色卡颜色
             series_defs: list[dict] = []
@@ -223,6 +232,8 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
                     break
 
             series_out: list[dict] = []
+            material_catalog: dict[str, dict] = {}
+            material_owned: set[str] = set()
             for definition in series_defs:
                 owned = [c for c in definition["catalog"] if c["count"] > 0]
                 if not owned:
@@ -231,31 +242,50 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
                     c.pop("keys", None)
                     key = _name_key(c["name"]) or c["hex"]
                     seen_colors.add((brand, key))
+                    material_owned.add(key)
+                # 该外观的完整色卡（去重后）与未入库的颜色
+                for c in definition["catalog"]:
+                    key = _name_key(c["name"]) or c["hex"]
+                    material_catalog.setdefault(key, {"name": c["name"], "hex": c["hex"]})
+                missing = [
+                    {"name": c["name"], "en": c["en"], "hex": c["hex"]}
+                    for c in definition["catalog"] if c["count"] <= 0
+                ]
                 series_out.append({
                     "series": definition["series"],
                     "finish": definition["finish"],
                     "order": definition["order"],
+                    "catalog_count": len(definition["catalog"]),
                     "color_count": len(owned),
+                    "missing_count": len(missing),
                     "spool_count": sum(c["count"] for c in owned),
                     "colors": owned,
+                    "missing": missing,
                 })
 
             if not series_out:
                 continue
+            brand_catalog.update(material_catalog)
+            brand_owned.update(material_owned)
             materials_out.append({
                 "material": material,
-                "color_count": sum(s["color_count"] for s in series_out),
+                "catalog_count": len(material_catalog),
+                "color_count": len(material_owned),
+                "missing_count": len(material_catalog) - len(material_owned),
                 "spool_count": sum(s["spool_count"] for s in series_out),
                 "series": series_out,
             })
 
         if not materials_out:
             continue
+        all_catalog.update((brand, key) for key in brand_catalog)
         brands_out.append({
             "brand": brand,
             "material_count": len(materials_out),
             "series_count": sum(len(m["series"]) for m in materials_out),
-            "color_count": sum(m["color_count"] for m in materials_out),
+            "catalog_count": len(brand_catalog),
+            "color_count": len(brand_owned),
+            "missing_count": len(brand_catalog) - len(brand_owned),
             "spool_count": sum(m["spool_count"] for m in materials_out),
             "materials": materials_out,
         })
@@ -281,7 +311,11 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
             "brand_count": len(brands_out),
             "material_count": sum(len(b["materials"]) for b in brands_out),
             "series_count": sum(b["series_count"] for b in brands_out),
+            # 色卡口径与统计口径同源：只算「已经买过至少一个色的外观」，
+            # 没买过的外观整个不进统计，别在这里把它算成「缺失」。
+            "catalog_count": len(all_catalog),
             "color_count": len(seen_colors),
+            "missing_count": len(all_catalog) - len(seen_colors),
             "spool_count": len(matched_ids),
             "unmatched_spool_count": sum(x["count"] for x in unmatched_out),
         },

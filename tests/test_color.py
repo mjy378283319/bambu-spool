@@ -465,8 +465,30 @@ owned = {c["name"]: c["count"] for c in series["colors"]}
 check("同名 2 盘 → 每色数量 2、颜色种数只算 1",
       owned.get("黑色") == 2 and series["color_count"] == 2, str(owned))
 check("色名匹配（冷白）", owned.get("冷白") == 1, str(owned))
-check("没有缺色字段，未购买的颜色不返回",
-      "missing" not in series and "missing_count" not in series, str(series.keys()))
+# 2026-11-16 用户第二次要求：保留已有色，同时列出该外观还没入库的颜色，
+# 并给出 总数 / 已有 / 缺失 三个数。
+check("给出该外观的色卡总数 / 已有 / 缺失",
+      series["catalog_count"] >= series["color_count"]
+      and series["missing_count"] == series["catalog_count"] - series["color_count"],
+      str({k: series.get(k) for k in ("catalog_count", "color_count", "missing_count")}))
+missing_names = {c["name"] for c in series["missing"]}
+check("缺失清单不含已入库的色",
+      "黑色" not in missing_names and "冷白" not in missing_names,
+      str(sorted(missing_names)[:8]))
+check("缺失清单每项带 hex（前端要画色块）",
+      all(c.get("hex") for c in series["missing"]), str(series["missing"][:3]))
+check("缺失的色数 = 清单长度", len(series["missing"]) == series["missing_count"],
+      f'{len(series["missing"])} / {series["missing_count"]}')
+check("材料层合计跟系列对得上",
+      pl["catalog_count"] == series["catalog_count"]
+      and pl["missing_count"] == series["missing_count"]
+      and pl["color_count"] == series["color_count"], str(pl.keys()))
+check("品牌层也有 总数 / 已有 / 缺失",
+      pm["catalog_count"] == pl["catalog_count"]
+      and pm["missing_count"] == pl["missing_count"]
+      and pm["color_count"] == pl["color_count"], str(pm.keys()))
+check("汇总层的缺色数 = 色卡总数 − 已入库",
+      tot["missing_count"] == tot["catalog_count"] - tot["color_count"], str(tot))
 check("归档的红色不出现", "红色" not in owned, str(owned))
 check("已用完的白色不出现", "白色" not in owned, str(owned))
 check("系列带中文外观名与排序权重",

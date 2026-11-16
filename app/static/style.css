@@ -1283,6 +1283,56 @@ th.sortable.on .sort-arrow { color: var(--accent); }
   .overlay { padding: 20px 10px; }
   .modal { padding: 16px 14px; border-radius: 14px; }
   #modalBody { overflow-x: auto; }
+
+  /* 颜色统计：桌面的「品牌卡 + 6 列表格」在手机上放不下（320px 会被裁）。
+     这里改成「外观标签 + 系列名」一行、四个数字一行，靠 flex-wrap 自然折行，
+     数字前用短标签（总/有/缺/盘），既保留全部信息又不横向溢出。 */
+  #colorStats .cs-brand-card { border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+  #colorStats .cs-brand-head {
+    border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    margin-bottom: 8px; padding: 10px 12px;
+  }
+  #colorStats .cs-brand-stats { margin-left: 0; }
+  #colorStats .cs-table, #colorStats .cs-table tbody { display: block; width: auto; }
+  #colorStats .cs-table thead { display: none; }
+  #colorStats .cs-table tbody tr.cs-material {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+    background: transparent; border: 0; padding: 10px 2px 4px;
+  }
+  #colorStats .cs-table tbody tr.cs-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+    padding: 8px 2px; margin: 0; border: 0; background: transparent;
+    border-bottom: 1px solid var(--border);
+  }
+  #colorStats .cs-table tbody tr.cs-material td,
+  #colorStats .cs-table tbody tr.cs-row td {
+    display: inline-flex; align-items: baseline; gap: 4px;
+    width: auto; padding: 0; border: 0; background: transparent;
+  }
+  #colorStats .cs-table tbody tr.cs-material td:first-child { flex: 1 1 100%; }
+  #colorStats .cs-table tbody tr.cs-material td::before { display: none; }
+  #colorStats .cs-table tbody tr.cs-material td.num::before { display: inline; }
+  /* 外观那一格独占一行（标签 + 系列名），四个数字落到下一行横排 */
+  #colorStats .cs-table tbody tr.cs-row td.cs-series {
+    padding-left: 0; flex: 1 1 100%; gap: 8px;
+  }
+  #colorStats .cs-table tbody tr.cs-row td.cs-series::before { display: none; }
+  #colorStats .cs-table tbody tr.cs-row td.cs-series-col { display: none; }
+  #colorStats .cs-sname-m { display: inline; color: var(--text-2); }
+  #colorStats .cs-table tbody tr.cs-material td.num,
+  #colorStats .cs-table tbody tr.cs-row td.num { font-size: 12.5px; }
+  #colorStats .cs-table tbody td.num::before {
+    content: attr(data-short);
+    font-size: 11px; font-weight: 400; color: var(--text-3);
+  }
+  #colorStats .cs-table tbody td.num.own::before { color: var(--green); }
+  #colorStats .cs-table tbody td.num.miss::before { color: var(--red); }
+  #colorStats .cs-table tbody tr.cs-detail {
+    display: block; padding: 0 2px 10px; margin: 0;
+    border: 0; background: transparent;
+  }
+  #colorStats .cs-table tbody tr.cs-detail td { display: block; padding: 0; }
+  #colorStats .cs-table tbody tr.cs-detail td::before { display: none; }
 }
 
 @media (max-width: 430px) {
@@ -1354,32 +1404,87 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 /* ── 颜色覆盖统计（汇总页最后一张卡） ───────────────────── */
 .cs-summary {
   display: flex; flex-wrap: wrap; gap: 6px 16px;
-  font-size: 13px; color: var(--text-2); margin: 0 0 10px;
+  font-size: 13px; color: var(--text-2); margin: 0 0 12px;
 }
 .cs-summary b { color: var(--text); font-size: 14px; }
-.cs-table th, .cs-table td { vertical-align: top; }
-.cs-table .cs-group th {
-  text-align: left; padding-top: 12px; font-size: 14px;
-  background: var(--surface-2);
+.cs-sum-own b { color: var(--green); }
+.cs-sum-miss b { color: var(--red); }
+
+/* 一个品牌一张卡片：描边 + 圆角 + 竖向间距，品牌之间不再粘连 */
+.cs-brand-list { display: flex; flex-direction: column; gap: 14px; }
+.cs-brand-card {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  background: var(--surface); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
 }
-.cs-table .cs-group .tiny { font-weight: 400; margin-left: 8px; }
-.cs-table .cs-material td { border-top: 1px solid var(--border-strong); font-weight: 600; }
-.cs-table .cs-material .tiny { font-weight: 400; margin-left: 8px; }
-.cs-table .cs-series { padding-left: 26px; }
-.cs-table .cs-detail td { padding-top: 0; }
+.cs-brand-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+  padding: 11px 14px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border-strong);
+}
+.cs-brand-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+/* 品牌名：正文色 + 700 + 15px，比材料名大一档，扫视时是这一屏的主锚点 */
+.cs-brand-name {
+  font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: .2px;
+}
+.cs-brand-meta { font-size: 12px; color: var(--text-3); }
+.cs-brand-stats { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-chip {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.cs-chip b { color: var(--text); }
+.cs-chip.own { color: var(--green); background: var(--green-soft); border-color: var(--green-soft); }
+.cs-chip.own b { color: var(--green); }
+.cs-chip.miss { color: var(--red); background: var(--red-soft); border-color: var(--red-soft); }
+.cs-chip.miss b { color: var(--red); }
+
+.cs-table { width: 100%; }
+.cs-table th, .cs-table td { vertical-align: top; }
+.cs-table thead th {
+  font-size: 12px; font-weight: 600; color: var(--text-3);
+  padding: 8px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.cs-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cs-table .num.own { color: var(--green); font-weight: 600; }
+.cs-table .num.miss { color: var(--red); font-weight: 600; }
+.cs-table .cs-material td {
+  padding: 7px 12px; background: var(--surface-2);
+  border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.cs-table .cs-material td.num { font-weight: 700; }
+.cs-brand-card .cs-table tbody tr:first-child td { border-top: 0; }
+.cs-mat { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.cs-mat-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.cs-mat-meta { font-size: 12px; color: var(--text-3); }
+.cs-table .cs-series { padding-left: 14px; }
+.cs-sname { color: var(--text-2); }
+/* 窄屏用：外观标签后面直接跟系列名（那张 6 列表格在手机上放不下） */
+.cs-sname-m { display: none; }
+.cs-table .cs-detail td { padding: 0 12px 10px; }
+.cs-table .cs-detail summary { padding: 2px 0 2px 2px; }
 .cs-block { margin: 8px 0 12px; }
 .cs-block h3 {
-  font-size: 13px; margin: 0 0 6px;
+  font-size: 12.5px; margin: 0 0 6px;
   color: var(--text-2); font-weight: 600;
 }
+.cs-block h3.cs-h-own { color: var(--green); }
+.cs-block h3.cs-h-miss { color: var(--red); }
 .cs-colors { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .cs-color {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 12.5px; padding: 3px 8px; border-radius: 6px;
   background: var(--surface-2); color: var(--text-2);
 }
-.cs-color.owned { color: var(--green); }
-.cs-color.missing { color: var(--text-3); }
+.cs-color.owned { color: var(--green); background: var(--green-soft); }
+/* 缺色用虚线描边 + 灰字：一眼能看出「这个还没买」，又不会跟已有色抢注意力 */
+.cs-color.missing {
+  color: var(--text-3); background: transparent;
+  border: 1px dashed var(--border-strong);
+}
 .cs-color .swatch { width: 11px; height: 11px; }
 .cs-qty { font-variant-numeric: tabular-nums; opacity: .8; }
 .cs-rest:not(.hidden) { display: inline; }

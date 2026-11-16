@@ -2723,25 +2723,44 @@ console.log("== 库存颜色统计列表 ==");
 {
   const data = {
     totals: {
-      brand_count: 1, material_count: 1, series_count: 2,
-      color_count: 5, spool_count: 7, unmatched_spool_count: 1,
+      brand_count: 2, material_count: 2, series_count: 3,
+      catalog_count: 12, color_count: 6, missing_count: 6,
+      spool_count: 9, unmatched_spool_count: 1,
     },
     brands: [{
       brand: "拓竹", material_count: 1, series_count: 2,
-      color_count: 5, spool_count: 7,
+      catalog_count: 6, color_count: 5, missing_count: 1, spool_count: 7,
       materials: [{
-        material: "PLA", color_count: 5, spool_count: 7,
+        material: "PLA", catalog_count: 6, color_count: 5, missing_count: 1, spool_count: 7,
         series: [
-          { series: "PLA Basic", finish: "普通", order: 10, color_count: 3, spool_count: 4,
+          { series: "PLA Basic", finish: "普通", order: 10,
+            catalog_count: 4, color_count: 3, missing_count: 1, spool_count: 4,
             colors: [
               { name: "黑色", hex: "#000000", count: 2 },
               { name: "白色", hex: "#FFFFFF", count: 1 },
               { name: "冷白", hex: "#D9DFE5", count: 1 },
-            ] },
-          { series: "PLA Matte", finish: "哑光", order: 20, color_count: 2, spool_count: 3,
+            ],
+            missing: [{ name: "红色", hex: "#E72F1D" }] },
+          { series: "PLA Matte", finish: "哑光", order: 20,
+            catalog_count: 2, color_count: 2, missing_count: 0, spool_count: 3,
             colors: [
               { name: "黑色", hex: "#111111", count: 2 },
               { name: "红色", hex: "#E72F1D", count: 1 },
+            ],
+            missing: [] },
+        ],
+      }],
+    }, {
+      brand: "Polymaker", material_count: 1, series_count: 1,
+      catalog_count: 6, color_count: 1, missing_count: 5, spool_count: 2,
+      materials: [{
+        material: "PETG", catalog_count: 6, color_count: 1, missing_count: 5, spool_count: 2,
+        series: [
+          { series: "PolyLite PETG", finish: "普通", order: 10,
+            catalog_count: 6, color_count: 1, missing_count: 5, spool_count: 2,
+            colors: [{ name: "黑色", hex: "#1A1A1A", count: 2 }],
+            missing: [
+              { name: "白色", hex: "#FAFAFA" }, { name: "红色", hex: "#D42A21" },
             ] },
         ],
       }],
@@ -2749,18 +2768,50 @@ console.log("== 库存颜色统计列表 ==");
     unmatched: [{ brand: "杂牌", material: "PLA", color_name: "紫色", count: 1 }],
   };
   const html = dbg.renderColorStatsHtml(data);
-  check("按品牌分组展示", html.includes("拓竹") && html.includes("1 种材料"), html.slice(0, 500));
+
+  // ① 品牌名要醒目：专用类，样式在 CSS 里给了 15px/700/正文色 + 品牌色点
+  check("品牌名走专用类（放大加粗、前面有品牌色块）",
+    html.includes('class="cs-brand-name">拓竹<') && html.includes("cs-brand-dot"),
+    html.slice(0, 500));
+  // ② 品牌之间要有硬间隔：一个品牌一张卡片，不是同一张表里的一行
+  const cardCount = (html.match(/class="cs-brand-card"/g) || []).length;
+  check("每个品牌各自一张卡片（2 个品牌 = 2 张卡）", cardCount === 2, String(cardCount));
+  check("卡片之间靠 cs-brand-list 的 gap 拉开，不再共用一张表",
+    html.includes("cs-brand-list") && !html.includes("cs-group"), html.slice(0, 300));
+
+  // ③ 总数 / 已有 / 缺失 三个数都在，且与已有色并列展示
+  check("外观行给出 总数 / 已有 / 缺失 三列",
+    html.includes('data-label="总数"') && html.includes('data-label="已有"')
+      && html.includes('data-label="缺失"'), html.slice(0, 1500));
+  check("品牌头也标出 已有 / 缺 / 共",
+    html.includes("已有 <b>5</b>") && html.includes("缺 <b>1</b>")
+      && html.includes("共 <b>6</b> 色"), html.slice(0, 800));
+  check("数字带短标签，手机端能压成一行",
+    html.includes('data-short="总"') && html.includes('data-short="缺"')
+      && html.includes('data-short="盘"'), html.slice(0, 1500));
   check("PLA 按外观拆成两行，Basic 与 Matte 不混在一起",
     html.includes("PLA Basic") && html.includes("PLA Matte") && html.includes(">哑光<"),
-    html.slice(0, 1200));
-  check("表格有颜色数与盘数", html.includes("颜色数") && html.includes("盘数"), html.slice(0, 900));
-  check("每色显示具体盘数（黑色 ×2）", html.includes("×2"), html.slice(0, 1800));
-  check("不再显示应有 / 缺色等未购买的颜色",
-    !html.includes("应有色") && !html.includes("缺少颜色") && !html.includes("待补"),
-    html.slice(0, 1800));
-  check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(0, 2200));
+    html.slice(0, 1600));
+
+  // ④ 已有色保留，同时列缺色
+  check("已有颜色照旧显示，且每色带盘数（黑色 ×2）",
+    html.includes("cs-color owned") && html.includes("×2"), html.slice(0, 2400));
+  check("展开区同时有「已入库」和「未入库」两块",
+    html.includes("已入库 3 种") && html.includes("未入库 1 种"), html.slice(0, 2600));
+  check("缺失的颜色用 missing 芯片单独列出",
+    html.includes("cs-color missing") && html.includes("红色"), html.slice(0, 2600));
+  check("没有缺色时写「色卡已全部入库」，不留空块",
+    dbg.renderColorStatsHtml({ brands: [{ brand: "x", materials: [{ material: "PLA",
+      series: [{ series: "S", finish: "普通", catalog_count: 1, color_count: 1,
+        missing_count: 0, spool_count: 1,
+        colors: [{ name: "黑", hex: "#000", count: 1 }], missing: [] }] }] }] })
+      .includes("色卡已全部入库"));
+
+  check("汇总行同时给已入库与未入库数",
+    html.includes("6</b> 色已入库") && html.includes("6</b> 色未入库"), html.slice(0, 400));
+  check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(-400));
   check("手机端每格带 data-label",
-    html.includes('data-label="外观"') && html.includes('data-label="颜色数"'));
+    html.includes('data-label="外观"') && html.includes('data-label="系列"'));
   check("色块 hex 走白名单（脏值不进 style）",
     !dbg.colorChipListHtml([{ name: "脏色", hex: "red;background:blue", count: 1 }], true)
       .includes("background:red;"));

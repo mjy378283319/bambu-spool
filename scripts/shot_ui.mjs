@@ -286,7 +286,23 @@ async function main() {
     // 自定义品牌 + 一条手动用量，让汇总页与「自定义品牌」卡片都有东西可看
     await post("/api/brands", { name: "自家作坊" });
     await post("/api/spools/" + ids[0] + "/use", { weight_g: 60, note: "本周打印" }).catch(() => {});
-    return { spools: ids.length };
+    // 颜色统计要「匹配到官方色卡」才有内容：上面的演示色名（哑光黑/基础白…）
+    // 都是随手写的，匹配不上色卡。这里再补几盘用**官方色名**的，
+    // 让品牌卡、外观分组、缺色清单都真的有数据可看（都 remaining > 0，不影响状态统计）。
+    const official = [
+      ["拓竹", "PLA", "普通", "玉石白", "#FFFFFF", 1000, 820],
+      ["拓竹", "PLA", "普通", "米色", "#C2AB72", 1000, 760],
+      ["拓竹", "PLA", "哑光", "象牙白", "#F4F0E6", 1000, 690],
+      ["Polymaker", "PLA", "普通", "黑色", "#080A0D", 1000, 610],
+      ["Polymaker", "PLA", "普通", "冷白", "#D9DFE5", 1000, 540],
+    ];
+    for (const [brand, material, finish, color_name, color_hex, initial_weight, remaining_weight] of official) {
+      await post("/api/spools", {
+        brand, material, finish, color_name, color_hex,
+        initial_weight, remaining_weight, price: 99, spool_weight: 250,
+      });
+    }
+    return { spools: ids.length + official.length };
   })()`);
   console.log("演示数据：", JSON.stringify(seed));
 
@@ -600,6 +616,72 @@ async function main() {
   await cdp.send("Emulation.setDeviceMetricsOverride",
     { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
   await sleep(400);
+
+  /* ── 颜色统计（汇总页最下面那张卡）：品牌卡与缺色清单的实拍 ──
+     字符串口径由 tests/test_ui_polish.mjs 钉住；这里确认在真浏览器里
+     卡片没撑破、品牌名确实比周围重、缺色芯片没把宽度顶出去。 */
+  await cdp.evaluate(sessionId, `switchView("summary")`);
+  await sleep(500);
+  await cdp.evaluate(sessionId, `(async () => {
+    try { await loadColorStats(true); } catch (e) { console.error(e); }
+  })()`);
+  await sleep(1200);
+  // 展开第一个外观的明细：截图要能看清「已入库 / 未入库」两段的芯片样式
+  await cdp.evaluate(sessionId, `document.querySelectorAll("#colorStats details").forEach((d, i) => { d.open = i === 0; })`);
+  await sleep(300);
+  const csBox = await cdp.evaluate(sessionId, `(() => {
+    const el = document.getElementById("colorStats");
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const name = document.querySelector("#colorStats .cs-brand-name");
+    return {
+      x: r.x + window.scrollX, y: r.y + window.scrollY,
+      width: r.width, height: r.height,
+      cards: document.querySelectorAll("#colorStats .cs-brand-card").length,
+      rows: document.querySelectorAll("#colorStats tr.cs-row").length,
+      missing: document.querySelectorAll("#colorStats .cs-color.missing").length,
+      headStyle: name ? getComputedStyle(name).fontWeight + "/" + getComputedStyle(name).fontSize : "",
+      wide: el.scrollWidth - el.clientWidth,
+    };
+  })()`);
+  console.log("颜色统计：", JSON.stringify(csBox && { ...csBox, height: Math.round(csBox.height) }));
+  if (csBox) {
+    check("颜色统计按品牌渲染出卡片", csBox.cards > 0, String(csBox.cards));
+    check("外观行有内容（总数/已有/缺失）", csBox.rows > 0, String(csBox.rows));
+    check("品牌名加粗放大（700 / 15px）", csBox.headStyle === "700/15px", csBox.headStyle);
+    check("颜色统计卡没有横向溢出", csBox.wide <= 2, String(csBox.wide));
+    await cdp.shotClip(sessionId, path.join(OUT, "03d-colorstats.png"), {
+      x: Math.max(0, csBox.x), y: Math.max(0, csBox.y),
+      width: csBox.width, height: Math.min(csBox.height, 2400), scale: 1,
+    });
+  }
+
+  /* 手机宽度：颜色统计的 6 列表格改成竖排后，不许把页面顶出横向滚动条 */
+  await cdp.send("Emulation.setDeviceMetricsOverride",
+    { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, sessionId);
+  await sleep(700);
+  const csMobile = await cdp.evaluate(sessionId, `(() => {
+    const de = document.documentElement;
+    const el = document.getElementById("colorStats");
+    const r = el.getBoundingClientRect();
+    return {
+      page: de.scrollWidth, client: de.clientWidth,
+      wide: el.scrollWidth - el.clientWidth,
+      x: r.x + window.scrollX, y: r.y + window.scrollY,
+      width: r.width, height: r.height,
+      rows: document.querySelectorAll("#colorStats tr.cs-row").length,
+    };
+  })()`);
+  console.log("颜色统计（390px）：", JSON.stringify({ ...csMobile, height: Math.round(csMobile.height) }));
+  check("390px 下颜色统计不横向溢出", csMobile.page <= csMobile.client + 2 && csMobile.wide <= 2,
+    JSON.stringify(csMobile));
+  await cdp.shotClip(sessionId, path.join(OUT, "03e-colorstats-mobile.png"), {
+    x: Math.max(0, csMobile.x), y: Math.max(0, csMobile.y),
+    width: csMobile.width, height: Math.min(csMobile.height, 1800), scale: 1,
+  });
+  await cdp.send("Emulation.setDeviceMetricsOverride",
+    { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await sleep(500);
 
   // 汇总页三张表都要有内容
   await cdp.evaluate(sessionId, `switchView("summary")`);
@@ -1407,7 +1489,17 @@ async function main() {
   await cdp.shot(sessionId, path.join(OUT, "08-bind-spool.png"));
 
   // 真的绑一个，看那一行会不会翻成「解绑」
-  await cdp.evaluate(sessionId, `document.querySelector("#modalHost .bind-row button").click()`);
+  // ⚠️ 之前这里是 `querySelector("#modalHost .bind-row button").click()`，
+  // 弹窗被别的刷新顺手关掉时整条工装直接抛 null 中断，后面几十条断言全跑不到。
+  // 改成「找不到就明确报一句、继续往下跑」，工装不该因为一段 UI 时序问题全盘停摆。
+  const bindClicked = await cdp.evaluate(sessionId, `(() => {
+    const btn = [...document.querySelectorAll("#modalHost .bind-row button")]
+      .find((b) => /绑到这盘|改为这盘/.test(b.innerText || ""));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  if (!bindClicked) console.log("  ⚠️ 跳过实绑：绑定弹窗里没找到「绑到这盘」按钮（弹窗可能已被关掉）");
   await sleep(1500);
   const bound = await cdp.evaluate(sessionId, `(() => {
     const rows = [...document.querySelectorAll("#modalHost .bind-row")];
@@ -1420,8 +1512,16 @@ async function main() {
   check("绑定成功后那一行翻成已绑定（按钮变成解绑）",
     bound.mine === 1 && bound.firstBtn === "解绑", JSON.stringify(bound));
 
-  // 解绑回去，别给后面的截图留状态
-  await cdp.evaluate(sessionId, `document.querySelector("#modalHost .bind-row button").click()`);
+  // 解绑回去，别给后面的截图留状态。
+  // 同上一处：弹窗可能已经被状态刷新关掉，硬点会抛 null 把整条工装打断。
+  const unbindClicked = await cdp.evaluate(sessionId, `(() => {
+    const btn = [...document.querySelectorAll("#modalHost .bind-row button")]
+      .find((b) => /解绑/.test(b.innerText || ""));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  if (!unbindClicked) console.log("  ⚠️ 跳过解绑：绑定弹窗已不在（后面的截图会保持当前状态）");
   await sleep(1500);
   const unbound = await cdp.evaluate(sessionId, `(() => {
     const rows = [...document.querySelectorAll("#modalHost .bind-row")];

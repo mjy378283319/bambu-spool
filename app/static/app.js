@@ -4037,49 +4037,86 @@ function toggleColorRest(btn) {
  *
  *  数据已由后端按「只保留有库存」筛过，并按 品牌 → 材料 → 外观 排好序；
  *  这里只负责画，不再排序/过滤 —— 两套口径必然对不上。
+ *
+ *  版式（2026-11-16 用户三点要求）：
+ *    1. 品牌名放大、加粗、用正文色，前面再加一个品牌色块 —— 换品牌时一眼能分开；
+ *    2. 一个品牌一张卡片（描边 + 圆角 + 间距），不再靠一行灰底把几个品牌粘成一片；
+ *    3. 外观行同时给出 总数 / 已有 / 缺失，展开后「已入库」和「未入库」两块并列，
+ *       缺什么色一眼看到，不用自己去色卡里数。
  */
 function renderColorStatsHtml(data) {
   const d = data || {};
   const t = d.totals || {};
   const brands = d.brands || [];
+  const num = (v) => Number(v) || 0;
   const summary = `<div class="cs-summary">
-    <span><b>${t.brand_count || 0}</b> 个品牌</span>
-    <span><b>${t.material_count || 0}</b> 种材料</span>
-    <span><b>${t.series_count || 0}</b> 个外观系列</span>
-    <span><b>${t.color_count || 0}</b> 种颜色</span>
-    <span><b>${t.spool_count || 0}</b> 盘有库存</span>
+    <span><b>${num(t.brand_count)}</b> 个品牌</span>
+    <span><b>${num(t.material_count)}</b> 种材料</span>
+    <span><b>${num(t.series_count)}</b> 个外观</span>
+    <span class="cs-sum-own"><b>${num(t.color_count)}</b> 色已入库</span>
+    <span class="cs-sum-miss"><b>${num(t.missing_count)}</b> 色未入库</span>
+    <span>色卡共 <b>${num(t.catalog_count)}</b> 色 · <b>${num(t.spool_count)}</b> 盘在库</span>
   </div>`;
   if (!brands.length) {
     return summary + `<div class="empty-state">还没有有库存的耗材。先到「料盘库存」录一盘，或检查是不是都已用完 / 已归档。</div>`;
   }
 
-  const rows = [];
-  brands.forEach((b) => {
-    rows.push(`<tr class="cs-group"><th colspan="4">${esc(b.brand)}
-      <span class="tiny muted">${b.material_count || 0} 种材料 · ${b.series_count || 0} 个外观 · ${b.color_count || 0} 色 · ${b.spool_count || 0} 盘</span></th></tr>`);
+  const cards = brands.map((b, index) => {
+    // 品牌色块只用来区分相邻品牌，取现有调色板按顺序轮转，别每个品牌都同一个颜色
+    const dot = BRAND_BAR_COLORS[index % BRAND_BAR_COLORS.length];
+    const rows = [];
     (b.materials || []).forEach((m) => {
+      // 材料行也占住 4 个数字列：合计与下面的系列行逐列对齐，不再是一串
+      // 挤在右边的「总 x 已有 y 缺 z」。
       rows.push(`<tr class="cs-material">
-        <td class="cell-main" data-label="材料"><b>${esc(m.material)}</b>
-          <span class="tiny muted">${(m.series || []).length} 个外观</span></td>
-        <td></td>
-        <td class="num" data-label="颜色数">${m.color_count || 0}</td>
-        <td class="num" data-label="盘数">${m.spool_count || 0}</td>
+        <td colspan="2" data-label="材料">
+          <div class="cs-mat">
+            <span class="cs-mat-name">${esc(m.material)}</span>
+            <span class="cs-mat-meta">${(m.series || []).length} 个外观</span>
+          </div></td>
+        <td class="num" data-label="总数" data-short="总">${num(m.catalog_count)}</td>
+        <td class="num own" data-label="已有" data-short="有">${num(m.color_count)}</td>
+        <td class="num miss" data-label="缺失" data-short="缺">${num(m.missing_count)}</td>
+        <td class="num" data-label="盘数" data-short="盘">${num(m.spool_count)}</td>
       </tr>`);
       (m.series || []).forEach((s) => {
-        rows.push(`<tr>
-          <td class="cs-series" data-label="外观"><span class="tag teal">${esc(s.finish)}</span></td>
-          <td data-label="系列">${esc(s.series)}</td>
-          <td class="num" data-label="颜色数">${s.color_count || 0}</td>
-          <td class="num" data-label="盘数">${s.spool_count || 0}</td>
+        rows.push(`<tr class="cs-row">
+          <td class="cs-series" data-label="外观"><span class="tag teal">${esc(s.finish)}</span><span class="cs-sname-m">${esc(s.series)}</span></td>
+          <td class="cs-series-col" data-label="系列"><span class="cs-sname">${esc(s.series)}</span></td>
+          <td class="num" data-label="总数" data-short="总">${num(s.catalog_count)}</td>
+          <td class="num own" data-label="已有" data-short="有">${num(s.color_count)}</td>
+          <td class="num miss" data-label="缺失" data-short="缺">${num(s.missing_count)}</td>
+          <td class="num" data-label="盘数" data-short="盘">${num(s.spool_count)}</td>
         </tr>`);
-        rows.push(`<tr class="cs-detail"><td colspan="4">
-          <details class="label-diag"><summary>查看 ${esc(s.series)} 的颜色（${s.color_count || 0} 种 · ${s.spool_count || 0} 盘）</summary>
-            <div class="cs-block">${colorChipListHtml(s.colors, true)}</div>
+        rows.push(`<tr class="cs-detail"><td colspan="6">
+          <details class="label-diag">
+            <summary>${esc(s.series)}：共 ${num(s.catalog_count)} 色 · 已有 ${num(s.color_count)} · 缺 ${num(s.missing_count)}</summary>
+            <div class="cs-block"><h3 class="cs-h-own">已入库 ${num(s.color_count)} 种 · ${num(s.spool_count)} 盘</h3>
+              ${colorChipListHtml(s.colors, true)}</div>
+            <div class="cs-block"><h3 class="cs-h-miss">未入库 ${num(s.missing_count)} 种</h3>
+              ${colorChipListHtml(s.missing, false)}</div>
           </details>
         </td></tr>`);
       });
     });
-  });
+
+    return `<section class="cs-brand-card">
+      <header class="cs-brand-head">
+        <span class="cs-brand-dot" style="background:${dot}"></span>
+        <span class="cs-brand-name">${esc(b.brand)}</span>
+        <span class="cs-brand-meta">${num(b.material_count)} 种材料 · ${num(b.series_count)} 个外观 · ${num(b.spool_count)} 盘</span>
+        <span class="cs-brand-stats">
+          <span class="cs-chip own">已有 <b>${num(b.color_count)}</b></span>
+          <span class="cs-chip miss">缺 <b>${num(b.missing_count)}</b></span>
+          <span class="cs-chip">共 <b>${num(b.catalog_count)}</b> 色</span>
+        </span>
+      </header>
+      <div class="table-wrap"><table class="cs-table">
+        <thead><tr><th>外观</th><th>系列</th><th class="num">总数</th>
+          <th class="num">已有</th><th class="num">缺失</th><th class="num">盘数</th></tr></thead>
+        <tbody>${rows.join("")}</tbody></table></div>
+    </section>`;
+  }).join("");
 
   const unmatched = d.unmatched || [];
   const extra = unmatched.length
@@ -4087,10 +4124,7 @@ function renderColorStatsHtml(data) {
         <div class="cs-colors">${unmatched.map((u) =>
           `<span class="cs-color">${esc(u.brand)} · ${esc(u.material)} · ${esc(u.color_name)} ×${u.count}</span>`).join("")}</div></details>`
     : "";
-  return `${summary}<div class="table-wrap"><table class="cs-table">
-    <thead><tr><th>外观</th><th>系列</th>
-      <th style="text-align:right">颜色数</th><th style="text-align:right">盘数</th></tr></thead>
-    <tbody>${rows.join("")}</tbody></table></div>${extra}`;
+  return `${summary}<div class="cs-brand-list">${cards}</div>${extra}`;
 }
 
 function renderColorStats() {
