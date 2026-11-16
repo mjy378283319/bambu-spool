@@ -258,6 +258,32 @@ function fmtTime(iso) {
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) + " " + hhmm;
 }
 
+/** 后端的时间都是「无时区的 UTC」，没有 Z 就补一个再解析 —— 与 fmtTime 同一口径。 */
+function parseUtcDate(iso) {
+  if (!iso) return null;
+  const date = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  return isNaN(date) ? null : date;
+}
+
+/** 完整日期（YYYY-MM-DD）。料盘「添加时间」要跨年可读，不能沿用 fmtTime 的 MM-DD。 */
+function fmtDay(iso) {
+  const date = parseUtcDate(iso);
+  if (!date) return "—";
+  const pad = (v) => String(v).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** 买了多久：按自然日差算，给「添加时间」列第二行用。
+ *  超过一年换成「年」，否则一直用天 —— 「已 700 天」比「已 1.9 年」更难读。 */
+function spoolAgeText(iso) {
+  const date = parseUtcDate(iso);
+  if (!date) return "";
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days <= 0) return "今天入库";
+  if (days >= 365) return `已 ${(days / 365).toFixed(1)} 年`;
+  return `已 ${days} 天`;
+}
+
 function fmtDuration(seconds) {
   if (!seconds || seconds < 0) return "—";
   const h = Math.floor(seconds / 3600);
@@ -1518,7 +1544,7 @@ function priceBuckets(spools) {
 /* ── 表头排序 ──────────────────────────────────────────── */
 
 /** 走文字比较的列（其余按数值）。外观列空值显示成「普通」，排序也按显示值来。 */
-const TEXT_SORT_KEYS = { last_used_at: 1, material: 1, finish: 1, brand: 1, name: 1 };
+const TEXT_SORT_KEYS = { last_used_at: 1, created_at: 1, material: 1, finish: 1, brand: 1, name: 1 };
 
 /** 排序用的取值：外观列没有值时按界面上显示的「普通」参与比较，
  *  不然一整列「普通」会散在排序结果的另一头，跟看到的对不上。 */
@@ -1563,7 +1589,9 @@ function sortSpools(list) {
 /** 点表头切换排序：同一列反方向，换列时「越大越关心」的列默认降序。 */
 function toggleSpoolSort(key) {
   const cur = S.spoolSort || { key: "id", dir: "asc" };
-  const bigFirst = key === "remaining_weight" || key === "price" || key === "last_used_at";
+  // 「越大越关心」的列默认降序：价格高的、剩余多的、最近用过的、最近添加的。
+  const bigFirst = key === "remaining_weight" || key === "price"
+    || key === "last_used_at" || key === "created_at";
   S.spoolSort = cur.key === key
     ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
     : { key, dir: bigFirst ? "desc" : "asc" };
@@ -1655,6 +1683,11 @@ function spoolRowHtml(spool) {
   const usage = first
     ? `首次 ${first}${last ? `<br>最后 ${last}` : ""}`
     : '<span class="tag">未使用</span>';
+  // 「买了多久」：日期 + 已 N 天。created_at 是入库时间，不是首次使用时间；
+  // 老料盘可能早就买了但一直没用，这两个数不一样。
+  const added = spool.created_at
+    ? `<div>${fmtDay(spool.created_at)}</div><div class="tiny muted">${spoolAgeText(spool.created_at)}</div>`
+    : '<span class="tiny muted">—</span>';
 
   // data-label 给窄屏卡片式布局用（CSS 里 td::before 取 attr(data-label)）：
   // 手机上一行 9 列横向塞不下，会把表格拉出屏幕，所以窄屏改成竖排卡片。
@@ -1686,6 +1719,7 @@ function spoolRowHtml(spool) {
       </div>
     </td>
     <td class="tiny muted" data-label="使用时间">${usage}</td>
+    <td class="tiny muted" data-label="添加时间">${added}</td>
     <td class="cell-actions" onclick="event.stopPropagation()">
       <div class="row-actions main">
         <button title="查看这盘料的详情与使用记录" onclick="openSpoolDetail(${spool.id})">${ICO.eye}详情</button>
@@ -1732,6 +1766,7 @@ function renderSpools() {
       ${sortHead("price", "价格", "104px", "right")}
       ${sortHead("remaining_weight", "剩余", "148px")}
       ${sortHead("last_used_at", "使用时间", "168px")}
+      ${sortHead("created_at", "添加时间", "112px")}
       <th style="width:214px"></th>
     </tr></thead>
     <tbody>${slice.map(spoolRowHtml).join("")}</tbody></table>`;
@@ -5408,6 +5443,8 @@ setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {})
 // 肉眼很难盯住，钉在这里。
 window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
+  // 料盘「添加时间」列：日期按 UTC 解析、天数按自然日差，错一天用户就会以为买错批次
+  fmtDay, spoolAgeText,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
   renderFanCard,
   // 颜色覆盖统计：应有/已有/缺色与每色盘数，算错了用户会照着清单去采购

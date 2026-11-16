@@ -2500,6 +2500,26 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
   });
   check("库存表外观列用的是芯片", /data-label="外观"><span class="finish-chip matte">哑光<\/span>/.test(row),
     (row.match(/data-label="外观">[^<]*<[^>]*>[^<]*/) || [""])[0]);
+
+  // 「添加时间」列：入库日期 + 买了多久（2026-11-16 用户要求）
+  const aged = sandbox.spoolRowHtml({
+    id: 6, name: "老盘", material: "PLA", color_hex: "#112233", finish: "普通",
+    price: 0, remaining_weight: 900, initial_weight: 1000, remaining_percent: 90,
+    slots: [], usages: [],
+    created_at: new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 19),
+  });
+  check("库存表多了「添加时间」列", aged.includes('data-label="添加时间"'), aged.slice(0, 400));
+  check("添加时间显示完整日期（跨年可读）", /\d{4}-\d{2}-\d{2}/.test(aged), aged.slice(0, 700));
+  check("添加时间第二行显示买了多久", /已 (89|90) 天/.test(aged), aged.slice(0, 700));
+  check("表头有添加时间列", appSrc.includes('sortHead("created_at", "添加时间"'));
+  check("添加时间可按时间排序", dbg.TEXT_SORT_KEYS.created_at === 1,
+    String(dbg.TEXT_SORT_KEYS));
+  check("没 created_at 时显示「—」，不编日期",
+    /data-label="添加时间"><span class="tiny muted">—<\/span>/.test(sandbox.spoolRowHtml({
+      id: 7, name: "x", material: "PLA", color_hex: "#000000", finish: "普通",
+      price: 0, remaining_weight: 1, initial_weight: 1, remaining_percent: 100,
+      slots: [], usages: [],
+    })));
   check("CSS 里各色调都有定义",
     /\.finish-chip\.silk/.test(CSS_SRC) && /\.finish-chip\.matte/.test(CSS_SRC)
     && /\.finish-chip\.glow/.test(CSS_SRC) && /\.finish-chip\.plain/.test(CSS_SRC));
