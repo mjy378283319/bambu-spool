@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from ..catalog import (
     GCODE_STATE_LABELS,
+    HMS_SEVERITY,
     STAGE_LABELS,
     hms_module,
     hms_severity,
@@ -432,6 +433,8 @@ class HmsError:
     text: str = ""
     severity: str = "未知"
     module: str = "未知"
+    # 原始严重度码（1 致命 / 2 严重 / 3 一般 / 4 提示），界面按它选颜色
+    level: int = 0
 
 
 @dataclass
@@ -705,6 +708,13 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
             continue
         attr = _as_int(item.get("attr"))
         code = _as_int(item.get("code"))
+        # HMS 的 attr 位拆分：bit24-31 模块、bit16-23 严重度、低位是错误序号。
+        # 真机上会冒出一批**严重度位是 0** 的条目（状态已经 FINISH/IDLE 了还在报），
+        # 这种条目只能翻译出「主板 · 未知」——既说不出是什么问题、也判断不了轻重，
+        # 纯噪音。严重度认不出来的一律不往界面上送（2026-11-16 用户反馈）。
+        level = (attr >> 16) & 0xFF
+        if level not in HMS_SEVERITY:
+            continue
         state.hms.append(
             HmsError(
                 attr=attr,
@@ -712,6 +722,7 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
                 text=hms_text(attr, code),
                 severity=hms_severity(attr),
                 module=hms_module(attr),
+                level=level,
             )
         )
 

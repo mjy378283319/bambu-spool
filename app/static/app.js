@@ -1234,9 +1234,16 @@ function renderRunCard(state) {
     : "—";
   const stage = [state.stage_label, state.remaining_minutes ? `剩余 ${state.remaining_minutes} 分钟` : ""]
     .filter(Boolean).join(" · ");
+  // HMS 告警标签：按严重度上色（致命/严重红、一般橙、提示蓝），
+  // title 挂原始 HMS 码，出问题时能拿去查。后端已把「严重度认不出」的条目滤掉，
+  // 不会再有「主板 · 未知」这种说不出问题的噪音。
+  const hmsCls = (h) => {
+    const lv = Number(h && h.level);
+    return lv === 1 || lv === 2 ? "red" : lv === 3 ? "amber" : "blue";
+  };
   const hms = (state.hms && state.hms.length)
     ? `<div class="row" style="margin-top:10px;gap:6px">
-         ${state.hms.map((h) => `<span class="tag red">${esc(h.module)} · ${esc(h.severity)}</span>`).join("")}
+         ${state.hms.map((h) => `<span class="tag ${hmsCls(h)}" title="${esc(h.text || "")}">${esc(h.module)} · ${esc(h.severity)}</span>`).join("")}
        </div>`
     : "";
 
@@ -5467,6 +5474,8 @@ window.panelDebug = {
   fmtDay, spoolAgeText,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装
   renderFanCard,
+  // 打印状态卡：HMS 告警标签按严重度上色，未知级别的条目必须不出现
+  renderRunCard,
   // 颜色覆盖统计：应有/已有/缺色与每色盘数，算错了用户会照着清单去采购
   renderColorStatsHtml, colorChipListHtml,
   // 双喷嘴（X2D/H2D/H2C/H2D Pro）：副喷嘴与副部件风扇只在双头模式出现，

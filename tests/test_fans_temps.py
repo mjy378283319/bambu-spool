@@ -623,6 +623,45 @@ def test_exhaust_real_p2s() -> None:
           f"{none.exhaust_fan_pct}/{none.exhaust_source}")
 
 
+# ── 2g. HMS 告警：只放行能翻译出严重度的条目 ──────────────────────
+def test_hms_filter() -> None:
+    print("\n== HMS 告警：认不出严重度的条目不上界面 ==")
+
+    def report(*items):
+        return parse_report({"print": {"hms": [
+            {"attr": a, "code": c} for a, c in items
+        ]}})
+
+    # 用户 2026-11-16 反馈：状态已经是「已完成 / 空闲」，打印状态卡下面还挂着
+    # 一个「主板 · 未知」。真机那条 attr 的模块位是 0x05（主板），但严重度位是 0，
+    # 不在 1..4 里 —— 翻译不出问题内容也判断不了轻重，属于纯噪音。
+    noise = report((0x05000001, 0x00010002))
+    check("严重度位为 0 的残留告警被丢掉（不再显示「主板 · 未知」）",
+          noise.hms == [], str([h.__dict__ for h in noise.hms]))
+
+    real = report((0x05030001, 0x00010002))
+    check("一般级主板告警保留", len(real.hms) == 1, str(len(real.hms)))
+    check("模块翻译成主板", real.hms[0].module == "主板", real.hms[0].module)
+    check("严重度翻译成一般", real.hms[0].severity == "一般", real.hms[0].severity)
+    check("带原始严重度码给界面配色", real.hms[0].level == 3, str(real.hms[0].level))
+    check("HMS 码保留（title 里能拿去查）",
+          real.hms[0].text.startswith("HMS_05030001_"), real.hms[0].text)
+
+    fatal = report((0x08010001, 0x00020003))
+    check("工具头致命告警保留且模块正确",
+          len(fatal.hms) == 1 and fatal.hms[0].module == "工具头"
+          and fatal.hms[0].severity == "致命",
+          str([h.__dict__ for h in fatal.hms]))
+
+    mixed = report((0x05000001, 1), (0x05030001, 2))
+    check("好坏混报时只留有效条目", len(mixed.hms) == 1, str(len(mixed.hms)))
+
+    check("没有 hms 字段时不炸", parse_report({"print": {}}).hms == [])
+    check("state_dict 下发 level（界面靠它配色）",
+          (hub.state_dict(report((0x05030001, 2)), 1).get("hms") or [{}])[0].get("level") == 3,
+          str(hub.state_dict(report((0x05030001, 2)), 1).get("hms")))
+
+
 if __name__ == "__main__":
     test_fan_percent()
     test_airduct_fans()
@@ -634,6 +673,7 @@ if __name__ == "__main__":
     test_dual_nozzle()
     test_fan_raw()
     test_exhaust_real_p2s()
+    test_hms_filter()
     print(f"\n通过 {len(PASSED)} 项，失败 {len(FAILED)} 项")
     if FAILED:
         print("失败项：", FAILED)

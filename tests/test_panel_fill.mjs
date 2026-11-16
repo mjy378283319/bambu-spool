@@ -139,7 +139,7 @@ if (!dbg) {
   console.error("app.js 没有导出 window.panelDebug，无法自测（是不是被改掉了？）");
   process.exit(1);
 }
-const { fanChannels, filFill, MIN_FILL_PCT, renderFanCard } = dbg;
+const { fanChannels, filFill, MIN_FILL_PCT, renderFanCard, renderRunCard } = dbg;
 
 // ── 1. 风扇四行命名 ─────────────────────────────────────────────
 console.log("== 风扇通道命名（P2S / X2 对齐拓竹 App「空调系统」页） ==");
@@ -214,6 +214,39 @@ check("机型缺失不炸", Array.isArray(fanChannels({})) && Array.isArray(fanC
   check("四行风扇与 100% 读数照旧显示",
     html.includes(">100%<") && html.includes("外排") && html.includes("风扇状态"),
     html.slice(0, 600));
+}
+
+// ── 1c. 打印状态卡的 HMS 告警标签（2026-11-16） ──────────────────
+// 用户截图：状态「已完成 / 空闲」，进度条下面却挂着一个红标签「主板 · 未知」。
+// 未知级别的条目已由后端丢掉；这里钉住「留下的条目按级别上色、并带上可查的 HMS 码」。
+{
+  const base = {
+    gcode_state: "FINISH", state_label: "已完成", stage_label: "空闲",
+    progress: 100, layer_num: 100, total_layer_num: 100,
+  };
+
+  const clean = renderRunCard({ ...base, hms: [] });
+  check("没有告警时卡片里没有任何标签", !clean.includes('class="tag'), clean.slice(-260));
+
+  const fatal = renderRunCard({ ...base, hms: [
+    { module: "工具头", severity: "致命", level: 1, text: "HMS_08010001_00020003" },
+  ] });
+  check("致命告警标红并写明模块", fatal.includes("tag red") && fatal.includes("工具头 · 致命"),
+    fatal.slice(-260));
+  check("告警带 HMS 原始码（鼠标悬停能拿去查）",
+    fatal.includes('title="HMS_08010001_00020003"'), fatal.slice(-260));
+
+  const common = renderRunCard({ ...base, hms: [
+    { module: "主板", severity: "一般", level: 3, text: "HMS_05030001_00000002" },
+  ] });
+  check("一般级用琥珀色，不再一律标红",
+    common.includes("tag amber") && !common.includes("tag red"), common.slice(-260));
+
+  const info = renderRunCard({ ...base, hms: [
+    { module: "AMS", severity: "提示", level: 4, text: "HMS_07040001_00000001" },
+  ] });
+  check("提示级用蓝色", info.includes("tag blue") && !info.includes("tag red"),
+    info.slice(-260));
 }
 
 // ── 2. 料条高度 = 余重 ÷ 满盘容量 ───────────────────────────────
