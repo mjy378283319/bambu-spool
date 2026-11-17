@@ -227,6 +227,11 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
                     if hit is None:
                         continue
                     hit["count"] += 1
+                    # 记下具体是哪几盘：前端色块要能点进去看/改这盘料。
+                    # 只存 id，不存对象 —— 统计接口的返回要能直接 JSON 序列化。
+                    sid = getattr(spool, "id", None)
+                    if sid is not None:
+                        hit.setdefault("spool_ids", []).append(sid)
                     definition["spool_count"] = definition.get("spool_count", 0) + 1
                     matched_ids.add(id(spool))
                     break
@@ -291,17 +296,26 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
         })
 
     # 有库存但没有官方色卡可比的盘：单列，不硬塞进统计
-    unmatched: dict[tuple[str, str, str], int] = defaultdict(int)
+    # 键 -> 料盘 id 列表（不存对象，接口要能直接 JSON 序列化）。
+    # 前端拿这些 id 把「没有官方色卡」的条目点进料盘详情，否则这栏只是死名单。
+    unmatched: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     for spool in live:
         if id(spool) in matched_ids:
             continue
         brand = normalize_brand(getattr(spool, "brand", ""))
         material = getattr(spool, "material", "") or "未填写"
         color = getattr(spool, "color_name", "") or "未填写"
-        unmatched[(brand, material, color)] += 1
+        sid = getattr(spool, "id", None)
+        unmatched[(brand, material, color)].append(sid)
     unmatched_out = [
-        {"brand": b, "material": m, "color_name": c, "count": n}
-        for (b, m, c), n in sorted(unmatched.items(), key=lambda kv: -kv[1])
+        {
+            "brand": b,
+            "material": m,
+            "color_name": c,
+            "count": len(ids),
+            "spool_ids": [sid for sid in ids if sid is not None],
+        }
+        for (b, m, c), ids in sorted(unmatched.items(), key=lambda kv: -len(kv[1]))
     ]
 
     # 品牌按「有库存的颜色种数」降序，其次是料盘数

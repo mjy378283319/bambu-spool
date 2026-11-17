@@ -1487,5 +1487,27 @@ th.sortable.on .sort-arrow { color: var(--accent); }
 }
 .cs-color .swatch { width: 11px; height: 11px; }
 .cs-qty { font-variant-numeric: tabular-nums; opacity: .8; }
+/* 可点的色块与「没有官方色卡」条目：是按钮，不是 span。
+   浏览器默认边框要清掉，鼠标要变手型，键盘 Tab 到时要看得见焦点。 */
+button.cs-color {
+  border: 0; font: inherit; line-height: inherit; cursor: pointer;
+  transition: background .12s, box-shadow .12s;
+}
+button.cs-color:hover { box-shadow: 0 0 0 2px var(--accent-soft); }
+button.cs-color:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cs-color-raw { color: var(--text-2); background: var(--surface-2); }
+.cs-color-raw:hover { color: var(--accent); background: var(--accent-soft); }
 .cs-rest:not(.hidden) { display: inline; }
 .cs-unmatched { margin-top: 12px; }
+
+/* 同款耗材有多盘时的选择列表 */
+.spool-pick-list { display: grid; gap: 6px; }
+.spool-pick-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; text-align: left; font: inherit; color: inherit;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer;
+}
+.spool-pick-row:hover { border-color: var(--accent); background: var(--surface-3); }
+.spool-pick-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.spool-pick-name b { font-weight: 600; }

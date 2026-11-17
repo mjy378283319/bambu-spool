@@ -646,6 +646,15 @@ console.log("== 料盘行操作 / 打印机布局（源码级） ==");
 
 const cssSrc = fs.readFileSync(path.join(ROOT, "app", "static", "style.css"), "utf8");
 check("每行有「详情」入口", /onclick="openSpoolDetail\(\$\{spool\.id\}\)"/.test(appSrc));
+// 2026-11-17：详情页里点「编辑」不再关掉详情另开弹窗，表单原地顶上并回详情
+check("详情页的编辑是原地切换（带 returnDetail）",
+  /openSpoolDialog\(spool,\s*false,\s*null,\s*id\)/.test(appSrc));
+check("编辑表单的取消/保存都带回详情 id",
+  /cancelSpoolDialog\(\$\{returnDetail \? returnDetail : "null"\}\)/.test(appSrc)
+    && /saveSpool\(\$\{isEdit \? spool\.id : "null"\},\s*\$\{returnDetail \? returnDetail : "null"\}\)/.test(appSrc),
+  "按钮没把 returnDetail 传下去");
+check("从详情编辑保存后回详情，而不是掉回列表",
+  /if \(returnDetail\) await openSpoolDetail\(returnDetail\)/.test(appSrc));
 check("每行有「绑定」入口", /onclick="openBindSpoolDialog\(\$\{spool\.id\}\)"/.test(appSrc));
 check("每行有「克隆」入口", /onclick="openCloneSpoolDialog\(\$\{spool\.id\}\)"/.test(appSrc));
 check("克隆走的是「新增」而不是编辑（forceNew）",
@@ -2736,9 +2745,9 @@ console.log("== 库存颜色统计列表 ==");
           { series: "PLA Basic", finish: "普通", order: 10,
             catalog_count: 4, color_count: 3, missing_count: 1, spool_count: 4,
             colors: [
-              { name: "黑色", hex: "#000000", count: 2 },
-              { name: "白色", hex: "#FFFFFF", count: 1 },
-              { name: "冷白", hex: "#D9DFE5", count: 1 },
+              { name: "黑色", hex: "#000000", count: 2, spool_ids: [1, 2] },
+              { name: "白色", hex: "#FFFFFF", count: 1, spool_ids: [3] },
+              { name: "冷白", hex: "#D9DFE5", count: 1, spool_ids: [4] },
             ],
             missing: [{ name: "红色", hex: "#E72F1D" }] },
           { series: "PLA Matte", finish: "哑光", order: 20,
@@ -2765,7 +2774,7 @@ console.log("== 库存颜色统计列表 ==");
         ],
       }],
     }],
-    unmatched: [{ brand: "杂牌", material: "PLA", color_name: "紫色", count: 1 }],
+    unmatched: [{ brand: "杂牌", material: "PLA", color_name: "紫色", count: 1, spool_ids: [7] }],
   };
   const html = dbg.renderColorStatsHtml(data);
 
@@ -2810,6 +2819,22 @@ console.log("== 库存颜色统计列表 ==");
   check("汇总行同时给已入库与未入库数",
     html.includes("6</b> 色已入库") && html.includes("6</b> 色未入库"), html.slice(0, 400));
   check("没有对应色卡的盘单列", html.includes("没有对应官方色卡"), html.slice(-400));
+  // 2026-11-17：色块/未匹配条目要能直接点进料盘详情
+  check("已有色块是按钮，点击进这盘料（黑色 2 盘带上两个 id）",
+    /<button[^>]+class="cs-color owned cs-color-btn"[^>]+openSpoolGroup\(\[1,2\]\)/.test(html)
+      || (/cs-color owned cs-color-btn/.test(html) && html.includes("openSpoolGroup([1,2])")),
+    html.slice(0, 2400));
+  check("缺色不是按钮（点不出料盘）",
+    !/cs-color missing[^"]*"[^>]*openSpoolGroup/.test(html), html.slice(0, 2600));
+  check("没有官方色卡的条目也可点（带 spool_ids）",
+    html.includes("cs-color-raw") && html.includes("openSpoolGroup([7])"), html.slice(-500));
+  check("没有 id 的条目不会渲染成假按钮",
+    !dbg.renderColorStatsHtml({
+      unmatched: [{ brand: "x", material: "PLA", color_name: "y", count: 1 }],
+    }).includes("openSpoolGroup"),
+    "无 id 的条目仍带 onclick，点下去是空操作");
+  check("色块按钮有键盘焦点样式（CSS 里 button.cs-color 有 focus-visible）",
+    /button\.cs-color:focus-visible/.test(cssSrc));
   check("手机端每格带 data-label",
     html.includes('data-label="外观"') && html.includes('data-label="系列"'));
   check("色块 hex 走白名单（脏值不进 style）",

@@ -1897,10 +1897,17 @@ function spoolById(id) { return S.spools.find((s) => s.id === id); }
 async function editCurrentSpool(id) {
   let spool = S.spools.find((s) => s.id === id);
   if (!spool) {
-    try { spool = await api(`/api/spools/${id}`); } catch (err) { /* 退回空表单 */ }
+    try { spool = await api(`/api/spools/${id}`); } catch (err) { /* 下面按没找到处理 */ }
   }
+  if (!spool) { toast("找不到这盘料，刷新一下列表", "err"); return; }
+  // 不关详情：表单原地顶上，取消/保存都回到详情页
+  openSpoolDialog(spool, false, null, id);
+}
+
+/** 编辑表单的取消：从详情进来的回详情，其它情况正常关弹窗。 */
+function cancelSpoolDialog(returnDetail) {
+  if (returnDetail) { openSpoolDetail(returnDetail); return; }
   closeModal();
-  openSpoolDialog(spool);
 }
 
 /* ── 品牌官方色卡（如 Polymaker Panchroma / PETG） ─────── */
@@ -2069,7 +2076,12 @@ function markActivePreset() {
   });
 }
 
-function openSpoolDialog(spool, forceNew, clonedFrom) {
+/** 料盘表单（新增 / 编辑 / 克隆）。
+ *
+ *  `returnDetail`：从料盘详情点「编辑」进来时带上料盘 id。表单直接顶在详情位置，
+ *  保存/取消后回到详情 —— 不再「关掉详情 → 另开一个编辑弹窗 → 存完掉回列表」。
+ */
+function openSpoolDialog(spool, forceNew, clonedFrom, returnDetail) {
   S.dialogSpool = spool || null;
   // forceNew：表单预填了某盘料的参数，但目的是新增（克隆、或图片识色匹配到的色卡）
   const isEdit = !!spool && !forceNew;
@@ -2146,8 +2158,8 @@ function openSpoolDialog(spool, forceNew, clonedFrom) {
       里点颜色时，会帮你把外观预填上；你自己填过的值不会被覆盖。保存时会原样存下来。</p>
     <p class="hint">不确定皮重？多数塑料盘在 190~250 g 之间。皮重只影响「称重校准」的换算，不影响自动扣重。</p>
     <p class="hint">价格用于统计「耗材总价值」和「每次打印耗费的料材费」：打印费 = 整盘价 ÷ 满盘净重 × 本次用量。留空表示未登记，不计入费用汇总。</p>
-  `, `<button onclick="closeModal()">取消</button>
-      <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"})">保存</button>`);
+  `, `<button onclick="cancelSpoolDialog(${returnDetail ? returnDetail : "null"})">取消</button>
+      <button class="primary" onclick="saveSpool(${isEdit ? spool.id : "null"}, ${returnDetail ? returnDetail : "null"})">保存</button>`);
   renderColorPresets();
   syncBrandDeleteHint();
 }
@@ -2272,7 +2284,7 @@ function currentBrandValue() {
   return (input ? input.value : "").trim();
 }
 
-async function saveSpool(id) {
+async function saveSpool(id, returnDetail) {
   const payload = {
     brand: document.getElementById("f_brand").value.trim(),
     material: document.getElementById("f_material").value.trim(),
@@ -2299,9 +2311,12 @@ async function saveSpool(id) {
       await api("/api/spools", { method: "POST", body: JSON.stringify(payload) });
       toast("已新增料盘", "ok");
     }
-    closeModal();
+    // 从详情进来编辑的：不关弹窗，直接把这层内容换成详情（close 再 open
+    // 会多退/多推一条 #modal 历史，手机上按返回会闪一下）
+    if (!returnDetail) closeModal();
     await loadSpools();
     if (S.status) { await loadStatus(); await loadBindings(); }
+    if (returnDetail) await openSpoolDetail(returnDetail);
   } catch (err) { toast(err.message, "err"); }
 }
 
@@ -2352,6 +2367,49 @@ async function openSpoolDetail(id) {
     `, `<button class="primary" onclick="closeModal()">关闭</button>`, true);
   } catch (err) { toast(err.message, "err"); }
 }
+
+/** 点色块/未匹配条目 -> 看这一组料盘的详情。
+ *
+ *  一盘直接进详情；多盘先给个选择列表（同一颜色常有好几盘，直接跳第一盘
+ *  等于替用户瞎猜）。列表里每一行都是可点的，点进详情就能改耗材信息。 */
+async function openSpoolGroup(ids) {
+  const list = [...new Set((Array.isArray(ids) ? ids : []).filter((id) => id != null))];
+  if (!list.length) return;
+  if (list.length === 1) { openSpoolDetail(list[0]); return; }
+
+  const byId = new Map((S.spools || []).map((s) => [s.id, s]));
+  const missing = list.filter((id) => !byId.has(id));
+  if (missing.length) {
+    // 库里可能已经归档/被筛掉，列表里没有就单独补一次，别显示成「料盘 #3」
+    const fetched = await Promise.all(
+      missing.map((id) => api(`/api/spools/${id}`).catch(() => null)));
+    fetched.filter(Boolean).forEach((spool) => byId.set(spool.id, spool));
+  }
+
+  const rows = list.map((id) => {
+    const spool = byId.get(id);
+    if (!spool) {
+      return `<button type="button" class="spool-pick-row" onclick="openSpoolDetail(${id})">
+        <span class="spacer"></span><span class="small">料盘 #${id}</span>
+        <span class="tiny muted">详情 ›</span></button>`;
+    }
+    const sub = [spool.brand, spool.material, spool.location].filter(Boolean).join(" · ");
+    return `<button type="button" class="spool-pick-row" onclick="openSpoolDetail(${spool.id})">
+      <span class="swatch" style="background:${colorSafeHex(spool.color_hex)}"></span>
+      <span class="spool-pick-name"><b>${esc(spool.name)}</b>
+        <span class="tiny muted">${esc(sub || "—")}</span></span>
+      <span class="spacer"></span>
+      <span class="small">${(Number(spool.remaining_weight) || 0).toFixed(0)} g</span>
+      <span class="tiny muted">详情 ›</span></button>`;
+  }).join("");
+
+  openModal(`同款耗材 · ${list.length} 盘`,
+    `<div class="spool-pick-list">${rows}</div>
+     <p class="hint">点任意一盘进详情，可直接编辑品牌 / 材料 / 外观 / 颜色名；
+     改完回「颜色统计」刷新，它会重新参与色卡匹配。</p>`,
+    `<button onclick="closeModal()">关闭</button>`);
+}
+
 
 /** 克隆一盘料：把「这款耗材」的规格复制出来新增一盘。
  *
@@ -4008,8 +4066,18 @@ function colorSafeHex(value) {
 function colorChipHtml(c, owned) {
   const n = Number(c.count) || 0;
   const qty = owned && n > 1 ? `<span class="cs-qty">×${n}</span>` : "";
-  return `<span class="cs-color${owned ? " owned" : " missing"}" title="${esc(c.name)} ${esc(c.hex)}">
-    <span class="swatch" style="background:${colorSafeHex(c.hex)}"></span>${esc(c.name)}${qty}</span>`;
+  const inner = `<span class="swatch" style="background:${colorSafeHex(c.hex)}"></span>${esc(c.name)}${qty}`;
+  const title = `${esc(c.name)} ${esc(c.hex)}`;
+  // 已入库的色块能点：直接跳到这盘料（或这几种同色料盘）的详情页。
+  // 缺色的没有对应料盘，保持普通 span，不给假的可点暗示。
+  const ids = owned && Array.isArray(c.spool_ids)
+    ? c.spool_ids.filter((id) => id != null) : [];
+  if (ids.length) {
+    const hint = `${title}，点击查看这 ${ids.length} 盘料`;
+    return `<button type="button" class="cs-color owned cs-color-btn" title="${hint}"
+      onclick="openSpoolGroup([${ids.join(",")}])">${inner}</button>`;
+  }
+  return `<span class="cs-color${owned ? " owned" : " missing"}" title="${title}">${inner}</span>`;
 }
 
 function colorChipListHtml(colors, owned) {
@@ -4121,8 +4189,16 @@ function renderColorStatsHtml(data) {
   const unmatched = d.unmatched || [];
   const extra = unmatched.length
     ? `<details class="label-diag cs-unmatched"><summary>${unmatched.length} 类有库存的料盘没有对应官方色卡（不计入统计）</summary>
-        <div class="cs-colors">${unmatched.map((u) =>
-          `<span class="cs-color">${esc(u.brand)} · ${esc(u.material)} · ${esc(u.color_name)} ×${u.count}</span>`).join("")}</div></details>`
+        <div class="cs-colors">${unmatched.map((u) => {
+          const label = `${esc(u.brand)} · ${esc(u.material)} · ${esc(u.color_name)} ×${u.count}`;
+          const ids = Array.isArray(u.spool_ids) ? u.spool_ids.filter((id) => id != null) : [];
+          // 这一栏原本是死名单：知道「没对上色卡」却没法处理。现在点进去就是
+          // 这盘料的详情页，可以直接改品牌/材料/颜色名，让它重新进统计。
+          if (!ids.length) return `<span class="cs-color">${label}</span>`;
+          return `<button type="button" class="cs-color cs-color-btn cs-color-raw"
+            title="点击查看这 ${ids.length} 盘料并编辑耗材信息"
+            onclick="openSpoolGroup([${ids.join(",")}])">${label}</button>`;
+        }).join("")}</div></details>`
     : "";
   return `${summary}<div class="cs-brand-list">${cards}</div>${extra}`;
 }

@@ -437,19 +437,20 @@ from app.models import Spool  # noqa: E402
 
 
 def _stat_spool(brand, material, color_name, color_hex,
-                archived=False, remaining=1000.0):
-    return Spool(brand=brand, material=material, color_name=color_name,
+                archived=False, remaining=1000.0, sid=None):
+    # 真库里的料盘一定有 id：接口要拿它让前端点进详情，测试也得带上
+    return Spool(id=sid, brand=brand, material=material, color_name=color_name,
                  color_hex=color_hex, archived=archived, remaining_weight=remaining)
 
 
 stat_data = build_color_stats([
-    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D"),
-    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D"),
-    _stat_spool("Polymaker", "PLA", "冷白", "#D9DFE5"),
-    _stat_spool("Bambu Lab", "PLA", "黑色", "#000000"),       # 别名归一到拓竹
-    _stat_spool("杂牌", "PLA", "紫色", "#800080"),             # 没有官方色卡
-    _stat_spool("Polymaker", "PLA", "红色", "#E72F1D", archived=True),  # 归档不算
-    _stat_spool("Polymaker", "PLA", "白色", "#EBF7FF", remaining=0),    # 用完不算
+    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D", sid=1),
+    _stat_spool("Polymaker", "PLA", "黑色", "#080A0D", sid=2),
+    _stat_spool("Polymaker", "PLA", "冷白", "#D9DFE5", sid=3),
+    _stat_spool("Bambu Lab", "PLA", "黑色", "#000000", sid=4),       # 别名归一到拓竹
+    _stat_spool("杂牌", "PLA", "紫色", "#800080", sid=5),             # 没有官方色卡
+    _stat_spool("Polymaker", "PLA", "红色", "#E72F1D", archived=True, sid=6),  # 归档不算
+    _stat_spool("Polymaker", "PLA", "白色", "#EBF7FF", remaining=0, sid=7),    # 用完不算
 ])
 tot = stat_data["totals"]
 check("只统计有库存的盘（归档 / 用完不计）", tot["spool_count"] == 4, str(tot))
@@ -501,6 +502,23 @@ check("PLA Basic 与 Panchroma PLA 都归「普通」",
       bambu_series["finish"] == "普通", bambu_series["finish"])
 check("没有色卡可比的盘单列", any(u["brand"] == "杂牌" for u in stat_data["unmatched"]))
 check("未匹配盘数正确", tot["unmatched_spool_count"] == 1, str(tot))
+
+# 2026-11-17：色块要能直接点进料盘详情，所以每个「已有色」必须带 spool_ids
+black = next(c for c in series["colors"] if c["name"] == "黑色")
+check("已有色带具体料盘 id（黑色 2 盘 → [1,2]）",
+      black.get("spool_ids") == [1, 2], str(black.get("spool_ids")))
+check("每个已有色都有 spool_ids",
+      all(c.get("spool_ids") for c in series["colors"]),
+      str([(c["name"], c.get("spool_ids")) for c in series["colors"]]))
+check("缺色不带 spool_ids（点不出料盘）",
+      all("spool_ids" not in c for c in series["missing"]),
+      str(series["missing"][:3]))
+unmatched_one = next(u for u in stat_data["unmatched"] if u["brand"] == "杂牌")
+check("未匹配条目带 spool_ids（点进去能改耗材信息）",
+      unmatched_one.get("spool_ids") == [5], str(unmatched_one))
+check("归档 / 用完的盘不出现在 spool_ids 里",
+      all(6 not in (c.get("spool_ids") or []) and 7 not in (c.get("spool_ids") or [])
+          for c in series["colors"]), str([c.get("spool_ids") for c in series["colors"]]))
 check("空库存不炸", build_color_stats([])["totals"]["spool_count"] == 0)
 
 section("8. 接口端到端（真实 uvicorn）")
@@ -574,6 +592,7 @@ else:
         check("登录", r.status_code == 200, f"HTTP {r.status_code}")
 
         # 建两盘料供匹配
+        created_ids = []
         for payload in (
             {"brand": "Polymaker", "material": "PLA", "color_name": "蓝色", "color_hex": "#003776",
              "initial_weight": 1000, "spool_weight": 140},
@@ -582,6 +601,8 @@ else:
         ):
             r = client.post("/api/spools", json=payload)
             check(f"建料盘 {payload['brand']}", r.status_code == 200, f"HTTP {r.status_code}")
+            if r.status_code == 200:
+                created_ids.append(r.json().get("id"))
 
         # 颜色覆盖统计接口（登录后、真实 DB）
         r = client.get("/api/color/stats")
@@ -590,6 +611,20 @@ else:
             cs = r.json()
             check("颜色统计返回 totals/brands/unmatched",
                   all(k in cs for k in ("totals", "brands", "unmatched")))
+            # 前端拿 spool_ids 跳到料盘详情：接口里必须带，且指向真实料盘
+            api_ids = [
+                sid
+                for b in cs["brands"]
+                for m in b["materials"]
+                for s in m["series"]
+                for c in s["colors"]
+                for sid in (c.get("spool_ids") or [])
+            ]
+            check("接口里的已有色带 spool_ids", bool(api_ids), str(cs["totals"]))
+            check("spool_ids 都指向刚建的料盘",
+                  all(sid in created_ids for sid in api_ids), str(api_ids))
+            check("未匹配条目也带 spool_ids（可点进详情改）",
+                  all("spool_ids" in u for u in cs["unmatched"]), str(cs["unmatched"]))
             check("颜色统计覆盖刚建的 2 盘（匹配 + 未匹配）",
                   (cs.get("totals") or {}).get("spool_count", 0)
                   + (cs.get("totals") or {}).get("unmatched_spool_count", 0) == 2,
