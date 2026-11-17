@@ -1982,9 +1982,14 @@ function renderColorPresets() {
       <div class="preset-grid">${g.colors.map((c) => {
         index[c.name] = c.hex;
         if (c.en) index[c.en] = c.hex;
+        // 店铺译名也进索引：用户照着买到的名字打「卡其色」，色值要跟着自动填。
+        (c.aliases || []).forEach((a) => { index[a] = c.hex; });
         // 系列名里的外观（「PLA 哑光」）顺带写进提示：点这里的颜色会把外观设成哑光。
         const seriesFinish = finishFromSeries(g.series);
-        const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}${c.official ? "" : "（色值为近似）"}`
+        const tips = (c.aliases || []).join(" / ");
+        const tip = `${c.name}${c.en ? " / " + c.en : ""} ${c.hex}`
+          + (tips ? `（店里叫：${tips}）` : "")
+          + (c.official ? "" : "（色值为近似）")
           + (seriesFinish ? ` · 外观：${seriesFinish}` : "");
         // 三色丝绸这类「多色交织」没有单一定义色：数据里带 hex2/hex3 两个辅色，
         // 色块画成三段渐变（hex 仍是主色，选中标记/比对都按它算）。
@@ -1997,8 +2002,13 @@ function renderColorPresets() {
       }).join("")}</div>
     </div>`).join("");
 
+  // 候选里同时收店铺译名（aliases）：官方叫「米色」、店里叫「卡其色」的同一卷料，
+  // 两种写法都得能选到 —— 否则用户按买到的名字搜，只会看到「没有匹配项」。
   list.innerHTML = groups.flatMap((g) => g.colors)
-    .map((c) => `<option value="${esc(c.name)}" label="${esc(c.en || "")}"></option>`).join("");
+    .map((c) => `<option value="${esc(c.name)}" label="${esc(c.en || "")}"></option>`
+      + (c.aliases || []).map((a) =>
+        `<option value="${esc(a)}" label="${esc(c.name)}"></option>`).join(""))
+    .join("");
 
   S._presetIndex = index;
   markActivePreset();

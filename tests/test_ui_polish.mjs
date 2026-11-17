@@ -2239,6 +2239,45 @@ check("生成脚本对多色系列取三个主色（_dominant_hexes）",
 check("三色数据带 hex2/hex3 字段",
   /d\["hex2"\] = hex2/.test(cailabSrc));
 
+// ── 20i. 店铺译名（aliases）：官方叫「米色」、店里叫「卡其色」────────
+// 2026-11-17 用户反馈「淘宝上有卡其色，应用里怎么没有，只有米色」。
+// 实拍线盘标签确认：店里「卡其色」= 官方 Beige #C2AB72，同一个颜色两个名字。
+// 所以候选里两种写法都得在，否则用户照买到的名字搜只会看到「没有匹配项」。
+console.log("");
+console.log("── 官方色卡的店铺译名 ──");
+{
+  state.catalog = {
+    ...(state.catalog || {}),
+    brand_lookup: { ...(state.catalog.brand_lookup || {}), polymaker: "Polymaker" },
+    color_series: {
+      "Polymaker": { "Panchroma PLA": [
+        { name: "米色", en: "Beige", hex: "#C2AB72", official: true, aliases: ["卡其色"] },
+        { name: "石蓝", en: "Stone Blue", hex: "#487BA2", official: true, aliases: ["峰蓝色"] },
+      ] },
+    },
+    material_color_series: {
+      ...(state.catalog.material_color_series || {}), PLA: ["Panchroma PLA"],
+    },
+  };
+  const bEl = sandbox.document.getElementById("f_brand");
+  const mEl = sandbox.document.getElementById("f_material");
+  const box = sandbox.document.getElementById("colorPresets");
+  const list = sandbox.document.getElementById("colorList");
+  bEl.value = "Polymaker";
+  mEl.value = "PLA";
+  sandbox.renderColorPresets();
+  check("颜色候选里官方名与店里名都在（打「卡其」能选到）",
+    /value="米色"/.test(list.innerHTML) && /value="卡其色"/.test(list.innerHTML),
+    list.innerHTML.slice(0, 300));
+  check("两个译名都进候选，不只加了一个",
+    /value="峰蓝色"/.test(list.innerHTML), list.innerHTML.slice(0, 300));
+  check("色块提示里标出「店里叫：卡其色」",
+    /店里叫：卡其色/.test(box.innerHTML), box.innerHTML.slice(0, 260));
+  check("译名进了色值索引（选中/输入「卡其色」自动带出 #C2AB72）",
+    state._presetIndex["卡其色"] === "#C2AB72",
+    JSON.stringify(state._presetIndex));
+}
+
 // ── 21. 自定义品牌：表单里能删、下拉里不重复 ──────────────────────
 // 用户反馈「这个自定义品牌是不是要有删除键」「爱乐酷有两个」。
 console.log("");

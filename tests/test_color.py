@@ -466,6 +466,22 @@ owned = {c["name"]: c["count"] for c in series["colors"]}
 check("同名 2 盘 → 每色数量 2、颜色种数只算 1",
       owned.get("黑色") == 2 and series["color_count"] == 2, str(owned))
 check("色名匹配（冷白）", owned.get("冷白") == 1, str(owned))
+
+# 2026-11-17：天猫/淘宝店的译名跟官方直译对不上（Beige 店里叫「卡其色」、
+# Stone Blue 店里叫「峰蓝色」）。用户照买到的名字填色名，必须还能归到官方色，
+# 不能掉进「没有对应色卡」里 —— 否则统计里这盘料永远缺一格。
+alias_data = build_color_stats([
+    _stat_spool("Polymaker", "PLA", "卡其色", "#000000", sid=51),
+    _stat_spool("Polymaker", "PLA", "峰蓝色", "#000000", sid=52),
+])
+_alias_pl = next(m for b in alias_data["brands"] if b["brand"] == "Polymaker"
+                 for m in b["materials"] if m["material"] == "PLA")
+_alias_owned = {c["name"]: c["count"] for c in _alias_pl["series"][0]["colors"]}
+check("店铺译名「卡其色」归到官方米色（Beige）",
+      _alias_owned.get("米色") == 1, str(_alias_owned))
+check("店铺译名「峰蓝色」归到官方石蓝（Stone Blue）",
+      _alias_owned.get("石蓝") == 1, str(_alias_owned))
+check("只写译名的料盘不算未匹配", alias_data["unmatched"] == [], str(alias_data["unmatched"]))
 # 2026-11-16 用户第二次要求：保留已有色，同时列出该外观还没入库的颜色，
 # 并给出 总数 / 已有 / 缺失 三个数。
 check("给出该外观的色卡总数 / 已有 / 缺失",

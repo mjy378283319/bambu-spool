@@ -183,7 +183,9 @@ def build_color_stats(spools: Iterable[Any]) -> dict:
                         }
                         by_key[key] = item
                         catalog.append(item)
-                    for candidate in (name, color.get("en"), hexv):
+                    # 别名词（店铺译名，如 Polymaker Beige 店里叫「卡其色」）也要进
+                    # 匹配键：用户照买到的名字填了色名，统计不能把他算成「没有色卡」。
+                    for candidate in (name, color.get("en"), hexv, *color.get("aliases", [])):
                         norm = _name_key(candidate) if candidate != hexv else hexv
                         if norm:
                             item["keys"].add(norm)

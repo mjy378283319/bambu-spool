@@ -397,8 +397,16 @@ def spool_weight_options(brand: str) -> list[float]:
 # 数据来源：Polymaker 官方站点（us.polymaker.com / eu-wholesale.polymaker.com）
 # 商品页的色卡。official=True 表示 HEX 直接取自官方页面；False 表示官方仅公布
 # 色名、该 HEX 是按色名推断的近似值（界面会加角标提示）。
-def _c(name: str, en: str, hex_value: str, official: bool = True) -> dict:
-    return {"name": name, "en": en, "hex": hex_value, "official": official}
+# aliases：国内店铺（天猫/淘宝/1688）用的另一个中文色名。官方英文只对应一种
+# 颜色，但店铺译名常跟官方直译对不上 —— Polymaker 的 Beige 官方翻「米色」，
+# 店里叫「卡其色」（线盘标签印的就是 BEIGE #C2AB72，已实拍核对）。少了这一层，
+# 用户按买到的名字搜不到、只能当「没有官方色卡」处理，统计也就白做了。
+def _c(name: str, en: str, hex_value: str, official: bool = True,
+       aliases: tuple[str, ...] = ()) -> dict:
+    item = {"name": name, "en": en, "hex": hex_value, "official": official}
+    if aliases:
+        item["aliases"] = list(aliases)
+    return item
 
 
 # Panchroma™ Basic PLA（US 商品页 28 色）
@@ -408,26 +416,26 @@ POLYMAKER_PANCHROMA_PLA: list[dict] = [
     _c("冷白", "Cold White", "#D9DFE5"),
     _c("红色", "Red", "#E72F1D"),
     _c("橙色", "Orange", "#F67405"),
-    _c("品红", "Magenta", "#F24574"),
+    _c("品红", "Magenta", "#F24574", aliases=("洋红色",)),
     _c("粉色", "Pink", "#F1A1AF"),
     _c("酒红", "Wine Red", "#D60212"),
     _c("柠檬黄", "Lemon Yellow", "#EED230"),
     _c("黄色", "Yellow", "#FFE800"),
-    _c("奶油白", "Cream", "#EED1A8"),
-    _c("米色", "Beige", "#C2AB72"),
-    _c("棕褐", "Tan", "#A79E82"),
+    _c("奶油白", "Cream", "#EED1A8", aliases=("奶油色",)),
+    _c("米色", "Beige", "#C2AB72", aliases=("卡其色",)),
+    _c("棕褐", "Tan", "#A79E82", aliases=("浅褐色",)),
     _c("棕色", "Brown", "#55331A"),
     _c("绿色", "Green", "#06924D"),
-    _c("青柠绿", "Lime Green", "#D5D701"),
+    _c("青柠绿", "Lime Green", "#D5D701", aliases=("柠绿色",)),
     _c("丛林绿", "Jungle Green", "#4E742D"),
     _c("橄榄绿", "Olive Green", "#948902"),
-    _c("暗橄榄绿", "Dark Olive Drab", "#575B54"),
-    _c("天蓝", "Azure Blue", "#0066D9"),
+    _c("暗橄榄绿", "Dark Olive Drab", "#575B54", aliases=("深橄榄色",)),
+    _c("天蓝", "Azure Blue", "#0066D9", aliases=("天蓝色",)),
     _c("蓝色", "Blue", "#003776"),
     _c("水蓝", "Aqua Blue", "#5EBDDB"),
-    _c("石蓝", "Stone Blue", "#487BA2"),
-    _c("品牌青", "Polymaker Teal", "#4CC0C7"),
-    _c("钢灰", "Steel Grey", "#616469"),
+    _c("石蓝", "Stone Blue", "#487BA2", aliases=("峰蓝色",)),
+    _c("品牌青", "Polymaker Teal", "#4CC0C7", aliases=("青色",)),
+    _c("钢灰", "Steel Grey", "#616469", aliases=("钢铁灰",)),
     _c("灰色", "Grey", "#8C9099"),
     _c("深灰", "Dark Grey", "#485259"),
     _c("紫色", "Purple", "#6C47B2"),
