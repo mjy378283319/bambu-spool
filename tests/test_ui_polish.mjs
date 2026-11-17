@@ -2278,6 +2278,50 @@ console.log("── 官方色卡的店铺译名 ──");
     JSON.stringify(state._presetIndex));
 }
 
+// 2026-11-17 追加：Matte 52 色抓了天猫 SKU，47 色译名差异更大
+// （官方「哑光炭黑 / 化石灰 / 木棕」，店里「碳墨黑 / 灰烬色 / 土壤棕」）。
+{
+  state.catalog = {
+    ...(state.catalog || {}),
+    color_series: {
+      "Polymaker": { "Panchroma 哑光 PLA": [
+        { name: "哑光炭黑", en: "Matte Charcoal Black", hex: "#2F2E30", official: true,
+          aliases: ["碳墨黑"] },
+        { name: "哑光化石灰", en: "Matte Fossil Grey", hex: "#8A8C94", official: true,
+          aliases: ["灰烬色"] },
+        { name: "哑光木棕", en: "Matte Wood Brown", hex: "#AB7449", official: true,
+          aliases: ["土壤棕"] },
+        { name: "哑光莫兰迪赤陶", en: "Matte Muted Terracotta", hex: "#C06443", official: true,
+          aliases: ["莫兰迪系列—陶土色", "莫兰迪陶土色"] },
+      ] },
+    },
+    material_color_series: {
+      ...(state.catalog.material_color_series || {}), PLA: ["Panchroma 哑光 PLA"],
+    },
+  };
+  const bEl = sandbox.document.getElementById("f_brand");
+  const mEl = sandbox.document.getElementById("f_material");
+  const box = sandbox.document.getElementById("colorPresets");
+  const list = sandbox.document.getElementById("colorList");
+  bEl.value = "Polymaker";
+  mEl.value = "PLA";
+  sandbox.renderColorPresets();
+  check("Matte 店里的「碳墨黑 / 灰烬色 / 土壤棕」都在候选里",
+    /value="碳墨黑"/.test(list.innerHTML)
+    && /value="灰烬色"/.test(list.innerHTML)
+    && /value="土壤棕"/.test(list.innerHTML),
+    list.innerHTML.slice(0, 320));
+  check("Matte 官方名也保留（不是用译名顶替原名）",
+    /value="哑光炭黑"/.test(list.innerHTML), list.innerHTML.slice(0, 320));
+  check("Matte 店里的完整叫法也进候选（莫兰迪系列—陶土色）",
+    /value="莫兰迪系列—陶土色"/.test(list.innerHTML), list.innerHTML.slice(0, 400));
+  check("Matte 色块提示标出「店里叫：碳墨黑」",
+    /店里叫：碳墨黑/.test(box.innerHTML), box.innerHTML.slice(0, 300));
+  check("Matte 译名带出正确 HEX（碳墨黑 → #2F2E30）",
+    state._presetIndex["碳墨黑"] === "#2F2E30" && state._presetIndex["灰烬色"] === "#8A8C94",
+    JSON.stringify(state._presetIndex));
+}
+
 // ── 21. 自定义品牌：表单里能删、下拉里不重复 ──────────────────────
 // 用户反馈「这个自定义品牌是不是要有删除键」「爱乐酷有两个」。
 console.log("");

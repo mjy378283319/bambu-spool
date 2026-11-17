@@ -482,6 +482,48 @@ check("店铺译名「卡其色」归到官方米色（Beige）",
 check("店铺译名「峰蓝色」归到官方石蓝（Stone Blue）",
       _alias_owned.get("石蓝") == 1, str(_alias_owned))
 check("只写译名的料盘不算未匹配", alias_data["unmatched"] == [], str(alias_data["unmatched"]))
+
+# 2026-11-17 追加：Matte 的店铺译名差异更大（官方「哑光炭黑 / 哑光化石灰 /
+# 哑光木棕」，天猫 SKU 是「碳墨黑 / 灰烬色 / 土壤棕」）。抓了商品页 111 条
+# SKU，其中 47 色能跟官方 52 色一一对应，剩 5 色店铺没单独卖（见 catalog 注释）。
+from app.catalog import POLYMAKER_PANCHROMA_MATTE  # noqa: E402
+
+_matte_aliased = [c for c in POLYMAKER_PANCHROMA_MATTE if c.get("aliases")]
+_matte_alias_names = [a for c in _matte_aliased for a in c["aliases"]]
+check("Matte 52 色里 47 色补了店铺译名",
+      len(POLYMAKER_PANCHROMA_MATTE) == 52 and len(_matte_aliased) == 47,
+      f"{len(_matte_aliased)} / {len(POLYMAKER_PANCHROMA_MATTE)}")
+check("同一系列内别名不自相冲突",
+      len(_matte_alias_names) == len(set(_matte_alias_names)),
+      f"{len(_matte_alias_names)} 个别名 / {len(set(_matte_alias_names))} 个唯一")
+check("官方色名本身不与别人的别名撞车",
+      not (set(c["name"] for c in POLYMAKER_PANCHROMA_MATTE) & set(_matte_alias_names)))
+
+_matte_alias_data = build_color_stats([
+    Spool(id=61, brand="Polymaker", material="PLA", finish="哑光",
+          color_name="碳墨黑", color_hex="#000000", remaining_weight=1000),
+    Spool(id=62, brand="Polymaker", material="PLA", finish="哑光",
+          color_name="灰烬色", color_hex="#000000", remaining_weight=1000),
+    Spool(id=63, brand="Polymaker", material="PLA", finish="哑光",
+          color_name="土壤棕", color_hex="#000000", remaining_weight=1000),
+    Spool(id=64, brand="Polymaker", material="PLA", finish="哑光",
+          color_name="莫兰迪系列—陶土色", color_hex="#000000", remaining_weight=1000),
+])
+_matte_series = next(
+    s for b in _matte_alias_data["brands"] if b["brand"] == "Polymaker"
+    for m in b["materials"] if m["material"] == "PLA"
+    for s in m["series"] if s["finish"] == "哑光")
+_matte_owned = {c["name"]: c["count"] for c in _matte_series["colors"]}
+check("Matte「碳墨黑」归到官方哑光炭黑",
+      _matte_owned.get("哑光炭黑") == 1, str(_matte_owned))
+check("Matte「灰烬色」归到官方哑光化石灰",
+      _matte_owned.get("哑光化石灰") == 1, str(_matte_owned))
+check("Matte「土壤棕」归到官方哑光木棕",
+      _matte_owned.get("哑光木棕") == 1, str(_matte_owned))
+check("Matte「莫兰迪系列—陶土色」归到官方哑光莫兰迪赤陶",
+      _matte_owned.get("哑光莫兰迪赤陶") == 1, str(_matte_owned))
+check("只写 Matte 店铺译名的盘不算未匹配",
+      _matte_alias_data["unmatched"] == [], str(_matte_alias_data["unmatched"]))
 # 2026-11-16 用户第二次要求：保留已有色，同时列出该外观还没入库的颜色，
 # 并给出 总数 / 已有 / 缺失 三个数。
 check("给出该外观的色卡总数 / 已有 / 缺失",
