@@ -421,7 +421,8 @@ class TrayState:
 class AmsUnit:
     ams_id: int = 0
     model: str = "AMS"
-    humidity: Any = ""
+    humidity: Any = ""          # 0-5 档位（老固件 / 没报 humidity_raw 时用）
+    humidity_raw: Any = ""      # 0-100 百分比；拓竹 App 卡片上显示的就是这个
     temp: float = 0.0
     trays: list[TrayState] = field(default_factory=list)
 
@@ -748,6 +749,9 @@ def parse_report(payload: dict, serial: str = "") -> Optional[PrinterState]:
             ams_id=ams_id,
             model=_as_str(raw_unit.get("info"), "AMS").split(";")[0] or "AMS",
             humidity=raw_unit.get("humidity", ""),
+            # 真机 P2S 同一个 ams 单元同时报 humidity="5"（档位）和
+            # humidity_raw="16"（百分比）；后者才是拓竹 App 显示的 16%。
+            humidity_raw=raw_unit.get("humidity_raw", ""),
             temp=_as_float(raw_unit.get("temp")),
         )
         trays_raw = raw_unit.get("tray") or []

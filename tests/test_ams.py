@@ -107,6 +107,9 @@ def test_parsed_state() -> None:
     check("两个 AMS 单元", len(state.ams_units) == 2, str(len(state.ams_units)))
     first = state.ams_units[0]
     check("首个单元是四槽普通 AMS", first.ams_id == 0 and len(first.trays) == 4)
+    # 真机 P2S：humidity="5" 是档位，humidity_raw="16" 才是拓竹 App 显示的 16%
+    check("普通 AMS 同时解析出 humidity_raw 百分比",
+          first.humidity_raw == "16", str(first.humidity_raw))
     check("位串生效：槽位 3 为空", not first.trays[2].occupied)
     check("位串生效：槽位 1 有料", first.trays[0].occupied)
 
@@ -131,6 +134,8 @@ def test_state_dict() -> None:
         check("普通单元 kind=ams", unit["kind"] == "ams")
         check("普通单元 name=AMS A", unit["name"] == "AMS A", str(unit.get("name")))
         check("普通单元 slot_count=4", unit["slot_count"] == 4)
+        check("普通单元下发 humidity_raw（前端优先用它显示百分比）",
+              unit["humidity_raw"] == "16", str(unit.get("humidity_raw")))
         check("普通单元 model 已清洗", unit["model"] == "AMS 2 Pro", str(unit.get("model")))
         tray = unit["trays"][1]
         check("槽位带 remain_weight_g", tray["remain_weight_g"] == 640.0, str(tray.get("remain_weight_g")))
@@ -139,6 +144,8 @@ def test_state_dict() -> None:
     if MOCK_HT_ID in units:
         unit = units[MOCK_HT_ID]
         check("HT 单元 kind=ht", unit["kind"] == "ht")
+        check("HT 没有 humidity_raw（它的 humidity 本身就是百分比）",
+              unit["humidity_raw"] == "", str(unit.get("humidity_raw")))
         check("HT 单元 name=HT A", unit["name"] == "HT A", str(unit.get("name")))
         check("HT 单元 slot_count=1", unit["slot_count"] == 1)
 

@@ -927,6 +927,7 @@ class PrinterHub:
                     "name": ams_display_name(unit.ams_id),
                     "model": clean_ams_model(unit.model, unit.ams_id),
                     "humidity": unit.humidity,
+                    "humidity_raw": unit.humidity_raw,
                     "temp": unit.temp,
                     "slot_count": len(unit.trays),
                     "trays": [

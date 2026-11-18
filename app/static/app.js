@@ -1077,12 +1077,23 @@ function inkOn(hex) {
   return (r * 299 + g * 587 + b * 114) / 1000 > 160 ? "#111827" : "#ffffff";
 }
 
-/** 拓竹湿度有两种口径：普通 AMS 上报 0-5 档位，AMS HT 上报百分比。 */
-function humidityText(value) {
+/**
+ * 湿度显示口径（真机 P2S 报文 + 官方文档双向确认）：
+ *   humidity      = 0-5 档位，老固件 / 没报 raw 时才有意义；
+ *   humidity_raw  = 0-100 百分比，普通 AMS 新固件上报，拓竹 App 卡片显示的就是它；
+ *   AMS HT 没有 raw，它的 humidity 本身就是百分比。
+ * 优先显示具体百分比；两者都拿不到时才退回档位 + 描述，不显示假数值。
+ */
+function humidityText(value, raw, isHt) {
+  const rawNum = Number(raw);
+  if (raw !== undefined && raw !== null && raw !== "" && Number.isFinite(rawNum)) {
+    return `湿度 ${Math.round(rawNum)}%`;
+  }
   if (value === undefined || value === null || value === "") return "湿度 —";
   const num = Number(value);
-  if (Number.isNaN(num)) return `湿度 ${esc(value)}`;
-  if (num <= 5) {
+  if (!Number.isFinite(num)) return `湿度 ${esc(value)}`;
+  // 只有普通 AMS 才把 0-5 当档位；HT 的 3 是 3%，不能写成「3 级 · 正常」
+  if (!isHt && num <= 5) {
     const desc = num <= 2 ? "干燥" : num <= 3 ? "正常" : "偏潮";
     return `湿度 ${num} 级 · ${desc}`;
   }
@@ -1359,7 +1370,7 @@ function renderUnitCard(unit, printer) {
       ${unit.model ? `<span class="tag ${isHt ? "teal" : ""}">${esc(unit.model)}</span>` : ""}
       <span class="spacer"></span>
       <span class="metric">${ICO.thermo}${esc(temp)}</span>
-      <span class="metric">${ICO.drop}${humidityText(unit.humidity)}</span>
+      <span class="metric">${ICO.drop}${humidityText(unit.humidity, unit.humidity_raw, isHt)}</span>
       <span class="metric">使用 ${esc(usage)}</span>
     </div>
     <div class="tray-grid ${isHt ? "single" : ""}">${trays.map((tray) => renderTrayCard(unit, tray, printer)).join("")}</div>
@@ -5590,6 +5601,8 @@ setInterval(() => { if (S.status && !S.status.mock) loadStatus().catch(() => {})
 // 肉眼很难盯住，钉在这里。
 window.panelDebug = {
   fanChannels, filFill, MIN_FILL_PCT,
+  // AMS 湿度：优先 humidity_raw 百分比，没 raw 才退回档位；错口径用户会以为要烘干
+  humidityText, renderUnitCard,
   // 料盘「添加时间」列：日期按 UTC 解析、天数按自然日差，错一天用户就会以为买错批次
   fmtDay, spoolAgeText,
   // 风扇卡的「未安装 / 未转」取决于 fans_installed，写错了用户会以为自己的配件没装

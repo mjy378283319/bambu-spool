@@ -87,7 +87,9 @@ class MockSource:
                     {
                         "id": "0",
                         "info": "AMS 2 Pro",
-                        "humidity": "3",
+                        "humidity": "5",
+                        # 真机 P2S：humidity 是档位、humidity_raw 才是 App 显示的百分比
+                        "humidity_raw": "16",
                         "temp": "31.5",
                         "tray": [
                             {"id": str(i), **tray,

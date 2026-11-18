@@ -2963,6 +2963,33 @@ console.log("== 库存筛选选项 ==");
   dbg.syncFilterOptions();
 }
 
+// ── AMS 湿度：具体百分比优先，档位只兜底 ────────────────────────
+// 2026-11-18 用户截图：应用显示「湿度 5 级 · 偏潮」，拓竹 App 同一类机器显示 21%。
+// 真机 P2S 报文同时有 humidity=5（档位）和 humidity_raw=16（百分比），
+// 官方文档写明 humidity_raw 才是 raw percentage —— 之前只读前者，所以对不上。
+console.log("");
+console.log("── AMS 湿度口径 ──");
+{
+  check("优先显示 humidity_raw 百分比（5 档 / 16% → 16%）",
+    dbg.humidityText("5", "16", false) === "湿度 16%", dbg.humidityText("5", "16", false));
+  check("4% 是具体百分比，不被当成 4 档",
+    dbg.humidityText("4", "4", false) === "湿度 4%", dbg.humidityText("4", "4", false));
+  check("没有 raw 才退回档位 + 描述",
+    dbg.humidityText("5", "", false) === "湿度 5 级 · 偏潮", dbg.humidityText("5", "", false));
+  check("raw=0 是有效值，不能当缺失",
+    dbg.humidityText("5", "0", false) === "湿度 0%", dbg.humidityText("5", "0", false));
+  check("AMS HT 的 humidity=3 是 3%，不误判成 3 档",
+    dbg.humidityText("3", "", true) === "湿度 3%", dbg.humidityText("3", "", true));
+  check("两个字段都没有才显示占位",
+    dbg.humidityText("", "", false) === "湿度 —", dbg.humidityText("", "", false));
+  const amsCard = dbg.renderUnitCard({
+    name: "AMS A", model: "AMS 2 Pro", kind: "ams", temp: 25,
+    humidity: "5", humidity_raw: "21", trays: [],
+  }, {});
+  check("AMS 卡片实际渲染出 21%", amsCard.includes("湿度 21%"), amsCard.slice(0, 320));
+  check("AMS 卡片不再出现「5 级 · 偏潮」", !amsCard.includes("5 级"), amsCard.slice(0, 320));
+}
+
 // ── 汇总 ────────────────────────────────────────────────────────
 console.log("");
 if (FAILED.length) {
