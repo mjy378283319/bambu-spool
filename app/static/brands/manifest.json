@@ -52,5 +52,23 @@
     "w": 128,
     "h": 128,
     "src": "https://cdn.shopify.com/s/files/1/0822/8611/7163/files/Logo_Favicon_96x96.png?v=1716809743"
+  },
+  "大简": {
+    "file": "dajian.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供 760px 官方 logo（greatsimple.net，白底转透明）"
+  },
+  "彩多屋": {
+    "file": "caiduowu.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供 760px 官方 logo（Cai Lab，黑底保留）"
+  },
+  "魔创": {
+    "file": "mochuang.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供 760px 官方 logo（Alchemakes 魔创，裁图形区+白底转透明）"
   }
 }

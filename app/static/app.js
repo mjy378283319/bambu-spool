@@ -84,6 +84,9 @@ const BRAND_LOGOS = {
   "FusRock": "fusrock", "巴斯夫": "basf", "basf": "basf",
   "闪铸": "flashforge", "flashforge": "flashforge",
   "Inslogic": "inslogic",
+  "大简": "dajian", "greatsimple": "dajian", "great simple": "dajian",
+  "彩多屋": "caiduowu", "cai lab": "caiduowu", "cailab": "caiduowu",
+  "魔创": "mochuang", "alchemakes": "mochuang",
 };
 const BRAND_MARK_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886", "#e05a5a", "#6b7fd7"];
 

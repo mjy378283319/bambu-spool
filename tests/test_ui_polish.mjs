@@ -2634,6 +2634,12 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     brandLogoSlug("拓竹") === "bambulab" && brandLogoSlug("Bambu Lab") === "bambulab"
     && brandLogoSlug("bambulab") === "bambulab");
   check("品牌 logo 归一：三绿/SUNLU 命中", brandLogoSlug("三绿 Sunlu") === "sunlu" && brandLogoSlug("SUNLU") === "sunlu");
+  check("品牌 logo 归一：大简/GreatSimple 命中",
+    brandLogoSlug("大简") === "dajian" && brandLogoSlug("GreatSimple") === "dajian"
+    && brandLogoSlug("Great Simple") === "dajian");
+  check("品牌 logo 归一：彩多屋/魔创 命中",
+    brandLogoSlug("彩多屋") === "caiduowu" && brandLogoSlug("Cai Lab") === "caiduowu"
+    && brandLogoSlug("魔创") === "mochuang" && brandLogoSlug("Alchemakes") === "mochuang");
   check("没登记 logo 的品牌返回 null（走文字徽标）",
     brandLogoSlug("阿米阿米") === null && brandLogoSlug("") === null);
   check("有 logo 的品牌渲染 <img>，src 指向 /static/brands/",
