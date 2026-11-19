@@ -87,6 +87,10 @@ const BRAND_LOGOS = {
   "大简": "dajian", "greatsimple": "dajian", "great simple": "dajian",
   "彩多屋": "caiduowu", "cai lab": "caiduowu", "cailab": "caiduowu",
   "魔创": "mochuang", "alchemakes": "mochuang",
+  "兰博": "lanbo", "没毛病": "meimaobing",
+  "阿米阿米": "rmerme", "rmerme": "rmerme", "amiami": "rmerme",
+  "GEEK极客": "geek", "GEEK": "geek", "极客": "geek", "geek": "geek",
+  "锐造": "tecbears", "锐造新材": "tecbears", "tecbears": "tecbears",
 };
 const BRAND_MARK_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886", "#e05a5a", "#6b7fd7"];
 

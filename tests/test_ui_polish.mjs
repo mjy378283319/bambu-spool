@@ -2640,13 +2640,18 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
   check("品牌 logo 归一：彩多屋/魔创 命中",
     brandLogoSlug("彩多屋") === "caiduowu" && brandLogoSlug("Cai Lab") === "caiduowu"
     && brandLogoSlug("魔创") === "mochuang" && brandLogoSlug("Alchemakes") === "mochuang");
+  check("品牌 logo 归一：兰博/没毛病/阿米阿米/GEEK极客/锐造 命中",
+    brandLogoSlug("兰博") === "lanbo" && brandLogoSlug("没毛病") === "meimaobing"
+    && brandLogoSlug("阿米阿米") === "rmerme" && brandLogoSlug("RMERME") === "rmerme"
+    && brandLogoSlug("GEEK极客") === "geek" && brandLogoSlug("极客") === "geek"
+    && brandLogoSlug("锐造") === "tecbears" && brandLogoSlug("锐造新材") === "tecbears");
   check("没登记 logo 的品牌返回 null（走文字徽标）",
-    brandLogoSlug("阿米阿米") === null && brandLogoSlug("") === null);
+    brandLogoSlug("爱酷乐") === null && brandLogoSlug("") === null);
   check("有 logo 的品牌渲染 <img>，src 指向 /static/brands/",
     /<img src="\/static\/brands\/bambulab\.png"/.test(brandIconHtml("拓竹")),
     brandIconHtml("拓竹"));
   check("无 logo 品牌渲染首字徽标（品牌色底）",
-    /brand-mark no-logo/.test(brandIconHtml("阿米阿米")) && /brand-mark-fb/.test(brandIconHtml("阿米阿米")));
+    /brand-mark no-logo/.test(brandIconHtml("爱酷乐")) && /brand-mark-fb/.test(brandIconHtml("爱酷乐")));
   check("列表名称前用了品牌图标，不再是颜色方块",
     /<div class="cell-name">\s*<span class="brand-mark"/.test(colored),
     (colored.match(/<div class="cell-name">[\s\S]{0,120}/) || [""])[0]);

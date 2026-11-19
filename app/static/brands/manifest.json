@@ -70,5 +70,35 @@
     "w": 128,
     "h": 128,
     "src": "用户提供 760px 官方 logo（Alchemakes 魔创，裁图形区+白底转透明）"
+  },
+  "兰博": {
+    "file": "lanbo.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（80px 透明底原图）"
+  },
+  "没毛病": {
+    "file": "meimaobing.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（蓝圆白手，白底转透明）"
+  },
+  "阿米阿米": {
+    "file": "rmerme.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（蓝底白字 RMERME，保留蓝底）"
+  },
+  "GEEK极客": {
+    "file": "geek.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（GEEK 斜纹字，白底转透明）"
+  },
+  "锐造": {
+    "file": "tecbears.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（橙色 TECBEARS 锐造新材，白底转透明）"
   }
 }
