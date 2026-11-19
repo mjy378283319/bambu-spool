@@ -100,5 +100,41 @@
     "w": 128,
     "h": 128,
     "src": "用户提供官方 logo（橙色 TECBEARS 锐造新材，白底转透明）"
+  },
+  "Raise3D": {
+    "file": "raise3d.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（红六边形+RAISE3D，白底转透明）"
+  },
+  "FULLJOY": {
+    "file": "fulljoy.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（金色漩涡圆，原图透明底）"
+  },
+  "易泰龙": {
+    "file": "yitailong.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（彩龙+易泰龙3D耗材，白底转透明）"
+  },
+  "点维": {
+    "file": "dowell.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（DOWELL 3D 紫标，白底转透明）"
+  },
+  "卓普": {
+    "file": "zhuopu.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（蓝橙标识，白底转透明）"
+  },
+  "Nature3d": {
+    "file": "nature3d.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（造物新材料工厂店，白底转透明）"
   }
 }

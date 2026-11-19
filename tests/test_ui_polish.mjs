@@ -2645,6 +2645,11 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     && brandLogoSlug("阿米阿米") === "rmerme" && brandLogoSlug("RMERME") === "rmerme"
     && brandLogoSlug("GEEK极客") === "geek" && brandLogoSlug("极客") === "geek"
     && brandLogoSlug("锐造") === "tecbears" && brandLogoSlug("锐造新材") === "tecbears");
+  check("品牌 logo 归一：Raise3D/FULLJOY/易泰龙/点维/卓普/Nature3d 命中",
+    brandLogoSlug("Raise3D") === "raise3d" && brandLogoSlug("RAISE3D") === "raise3d"
+    && brandLogoSlug("FULLJOY") === "fulljoy" && brandLogoSlug("易泰龙") === "yitailong"
+    && brandLogoSlug("点维") === "dowell" && brandLogoSlug("卓普") === "zhuopu"
+    && brandLogoSlug("Nature3d") === "nature3d" && brandLogoSlug("nature3d") === "nature3d");
   check("没登记 logo 的品牌返回 null（走文字徽标）",
     brandLogoSlug("爱酷乐") === null && brandLogoSlug("") === null);
   check("有 logo 的品牌渲染 <img>，src 指向 /static/brands/",

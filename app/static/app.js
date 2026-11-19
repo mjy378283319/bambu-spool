@@ -91,6 +91,10 @@ const BRAND_LOGOS = {
   "阿米阿米": "rmerme", "rmerme": "rmerme", "amiami": "rmerme",
   "GEEK极客": "geek", "GEEK": "geek", "极客": "geek", "geek": "geek",
   "锐造": "tecbears", "锐造新材": "tecbears", "tecbears": "tecbears",
+  "Raise3D": "raise3d", "raise3d": "raise3d",
+  "FULLJOY": "fulljoy", "fulljoy": "fulljoy",
+  "易泰龙": "yitailong", "点维": "dowell", "dowell": "dowell",
+  "卓普": "zhuopu", "Nature3d": "nature3d", "nature3d": "nature3d",
 };
 const BRAND_MARK_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886", "#e05a5a", "#6b7fd7"];
 
