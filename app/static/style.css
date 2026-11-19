@@ -382,6 +382,24 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
 }
 .hex-pill i { width: 13px; height: 13px; border-radius: 50%; display: block; border: 1px solid rgba(0,0,0,.12); }
+/* 整枚药丸填充料盘颜色；文字色由 inkOn() 按亮度给黑/白，保证可读 */
+.hex-pill.filled { border-color: rgba(0,0,0,.16); font-weight: 600; }
+.hex-pill.filled:hover { filter: brightness(1.06); }
+
+/* 库存列表的品牌图标：有官方 logo 显示图片，否则显示品牌色+首字徽标 */
+.brand-mark {
+  position: relative; width: 18px; height: 18px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 5px; overflow: hidden;
+  border: 1px solid rgba(0,0,0,.08); background: var(--surface-2);
+}
+.brand-mark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.brand-mark-fb {
+  display: none; width: 100%; height: 100%;
+  align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+}
+.brand-mark.no-logo .brand-mark-fb, .brand-mark img[style*="display: none"] ~ .brand-mark-fb { display: flex; }
 
 /* 用量进度条 */
 .bar { height: 5px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }

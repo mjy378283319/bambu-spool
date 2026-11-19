@@ -70,6 +70,55 @@ function esc(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/* ── 品牌图标 ──────────────────────────────────────────────
+ *  库存列表名称前的方块改用品牌官方 logo（本地静态文件，来自各品牌官网 favicon）。
+ *  没有官方 logo 的品牌退回「品牌色 + 首字」徽标，保证每个品牌都有图标且稳定可辨。
+ *  logo 文件与 research/fetch_brand_logos.py 抓取结果一一对应；新增品牌 logo 时
+ *  同时往这里登记 + 把图片放进 /static/brands/。
+ *  注意：详情弹窗顶部的颜色方块是「这盘料的颜色」，不是品牌标，独立保留不动。 */
+const BRAND_LOGOS = {
+  "拓竹": "bambulab", "bambu lab": "bambulab", "bambulab": "bambulab",
+  "Polymaker": "polymaker", "poly maker": "polymaker",
+  "Kexcelled": "kexcelled", "JAYO": "jayo",
+  "三绿 Sunlu": "sunlu", "三绿": "sunlu", "sunlu": "sunlu",
+  "FusRock": "fusrock", "巴斯夫": "basf", "basf": "basf",
+  "闪铸": "flashforge", "flashforge": "flashforge",
+  "Inslogic": "inslogic",
+};
+const BRAND_MARK_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886", "#e05a5a", "#6b7fd7"];
+
+/** 品牌名归一到 logo 映射键（去空格/大小写），返回 slug 或 null。 */
+function brandLogoSlug(brand) {
+  const raw = String(brand || "").trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase().replace(/\s+/g, "");
+  if (BRAND_LOGOS[raw]) return BRAND_LOGOS[raw];
+  if (BRAND_LOGOS[lower]) return BRAND_LOGOS[lower];
+  // 去掉常见公司后缀再试一次（如「三绿 Sunlu」写成「三绿3D」）
+  const compact = raw.replace(/(3d|科技|耗材)/gi, "").trim();
+  if (BRAND_LOGOS[compact]) return BRAND_LOGOS[compact];
+  const compactLower = compact.toLowerCase().replace(/\s+/g, "");
+  return BRAND_LOGOS[compactLower] || null;
+}
+
+/** 稳定的品牌色：按名称 hash 取色，同一品牌每次刷新都同色。 */
+function brandMarkColor(brand) {
+  const s = String(brand || "?");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return BRAND_MARK_COLORS[Math.abs(h) % BRAND_MARK_COLORS.length];
+}
+
+/** 生成品牌图标 HTML。有官方 logo 用 <img>，否则用品牌色+首字徽标。 */
+function brandIconHtml(brand) {
+  const name = String(brand || "").trim() || "未标品牌";
+  const slug = brandLogoSlug(brand);
+  if (slug) {
+    return `<span class="brand-mark" title="${esc(name)}"><img src="/static/brands/${encodeURIComponent(slug)}.png" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('no-logo')"><span class="brand-mark-fb" style="background:${brandMarkColor(brand)}">${esc(name.slice(0, 1).toUpperCase())}</span></span>`;
+  }
+  return `<span class="brand-mark no-logo" title="${esc(name)}"><span class="brand-mark-fb" style="background:${brandMarkColor(brand)}">${esc(name.slice(0, 1).toUpperCase())}</span></span>`;
+}
+
 async function api(path, options = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
   // 登录态走 HttpOnly Cookie，浏览器自动携带，前端不接触令牌
@@ -1728,7 +1777,7 @@ function spoolRowHtml(spool) {
     <td class="small muted" data-label="ID">${spool.id}</td>
     <td class="cell-main">
       <div class="cell-name">
-        <span class="swatch" style="background:${esc(spool.color_hex)}"></span>
+        ${brandIconHtml(spool.brand)}
         <div class="nm">
           <div>${esc(spool.name)}</div>
           <div class="tiny muted">${esc(spool.location || slots || "未装到机器上")}</div>
@@ -1736,7 +1785,7 @@ function spoolRowHtml(spool) {
       </div>
     </td>
     <td data-label="类型"><span class="tag">${esc(spool.material)}</span></td>
-    <td data-label="颜色"><span class="hex-pill"><i style="background:${esc(spool.color_hex)}"></i>${esc((spool.color_hex || "").toUpperCase())}</span></td>
+    <td data-label="颜色"><span class="hex-pill filled" style="background:${esc(colorSafeHex(spool.color_hex))};color:${inkOn(spool.color_hex)}">${esc((spool.color_hex || "").toUpperCase())}</span></td>
     <td data-label="外观">${finishChipHtml(spool.finish)}</td>
     <td class="num" data-label="价格">${hasPrice ? "¥" + spool.price.toFixed(2) : '<span class="tiny muted">未登记</span>'}</td>
     <td data-label="剩余">
@@ -5652,6 +5701,8 @@ window.panelDebug = {
   jumpToSpoolsAll,
   // 外观芯片：色调映射只有一份，列表 / 下拉候选 / 表单共用
   finishTone, finishChipHtml, sortValue,
+  // 品牌图标（官网 logo + 文字徽标兜底）与整枚填充的颜色药丸
+  brandLogoSlug, brandMarkColor, brandIconHtml,
   // 自绘组合框（替代原生 datalist）：弹层高度与过滤行为浏览器不开放，
   // 只能自己画。候选现读 datalist（renderColorPresets 会实时改写），
   // 品牌归一（canonicalBrand）后色卡才查得到别名写法。

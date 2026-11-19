@@ -1,0 +1,56 @@
+{
+  "拓竹": {
+    "file": "bambulab.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://bambulab.cn/favicon.png"
+  },
+  "Polymaker": {
+    "file": "polymaker.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://polymaker.com/wp-content/uploads/polymaker-icon-60x60.png"
+  },
+  "Kexcelled": {
+    "file": "kexcelled.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://cdn.shopify.com/s/files/1/0958/0111/4939/files/LOGO-_800x800_1.png?crop=center&height=180&v=1776755667&width=180"
+  },
+  "JAYO": {
+    "file": "jayo.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://cdn.shopify.com/s/files/1/0787/0273/9640/files/JAYO.jpg?crop=center&height=32&v=1729327146&width=32"
+  },
+  "三绿 Sunlu": {
+    "file": "sunlu.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://3dsunlu.oss-accelerate.aliyuncs.com/prod/20260326/21ba7dcf-bfda-44b3-b1c9-29f5b2566111.jpg"
+  },
+  "FusRock": {
+    "file": "fusrock.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://fusrock.com/assets/img/favicon-32.png?v=1.0.286"
+  },
+  "巴斯夫": {
+    "file": "basf.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://basf.com/assets/favicons.v1/favicon.ico"
+  },
+  "闪铸": {
+    "file": "flashforge.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://cdn.shopify.com/s/files/1/0591/8641/3646/files/20260617-142644.png?v=1781677622&width=96"
+  },
+  "Inslogic": {
+    "file": "inslogic.png",
+    "w": 128,
+    "h": 128,
+    "src": "https://cdn.shopify.com/s/files/1/0822/8611/7163/files/Logo_Favicon_96x96.png?v=1716809743"
+  }
+}

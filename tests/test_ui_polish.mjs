@@ -209,6 +209,7 @@ const {
   // 双喷嘴（X2D/H2D/H2C）：副喷嘴与副部件风扇的显隐只看 nozzle_count
   isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips, fanChannels,
   finishTone, finishChipHtml, spoolRowHtml,
+  brandLogoSlug, brandMarkColor, brandIconHtml,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -233,6 +234,7 @@ for (const name of [
   "renderColorStatsHtml", "colorChipListHtml",
   "isDualNozzleState", "nozzleSideText", "renderTempCard", "renderArtChips",
   "finishTone", "finishChipHtml", "spoolRowHtml",
+  "brandLogoSlug", "brandMarkColor", "brandIconHtml",
 ]) {
   if (typeof dbg[name] !== "function") {
     console.error(`panelDebug 缺少导出：${name}（app.js 末尾的 window.panelDebug 里补上）`);
@@ -2612,6 +2614,41 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
       price: 0, remaining_weight: 1, initial_weight: 1, remaining_percent: 100,
       slots: [], usages: [],
     })));
+  // ── 2026-11-19：颜色药丸整枚填充 + 列表品牌图标（官方 logo / 文字徽标兜底） ──
+  const colored = sandbox.spoolRowHtml({
+    id: 8, name: "蓝色盘", brand: "拓竹", material: "PETG", color_hex: "#0047B0", finish: "普通",
+    price: 0, remaining_weight: 800, initial_weight: 1000, remaining_percent: 80, slots: [], usages: [],
+  });
+  check("颜色列整枚药丸填充色值（不再是小圆点）",
+    /class="hex-pill filled" style="background:#0047B0;color:#ffffff"/.test(colored),
+    (colored.match(/class="hex-pill[^"]*"[^>]*>/) || [""])[0]);
+  check("深色药丸文字用白色（inkOn 生效）", colored.includes("color:#ffffff"));
+  const light = sandbox.spoolRowHtml({
+    id: 9, name: "浅色盘", brand: "白牌", color_hex: "#F5F5F5", finish: "普通",
+    price: 0, remaining_weight: 1, initial_weight: 1, remaining_percent: 100, slots: [], usages: [],
+  });
+  check("浅色药丸文字用深色（保证可读）", /background:#F5F5F5;color:#111827/.test(light));
+  check("颜色列不再渲染小圆点 <i>", !/<i style="background/.test(colored));
+
+  check("品牌 logo 归一：中文/英文别名都命中拓竹",
+    brandLogoSlug("拓竹") === "bambulab" && brandLogoSlug("Bambu Lab") === "bambulab"
+    && brandLogoSlug("bambulab") === "bambulab");
+  check("品牌 logo 归一：三绿/SUNLU 命中", brandLogoSlug("三绿 Sunlu") === "sunlu" && brandLogoSlug("SUNLU") === "sunlu");
+  check("没登记 logo 的品牌返回 null（走文字徽标）",
+    brandLogoSlug("阿米阿米") === null && brandLogoSlug("") === null);
+  check("有 logo 的品牌渲染 <img>，src 指向 /static/brands/",
+    /<img src="\/static\/brands\/bambulab\.png"/.test(brandIconHtml("拓竹")),
+    brandIconHtml("拓竹"));
+  check("无 logo 品牌渲染首字徽标（品牌色底）",
+    /brand-mark no-logo/.test(brandIconHtml("阿米阿米")) && /brand-mark-fb/.test(brandIconHtml("阿米阿米")));
+  check("列表名称前用了品牌图标，不再是颜色方块",
+    /<div class="cell-name">\s*<span class="brand-mark"/.test(colored),
+    (colored.match(/<div class="cell-name">[\s\S]{0,120}/) || [""])[0]);
+  check("品牌色稳定：同品牌两次调用同色", brandMarkColor("拓竹") === brandMarkColor("拓竹"));
+  check("CSS 钉住品牌图标与填充药丸样式",
+    /\.brand-mark\s*\{/.test(CSS_SRC) && /\.hex-pill\.filled\s*\{/.test(CSS_SRC)
+    && /\.brand-mark-fb\s*\{/.test(CSS_SRC));
+
   check("CSS 里各色调都有定义",
     /\.finish-chip\.silk/.test(CSS_SRC) && /\.finish-chip\.matte/.test(CSS_SRC)
     && /\.finish-chip\.glow/.test(CSS_SRC) && /\.finish-chip\.plain/.test(CSS_SRC));
