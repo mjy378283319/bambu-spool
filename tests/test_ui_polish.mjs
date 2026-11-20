@@ -1689,6 +1689,11 @@ check("识色两列网格不会顶出弹窗（minmax(0,1fr) + .cf-col min-width:
   /\.cf-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(CSS_SRC)
   && /\.cf-cols\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/.test(CSS_SRC)
   && /\.cf-col\s*\{\s*min-width:\s*0/.test(CSS_SRC));
+// 900px 窗口下 logo + 带字导航 + 连接状态 + 账号区一起超出屏幕，
+// 原因是导航文字直到 860px 才收起。断点提到 1024px，品牌名仍留到 860px。
+check("顶栏在 861-1024px 收起导航文字，账号区不被顶出屏幕",
+  /@media \(max-width:\s*1024px\)[\s\S]{0,700}\.nav button span\s*\{\s*display:\s*none/.test(CSS_SRC)
+  && /@media \(max-width:\s*860px\)[\s\S]{0,120}\.brand-name\s*\{\s*display:\s*none/.test(CSS_SRC));
 check("候选是现读 datalist 的（renderColorPresets 会实时改写颜色候选，不能缓存）",
   /function comboOptions\(el\)/.test(appSrc)
   && /_comboListId/.test(appSrc));

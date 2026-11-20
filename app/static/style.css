@@ -1201,12 +1201,16 @@ th.sortable.on .sort-arrow { color: var(--accent); }
      品牌名必定截断。落到一栏，两卡各自铺满。 */
   .overview-row { grid-template-columns: minmax(0, 1fr); }
   .overview-row > .card { height: auto; }
+  /* 顶栏此前只在 ≤860px 收导航文字，结果 900px 窗口下 logo+4 个带字导航
+     +连接状态+账号区一起超出屏幕（实测账号「退出」right=1066 > 900）。
+     把收文字的断点提到 1024px：品牌名仍显示，导航只留图标，账号区不再被顶出去。 */
+  .topbar-inner { gap: 12px; padding: 0 16px; }
+  .nav button span { display: none; }
+  .nav button { padding: 8px 10px; }
 }
 @media (max-width: 860px) {
   .brand-name { display: none; }
-  .topbar-inner { gap: 10px; }
-  .nav button span { display: none; }
-  .nav button { padding: 8px 10px; }
+  .topbar-inner { gap: 10px; padding: 0 14px; }
   .fld.wide { grid-column: span 1; }
   .printer-layout { grid-template-columns: minmax(0, 1fr); }
   .label-layout { grid-template-columns: minmax(0, 1fr); }
