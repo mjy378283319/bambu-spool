@@ -136,5 +136,41 @@
     "w": 128,
     "h": 128,
     "src": "用户提供官方 logo（造物新材料工厂店，白底转透明）"
+  },
+  "爱酷乐": {
+    "file": "elegoo.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（ELEGOO 蓝字，白底转透明）"
+  },
+  "爱丽兹 Allizz": {
+    "file": "allizz.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（Allizz 手写体，白底转透明）"
+  },
+  "天瑞": {
+    "file": "tinmorry.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（TINMORRY，白底转透明）"
+  },
+  "R3D": {
+    "file": "r3d.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（橙底黑字 R3D，保留橙底）"
+  },
+  "eSUN易生": {
+    "file": "esun.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（eSUN 绿字，原图透明底）"
+  },
+  "iBOSS": {
+    "file": "iboss.png",
+    "w": 128,
+    "h": 128,
+    "src": "用户提供官方 logo（106x96 小图，裁掉下方 logo 字样+竖线后放大，白底转透明）"
   }
 }

@@ -2650,13 +2650,19 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
     && brandLogoSlug("FULLJOY") === "fulljoy" && brandLogoSlug("易泰龙") === "yitailong"
     && brandLogoSlug("点维") === "dowell" && brandLogoSlug("卓普") === "zhuopu"
     && brandLogoSlug("Nature3d") === "nature3d" && brandLogoSlug("nature3d") === "nature3d");
+  check("品牌 logo 归一：造物新材料别名 + 最后 6 个品牌命中",
+    brandLogoSlug("造物新材料") === "nature3d" && brandLogoSlug("造物新材") === "nature3d"
+    && brandLogoSlug("爱酷乐") === "elegoo" && brandLogoSlug("ELEGOO") === "elegoo"
+    && brandLogoSlug("爱丽兹") === "allizz" && brandLogoSlug("爱丽兹 Allizz") === "allizz"
+    && brandLogoSlug("天瑞") === "tinmorry" && brandLogoSlug("iBOSS") === "iboss"
+    && brandLogoSlug("R3D") === "r3d" && brandLogoSlug("易生") === "esun" && brandLogoSlug("eSUN易生") === "esun");
   check("没登记 logo 的品牌返回 null（走文字徽标）",
-    brandLogoSlug("爱酷乐") === null && brandLogoSlug("") === null);
+    brandLogoSlug("未登记测试品牌XYZ") === null && brandLogoSlug("") === null);
   check("有 logo 的品牌渲染 <img>，src 指向 /static/brands/",
     /<img src="\/static\/brands\/bambulab\.png"/.test(brandIconHtml("拓竹")),
     brandIconHtml("拓竹"));
   check("无 logo 品牌渲染首字徽标（品牌色底）",
-    /brand-mark no-logo/.test(brandIconHtml("爱酷乐")) && /brand-mark-fb/.test(brandIconHtml("爱酷乐")));
+    /brand-mark no-logo/.test(brandIconHtml("未登记测试品牌XYZ")) && /brand-mark-fb/.test(brandIconHtml("未登记测试品牌XYZ")));
   check("列表名称前用了品牌图标，不再是颜色方块",
     /<div class="cell-name">\s*<span class="brand-mark"/.test(colored),
     (colored.match(/<div class="cell-name">[\s\S]{0,120}/) || [""])[0]);

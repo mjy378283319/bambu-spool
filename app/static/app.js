@@ -95,6 +95,13 @@ const BRAND_LOGOS = {
   "FULLJOY": "fulljoy", "fulljoy": "fulljoy",
   "易泰龙": "yitailong", "点维": "dowell", "dowell": "dowell",
   "卓普": "zhuopu", "Nature3d": "nature3d", "nature3d": "nature3d",
+  "造物新材料": "nature3d", "造物新材": "nature3d", "naturethree": "nature3d",
+  "爱酷乐": "elegoo", "ELEGOO": "elegoo", "elegoo": "elegoo",
+  "爱丽兹 Allizz": "allizz", "爱丽兹": "allizz", "allizz": "allizz", "alliz": "allizz",
+  "天瑞": "tinmorry", "tinmorry": "tinmorry",
+  "iBOSS": "iboss", "iboss": "iboss",
+  "R3D": "r3d", "r3d": "r3d",
+  "eSUN易生": "esun", "易生": "esun", "eSUN": "esun", "esun": "esun",
 };
 const BRAND_MARK_COLORS = ["#7c5cf0", "#e8479a", "#00b4c8", "#f0883e", "#12b886", "#e05a5a", "#6b7fd7"];
 
