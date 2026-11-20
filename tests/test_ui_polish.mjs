@@ -1683,6 +1683,12 @@ check(".combo-pop 是 fixed 定位（浮层随输入框定位，不随弹窗滚�
   /\.combo-pop\s*\{[^}]*position:\s*fixed/.test(CSS_SRC));
 check(".combo-pop 有 max-height（用户要求下拉能「加长」——本质是可滚动）",
   /\.combo-pop\s*\{[^}]*max-height:\s*300px/.test(CSS_SRC));
+// 1fr 默认带 min-content 下限：识色结果列遇到长色名/系列名会把网格撑宽，
+// 右侧「品牌色卡」整列顶出弹窗（用户截图反馈）。必须显式 minmax(0,1fr)。
+check("识色两列网格不会顶出弹窗（minmax(0,1fr) + .cf-col min-width:0）",
+  /\.cf-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(CSS_SRC)
+  && /\.cf-cols\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)/.test(CSS_SRC)
+  && /\.cf-col\s*\{\s*min-width:\s*0/.test(CSS_SRC));
 check("候选是现读 datalist 的（renderColorPresets 会实时改写颜色候选，不能缓存）",
   /function comboOptions\(el\)/.test(appSrc)
   && /_comboListId/.test(appSrc));

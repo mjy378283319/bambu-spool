@@ -700,8 +700,10 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 /* ── 图片识色 ───────────────────────────────────────── */
-.cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-@media (max-width: 720px) { .cf-grid { grid-template-columns: 1fr; } }
+/* 1fr = minmax(auto,1fr)：长色名/长系列名会把轨道撑到 min-content，
+   结果列顶出弹窗右边。必须用 minmax(0,1fr) 允许轨道收缩，配合 .cf-col 的 min-width:0。 */
+.cf-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 720px) { .cf-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .cf-drop {
   position: relative; border: 1.5px dashed var(--border-strong);
@@ -750,8 +752,9 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   display: flex; align-items: center; gap: 10px;
   padding-bottom: 10px; border-bottom: 1px solid var(--border); margin-bottom: 10px;
 }
-.cf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 720px) { .cf-cols { grid-template-columns: 1fr; } }
+.cf-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.cf-col { min-width: 0; }
+@media (max-width: 720px) { .cf-cols { grid-template-columns: minmax(0, 1fr); } }
 .cf-col-title { font-size: 13.5px; color: var(--text-2); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
 .cf-col-note { font-size: 12.5px; color: var(--text-3); }
 .cf-hit {
