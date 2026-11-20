@@ -989,7 +989,7 @@ function panelCard(title, icon, spools, metaOf, valueOf) {
     ? spools.map((s) => {
         const [line1, line2] = metaOf(s);
         return `<div class="panel-item" style="cursor:pointer" onclick="openSpoolDetail(${s.id})">
-          <span class="panel-ico"><span class="mat-dot" style="width:12px;height:12px;background:${esc(s.color_hex)}"></span></span>
+          ${brandIconHtml(s.brand)}
           <div class="panel-main">
             <div class="panel-name">${esc(s.name)}</div>
             <div class="panel-meta">${esc(line1)}${line2 ? " · " + esc(line2) : ""}</div>
@@ -5720,7 +5720,7 @@ window.panelDebug = {
   // 外观芯片：色调映射只有一份，列表 / 下拉候选 / 表单共用
   finishTone, finishChipHtml, sortValue,
   // 品牌图标（官网 logo + 文字徽标兜底）与整枚填充的颜色药丸
-  brandLogoSlug, brandMarkColor, brandIconHtml,
+  brandLogoSlug, brandMarkColor, brandIconHtml, panelCard,
   // 自绘组合框（替代原生 datalist）：弹层高度与过滤行为浏览器不开放，
   // 只能自己画。候选现读 datalist（renderColorPresets 会实时改写），
   // 品牌归一（canonicalBrand）后色卡才查得到别名写法。

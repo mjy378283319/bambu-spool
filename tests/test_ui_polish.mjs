@@ -209,7 +209,7 @@ const {
   // 双喷嘴（X2D/H2D/H2C）：副喷嘴与副部件风扇的显隐只看 nozzle_count
   isDualNozzleState, nozzleSideText, renderTempCard, renderArtChips, fanChannels,
   finishTone, finishChipHtml, spoolRowHtml,
-  brandLogoSlug, brandMarkColor, brandIconHtml,
+  brandLogoSlug, brandMarkColor, brandIconHtml, panelCard,
 } = dbg;
 const scanner = sandbox.window.spoolScanner;
 if (!scanner) {
@@ -234,7 +234,7 @@ for (const name of [
   "renderColorStatsHtml", "colorChipListHtml",
   "isDualNozzleState", "nozzleSideText", "renderTempCard", "renderArtChips",
   "finishTone", "finishChipHtml", "spoolRowHtml",
-  "brandLogoSlug", "brandMarkColor", "brandIconHtml",
+  "brandLogoSlug", "brandMarkColor", "brandIconHtml", "panelCard",
 ]) {
   if (typeof dbg[name] !== "function") {
     console.error(`panelDebug 缺少导出：${name}（app.js 末尾的 window.panelDebug 里补上）`);
@@ -2666,10 +2666,24 @@ const PY_HUB_SRC = fs.readFileSync(path.join(ROOT, "app", "core", "hub.py"), "ut
   check("列表名称前用了品牌图标，不再是颜色方块",
     /<div class="cell-name">\s*<span class="brand-mark"/.test(colored),
     (colored.match(/<div class="cell-name">[\s\S]{0,120}/) || [""])[0]);
+  // 概览「最近使用/最近添加/库存不足」三栏原来只有 12px 颜色圆点，
+  // 用户要求跟列表一样显示品牌 logo。这里直接调渲染函数验 HTML，
+  // 别只对着源码 grep（源码写了不等于这条路径真的用了）。
+  const dashCard = panelCard("最近使用", "", [{
+    id: 1, name: "测试料盘", brand: "拓竹", color_hex: "#ff0000",
+    last_used_at: "2026-11-20T00:00:00", remaining_weight: 100,
+  }], (s) => ["副标题一", "副标题二"], (s) => "100 g");
+  check("概览三栏条目渲染品牌 logo，不再是颜色圆点",
+    /<div class="panel-item"[\s\S]*?<span class="brand-mark"/.test(dashCard)
+    && /\/static\/brands\/bambulab\.png/.test(dashCard)
+    && !/panel-ico|mat-dot/.test(dashCard), dashCard.slice(0, 400));
   check("品牌色稳定：同品牌两次调用同色", brandMarkColor("拓竹") === brandMarkColor("拓竹"));
   check("CSS 钉住品牌图标与填充药丸样式",
     /\.brand-mark\s*\{/.test(CSS_SRC) && /\.hex-pill\.filled\s*\{/.test(CSS_SRC)
     && /\.brand-mark-fb\s*\{/.test(CSS_SRC));
+  check("两行文字区的品牌图标放大到 ~32px（库存列表 + 概览三栏）",
+    /\.cell-name \.brand-mark,\s*\.panel-item \.brand-mark\s*\{[^}]*width:\s*32px;\s*height:\s*32px/.test(CSS_SRC),
+    (CSS_SRC.match(/\.cell-name \.brand-mark[\s\S]{0,180}/) || [""])[0]);
 
   check("CSS 里各色调都有定义",
     /\.finish-chip\.silk/.test(CSS_SRC) && /\.finish-chip\.matte/.test(CSS_SRC)
